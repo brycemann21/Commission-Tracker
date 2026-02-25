@@ -26,6 +26,16 @@
       </select>
     </div>
 
+    <div>
+  <label class="text-xs text-slate-500">Tag</label>
+  <select class="w-full border rounded px-3 py-2" name="tag">
+    {% set current_tag = (deal.tag if deal and deal.tag else "Inbound") %}
+    {% for t in ["Inbound","Shop","Title","FO"] %}
+      <option value="{{ t }}" {% if current_tag == t %}selected{% endif %}>{{ t }}</option>
+    {% endfor %}
+  </select>
+</div>
+
     <div class="md:col-span-2">
       <label class="text-xs text-slate-500">Customer</label>
       <input class="w-full border rounded px-3 py-2" name="customer" value="{{ deal.customer if deal else '' }}" placeholder="Customer name">
