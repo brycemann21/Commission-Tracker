@@ -393,7 +393,7 @@ async def month_view(
 async def customer_summary(
     request: Request,
     q: str | None = None,
-    month: str | None = None,  # optional YYYY-MM filter on delivered month
+    month: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(
@@ -421,24 +421,24 @@ async def customer_summary(
         func.sum(func.coalesce(Deal.total_deal_comm, 0)).desc()
     )
 
-result = await db.execute(stmt)
-raw = result.all()
+    result = await db.execute(stmt)
+    raw = result.all()
 
-rows = []
-for r in raw:
-    rows.append({
-        "customer": r[0],
-        "deals": int(r[1] or 0),
-        "total_comm": float(r[2] or 0),
-        "last_delivered": r[3],
+    rows = []
+    for r in raw:
+        rows.append({
+            "customer": r[0],
+            "deals": int(r[1] or 0),
+            "total_comm": float(r[2] or 0),
+            "last_delivered": r[3],
+        })
+
+    return templates.TemplateResponse("customers.html", {
+        "request": request,
+        "rows": rows,
+        "q": q or "",
+        "month": month or "",
     })
-
-return templates.TemplateResponse("customers.html", {
-    "request": request,
-    "rows": rows,
-    "q": q or "",
-    "month": month or "",
-})
 
 # -----------------------------
 # End of month report
