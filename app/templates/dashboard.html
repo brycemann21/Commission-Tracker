@@ -85,6 +85,7 @@
       <input type="hidden" name="month" value="{{ month }}">
       <button
         type="submit"
+        onclick="return confirm('Mark this deal as Delivered?')"
         class="px-3 py-1 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-700"
       >
         Delivered
