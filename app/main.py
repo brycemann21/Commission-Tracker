@@ -449,7 +449,7 @@ async def customer_summary(
 @app.get("/reports/eom", response_class=HTMLResponse)
 async def end_of_month_report(
     request: Request,
-    month: str,  # required YYYY-MM
+    month: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     y, m = month.split("-")
