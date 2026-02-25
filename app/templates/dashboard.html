@@ -71,7 +71,13 @@
   </thead>
   <tbody>
     {% for d in pending_deals %}
-      <tr class="border-t">
+      <tr class="border-t
+  {% if d.days_pending >= 7 %}
+    bg-rose-100
+  {% elif d.days_pending >= 3 %}
+    bg-amber-100
+  {% endif %}
+">
         <td class="p-2">{{ d.sold_date or "" }}</td>
 <td class="p-2">{{ d.customer }}</td>
 <td class="p-2">{{ d.stock_num or "" }}</td>
