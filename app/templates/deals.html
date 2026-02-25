@@ -27,6 +27,7 @@
       <th class="text-left p-2">Model</th>
       <th class="text-left p-2">Type</th>
       <th class="text-left p-2">Status</th>
+      <th class="text-left p-2">Paid?</th>
       <th class="text-right p-2">Total</th>
       <th class="p-2"></th>
     </tr>
@@ -41,6 +42,17 @@
         <td class="p-2">{{ d.model }}</td>
         <td class="p-2">{{ d.new_used }}</td>
         <td class="p-2">{{ d.status }}</td>
+        <td class="p-2">
+          <div class="flex items-center gap-2">
+            <span class="inline-flex items-center px-2 py-1 rounded text-xs border {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-800{% else %}bg-slate-50 border-slate-200 text-slate-700{% endif %}">
+              {% if d.is_paid %}Paid{% else %}Pending{% endif %}
+            </span>
+            <form method="post" action="/deals/{{ d.id }}/toggle_paid">
+              <input type="hidden" name="next" value="{{ request.url }}">
+              <button class="text-xs underline" type="submit">{% if d.is_paid %}Mark Pending{% else %}Mark Paid{% endif %}</button>
+            </form>
+          </div>
+        </td>
         <td class="p-2 text-right">${{ "{:,.0f}".format(d.total_deal_comm or 0) }}</td>
         <td class="p-2 text-right">
           <a class="underline" href="/deals/{{ d.id }}/edit">Edit</a>

@@ -30,3 +30,4 @@ class DealIn(BaseModel):
 
     notes: str = ""
     pay_date: date | None = None
+    is_paid: bool = False

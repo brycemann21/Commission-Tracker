@@ -70,6 +70,11 @@
     <div class="text-3xl font-bold">
       ${{ "{:,.0f}".format(comm_mtd or 0) }}
     </div>
+    <div class="text-xs text-slate-500 mt-2 flex flex-col gap-1">
+      <div>Paid: <span class="font-semibold text-slate-900">${{ "{:,.0f}".format(paid_comm_mtd or 0) }}</span></div>
+      <div>Pending: <span class="font-semibold text-slate-900">${{ "{:,.0f}".format(pending_comm_mtd or 0) }}</span></div>
+    </div>
+
   </div>
 
   <div class="bg-white rounded border border-slate-200 p-4">

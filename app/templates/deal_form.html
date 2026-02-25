@@ -71,6 +71,12 @@
       <input type="date" class="w-full border rounded px-3 py-2" name="pay_date" value="{{ deal.pay_date if deal else '' }}">
     </div>
 
+    <div class="flex items-center gap-2 mt-6">
+      <input type="checkbox" class="h-4 w-4" name="is_paid" value="1" {% if deal and deal.is_paid %}checked{% endif %}>
+      <label class="text-sm text-slate-700">Mark as Paid</label>
+    </div>
+
+
     <div>
       <label class="text-xs text-slate-500">Discount &gt; $200?</label>
       <select class="w-full border rounded px-3 py-2" name="discount_gt_200">

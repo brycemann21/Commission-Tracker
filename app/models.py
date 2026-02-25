@@ -56,3 +56,6 @@ class Deal(Base):
     total_deal_comm: Mapped[float] = mapped_column(Float, default=0.0)
 
     pay_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
+
+    # Paid status (used for Paid vs Pending Commission)
+    is_paid: Mapped[bool] = mapped_column(Boolean, default=False)
