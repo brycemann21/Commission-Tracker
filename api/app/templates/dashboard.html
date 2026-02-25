@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="mb-4 bg-white rounded border border-slate-200 p-4">
+  <div class="flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <div class="text-xs text-slate-500">Viewing</div>
+      <div class="text-lg font-bold">
+        {% for mo in month_options %}
+          {% if mo.num == selected_month %}
+            {{ mo.label }}
+          {% endif %}
+        {% endfor %}
+        {{ selected_year }}
+      </div>
+    </div>
+
+    <form method="get" action="/" class="flex flex-wrap items-end gap-3">
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">Month</label>
+        <select
+          name="month"
+          class="h-10 px-3 rounded border border-slate-300 bg-white"
+          onchange="this.form.submit()"
+        >
+          {% for mo in month_options %}
+            <option value="{{ mo.num }}" {% if mo.num == selected_month %}selected{% endif %}>
+              {{ mo.label }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">Year</label>
+        <select
+          name="year"
+          class="h-10 px-3 rounded border border-slate-300 bg-white"
+          onchange="this.form.submit()"
+        >
+          {% for y in year_options %}
+            <option value="{{ y }}" {% if y == selected_year %}selected{% endif %}>
+              {{ y }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <button
+        type="submit"
+        class="h-10 px-4 rounded bg-slate-900 text-white text-sm hover:bg-slate-800"
+      >
+        Go
+      </button>
+    </form>
+  </div>
+</div>
+
+<div class="grid md:grid-cols-6 gap-4">
+  <div class="bg-white rounded border border-slate-200 p-4">
+    <div class="text-sm text-slate-500">Units (MTD)</div>
+    <div class="text-3xl font-bold">{{ units_mtd }}</div>
+    <div class="text-xs text-slate-500 mt-1">
+      New: {{ new_mtd }} · Used: {{ used_mtd }}
+    </div>
+  </div>
+
+  <div class="bg-white rounded border border-slate-200 p-4">
+    <div class="text-sm text-slate-500">Commission (MTD)</div>
+    <div class="text-3xl font-bold">
+      ${{ "{:,.0f}".format(comm_mtd or 0) }}
+    </div>
+    <div class="text-xs text-slate-500 mt-2 flex flex-col gap-1">
+      <div>Paid: <span class="font-semibold text-slate-900">${{ "{:,.0f}".format(paid_comm_mtd or 0) }}</span></div>
+      <div>Pending: <span class="font-semibold text-slate-900">${{ "{:,.0f}".format(pending_comm_mtd or 0) }}</span></div>
+    </div>
+
+  </div>
+
+  <div class="bg-white rounded border border-slate-200 p-4">
+    <div class="text-sm text-slate-500">Units (YTD)</div>
+    <div class="text-3xl font-bold">{{ units_ytd }}</div>
+  </div>
+
+  <div class="bg-white rounded border border-slate-200 p-4">
+    <div class="text-sm text-slate-500">Commission (YTD)</div>
+    <div class="text-3xl font-bold">
+      ${{ "{:,.0f}".format(comm_ytd or 0) }}
+    </div>
+  </div>
+
+  <div class="bg-white rounded border border-slate-200 p-4">
+    <div class="text-sm text-slate-500">Pending</div>
+    <div class="text-3xl font-bold">{{ pending }}</div>
+  </div>
+
+  <div class="bg-white rounded border border-slate-200 p-4">
+    <div class="text-sm text-slate-500">Year</div>
+    <div class="text-3xl font-bold">{{ year }}</div>
+  </div>
+</div>
+
+<div class="mt-6 bg-white rounded border border-slate-200 p-4">
+  <div class="text-sm text-slate-500 mb-2">{{ year }} Unit Trend</div>
+  <div class="grid grid-cols-12 gap-2 text-center text-sm">
+    {% for i in range(12) %}
+      <div>
+        <div class="text-xs text-slate-500">
+          {{ month_labels[i] }}
+        </div>
+        <div class="font-bold text-lg">
+          {{ units_by_month[i] }}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="mt-6 flex items-center justify-between">
+  <h2 class="text-lg font-bold">Pending Deals</h2>
+  <a class="text-sm underline" href="/pending">View all</a>
+</div>
+
+<div class="mt-2 overflow-x-auto bg-white rounded border border-slate-200">
+  <table class="min-w-full text-sm">
+    <thead class="bg-slate-900 text-white">
+      <tr>
+        <th class="text-left p-2">Sold Date</th>
+        <th class="text-left p-2">Customer Name</th>
+        <th class="text-left p-2">Tag</th>
+        <th class="text-left p-2">Stock #</th>
+        <th class="text-left p-2">Model</th>
+        <th class="text-left p-2">Notes</th>
+        <th class="p-2"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in pending_deals %}
+        <tr class="border-t
+          {% if d.days_pending >= 7 %}
+            bg-rose-100
+          {% elif d.days_pending >= 3 %}
+            bg-amber-100
+          {% endif %}
+        ">
+          <td class="p-2">{{ d.sold_date or "" }}</td>
+          <td class="p-2">{{ d.customer }}</td>
+          <td class="p-2">{{ d.tag or "" }}</td>
+          <td class="p-2">{{ d.stock_num or "" }}</td>
+          <td class="p-2">{{ d.model }}</td>
+          <td class="p-2">{{ d.notes or "" }}</td>
+          <td class="p-2 text-right">
+            <div class="flex items-center justify-end gap-2">
+              <a class="underline text-sm" href="/deals/{{ d.id }}/edit">Edit</a>
+
+              <form method="post" action="/deals/{{ d.id }}/deliver">
+                <input type="hidden" name="month" value="{{ month }}">
+                <button
+                  type="submit"
+                  onclick="return confirm('Mark this deal as Delivered?')"
+                  class="px-3 py-1 rounded bg-emerald-600 text-white text-xs hover:bg-emerald-700"
+                >
+                  Delivered
+                </button>
+              </form>
+
+              <form method="post" action="/deals/{{ d.id }}/dead">
+                <input type="hidden" name="month" value="{{ month }}">
+                <button
+                  type="submit"
+                  onclick="return confirm('Mark this deal as Dead?')"
+                  class="px-3 py-1 rounded bg-rose-600 text-white text-xs hover:bg-rose-700"
+                >
+                  Dead
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+
+      {% if not pending_deals %}
+        <tr class="border-t">
+          <td class="p-4 text-slate-500" colspan="7">No pending deals 🎉</td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
