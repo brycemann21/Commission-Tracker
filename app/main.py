@@ -13,7 +13,7 @@ from .utils import parse_date, today
 
 from fastapi.templating import Jinja2Templates
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./commission.db")
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:////tmp/commission.db")
 # Supabase transaction pooler requires TLS; asyncpg uses an SSL context.
 SSL_CONTEXT = ssl.create_default_context()
 SSL_CONTEXT.check_hostname = False
