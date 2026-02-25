@@ -11,9 +11,13 @@
   <nav class="sticky top-0 z-10 bg-white border-b border-slate-200">
     <div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4">
       <a class="font-bold" href="/">Commission Tracker</a>
-      <a class="text-sm hover:underline" href="/deals">Deals</a>
-      <a class="text-sm hover:underline" href="/reports/paycheck">Paycheck</a>
-      <a class="text-sm hover:underline" href="/settings">Settings</a>
+      <a class="text-sm hover:underline" href="/deals">Sales Entry</a>
+<a class="text-sm hover:underline" href="/pending">Pending</a>
+<a class="text-sm hover:underline" href="/month">Current Month</a>
+<a class="text-sm hover:underline" href="/customers">Customer Summary</a>
+<a class="text-sm hover:underline" href="/reports/eom?month={{ today().strftime('%Y-%m') }}">End of Month</a>
+<a class="text-sm hover:underline" href="/reports/paycheck">Paycheck</a>
+<a class="text-sm hover:underline" href="/settings">Settings</a>
       <div class="ml-auto">
         <a class="inline-flex items-center px-3 py-1.5 text-sm rounded bg-slate-900 text-white" href="/deals/new">+ New Deal</a>
       </div>
