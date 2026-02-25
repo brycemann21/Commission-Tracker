@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="grid md:grid-cols-4 gap-4">
+<div class="grid md:grid-cols-6 gap-4">
   <div class="bg-white rounded border border-slate-200 p-4">
     <div class="text-sm text-slate-500">Units (MTD)</div>
     <div class="text-3xl font-bold">{{ units_mtd }}</div>
@@ -15,7 +15,17 @@
       ${{ "{:,.0f}".format(comm_mtd or 0) }}
     </div>
   </div>
+  <div class="bg-white rounded border border-slate-200 p-4">
+    <div class="text-sm text-slate-500">Units (YTD)</div>
+    <div class="text-3xl font-bold">{{ units_ytd }}</div>
+  </div>
 
+  <div class="bg-white rounded border border-slate-200 p-4">
+    <div class="text-sm text-slate-500">Commission (YTD)</div>
+    <div class="text-3xl font-bold">
+      ${{ "{:,.0f}".format(comm_ytd or 0) }}
+    </div>
+  </div>
   <div class="bg-white rounded border border-slate-200 p-4">
     <div class="text-sm text-slate-500">Pending</div>
     <div class="text-3xl font-bold">{{ pending }}</div>
@@ -43,8 +53,41 @@
 </div>
 
 <div class="mt-6 flex items-center justify-between">
-  <h2 class="text-lg font-bold">Recent Deals</h2>
-  <a class="text-sm underline" href="/deals">View all</a>
+  <h2 class="text-lg font-bold">Pending Deals</h2>
+  <a class="text-sm underline" href="/pending">View all</a>
+</div>
+
+<div class="mt-2 overflow-x-auto bg-white rounded border border-slate-200">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-900 text-white">
+    <tr>
+      <th class="text-left p-2">Sold</th>
+      <th class="text-left p-2">Customer</th>
+      <th class="text-left p-2">Model</th>
+      <th class="text-right p-2">Est. Comm</th>
+      <th class="p-2"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for d in pending_deals %}
+      <tr class="border-t">
+        <td class="p-2">{{ d.sold_date or "" }}</td>
+        <td class="p-2">{{ d.customer }}</td>
+        <td class="p-2">{{ d.model }}</td>
+        <td class="p-2 text-right">${{ "{:,.0f}".format(d.total_deal_comm or 0) }}</td>
+        <td class="p-2 text-right">
+          <a class="underline text-sm" href="/deals/{{ d.id }}/edit">Edit</a>
+        </td>
+      </tr>
+    {% endfor %}
+
+    {% if not pending_deals %}
+      <tr class="border-t">
+        <td class="p-4 text-slate-500" colspan="5">No pending deals 🎉</td>
+      </tr>
+    {% endif %}
+  </tbody>
+</table>
 </div>
 
 <div class="mt-2 overflow-x-auto bg-white rounded border border-slate-200">
