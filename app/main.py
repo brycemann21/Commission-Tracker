@@ -273,7 +273,7 @@ async def deal_save(
     pay_date: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ):
-    @app.post("/deals/{deal_id}/deliver")
+@app.post("/deals/{deal_id}/deliver")
 async def mark_delivered(
     deal_id: int,
     month: str | None = Form(default=None),
