@@ -35,7 +35,11 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 app = FastAPI(title="Commission Tracker")
 templates = Jinja2Templates(directory="app/templates")
 
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+import os
+
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
 async def get_db():
