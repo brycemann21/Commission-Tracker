@@ -1,1 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
 
+<h2 style="margin: 16px 0;">Customer Summary</h2>
+
+<form method="get" action="/customers" style="display:flex; gap:8px; align-items:center; margin-bottom: 12px;">
+  <input type="text" name="q" value="{{ q }}" placeholder="Search customer..." style="padding:8px; width: 260px;">
+  <input type="text" name="month" value="{{ month }}" placeholder="YYYY-MM (optional)" style="padding:8px; width: 160px;">
+  <button type="submit" style="padding:8px 12px;">Filter</button>
+  <a href="/customers" style="padding:8px 12px; text-decoration:none;">Reset</a>
+</form>
+
+<table style="width:100%; border-collapse: collapse;">
+  <thead>
+    <tr style="background:#0f172a; color:white;">
+      <th style="text-align:left; padding:10px;">Customer</th>
+      <th style="text-align:right; padding:10px;">Deals</th>
+      <th style="text-align:right; padding:10px;">Total Comm</th>
+      <th style="text-align:left; padding:10px;">Last Delivered</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+      <tr style="border-bottom:1px solid #e5e7eb;">
+        <td style="padding:10px;">{{ r.customer }}</td>
+        <td style="padding:10px; text-align:right;">{{ r.deals }}</td>
+        <td style="padding:10px; text-align:right;">${{ "%.2f"|format(r.total_comm or 0) }}</td>
+        <td style="padding:10px;">
+          {% if r.last_delivered %}{{ r.last_delivered }}{% else %}-{% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr>
+        <td colspan="4" style="padding:12px;">No customers found.</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}
