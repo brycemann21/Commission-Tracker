@@ -84,22 +84,33 @@
 <td class="p-2">{{ d.model }}</td>
 <td class="p-2">{{ d.notes or "" }}</td>
 <td class="p-2 text-right">
-  <div class="flex items-center justify-end gap-3">
-    <a class="underline text-sm" href="/deals/{{ d.id }}/edit">Edit</a>
+  <div class="flex items-center justify-end gap-2">
+  <a class="underline text-sm" href="/deals/{{ d.id }}/edit">Edit</a>
 
-    <form method="post" action="/deals/{{ d.id }}/deliver">
-      <input type="hidden" name="month" value="{{ month }}">
-      <button
-        type="submit"
-        onclick="return confirm('Mark this deal as Delivered?')"
-        class="px-3 py-1 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-700"
-      >
-        Delivered
-      </button>
-    </form>
-  </div>
+  <form method="post" action="/deals/{{ d.id }}/deliver">
+    <input type="hidden" name="month" value="{{ month }}">
+    <button
+      type="submit"
+      onclick="return confirm('Mark this deal as Delivered?')"
+      class="px-3 py-1 rounded bg-emerald-600 text-white text-xs hover:bg-emerald-700"
+    >
+      Delivered
+    </button>
+  </form>
+
+  <form method="post" action="/deals/{{ d.id }}/dead">
+    <input type="hidden" name="month" value="{{ month }}">
+    <button
+      type="submit"
+      onclick="return confirm('Mark this deal as Dead?')"
+      class="px-3 py-1 rounded bg-rose-600 text-white text-xs hover:bg-rose-700"
+    >
+      Dead
+    </button>
+  </form>
+</div>
 </td>
-      </tr>
+</tr>
     {% endfor %}
 
     {% if not pending_deals %}
