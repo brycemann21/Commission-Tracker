@@ -421,7 +421,7 @@ async def customer_summary(
         func.sum(func.coalesce(Deal.total_deal_comm, 0)).desc()
     )
 
-    result = await db.execute(stmt)
+result = await db.execute(stmt)
 raw = result.all()
 
 rows = []
