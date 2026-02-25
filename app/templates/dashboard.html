@@ -1,17 +1,44 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="grid md:grid-cols-3 gap-4">
+<div class="grid md:grid-cols-4 gap-4">
   <div class="bg-white rounded border border-slate-200 p-4">
-    <div class="text-sm text-slate-500">Units (YTD)</div>
-    <div class="text-3xl font-bold">{{ units_ytd }}</div>
+    <div class="text-sm text-slate-500">Units (MTD)</div>
+    <div class="text-3xl font-bold">{{ units_mtd }}</div>
+    <div class="text-xs text-slate-500 mt-1">
+      New: {{ new_mtd }} · Used: {{ used_mtd }}
+    </div>
   </div>
+
   <div class="bg-white rounded border border-slate-200 p-4">
-    <div class="text-sm text-slate-500">Commission (YTD)</div>
-    <div class="text-3xl font-bold">${{ "{:,.0f}".format(comm_ytd) }}</div>
+    <div class="text-sm text-slate-500">Commission (MTD)</div>
+    <div class="text-3xl font-bold">
+      ${{ "{:,.0f}".format(comm_mtd or 0) }}
+    </div>
   </div>
+
   <div class="bg-white rounded border border-slate-200 p-4">
-    <div class="text-sm text-slate-500">Pipeline</div>
-    <div class="mt-1 text-sm">Pending: <b>{{ pending }}</b> · Delivered: <b>{{ delivered }}</b></div>
+    <div class="text-sm text-slate-500">Pending</div>
+    <div class="text-3xl font-bold">{{ pending }}</div>
+  </div>
+
+  <div class="bg-white rounded border border-slate-200 p-4">
+    <div class="text-sm text-slate-500">Year</div>
+    <div class="text-3xl font-bold">{{ year }}</div>
+  </div>
+</div>
+<div class="mt-6 bg-white rounded border border-slate-200 p-4">
+  <div class="text-sm text-slate-500 mb-2">{{ year }} Unit Trend</div>
+  <div class="grid grid-cols-12 gap-2 text-center text-sm">
+    {% for i in range(12) %}
+      <div>
+        <div class="text-xs text-slate-500">
+          {{ month_labels[i] }}
+        </div>
+        <div class="font-bold text-lg">
+          {{ units_by_month[i] }}
+        </div>
+      </div>
+    {% endfor %}
   </div>
 </div>
 
