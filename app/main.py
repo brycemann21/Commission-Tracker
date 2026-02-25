@@ -164,6 +164,10 @@ async def dashboard(request: Request, month: str | None = None, db: AsyncSession
     [d for d in deals if d.status == "Pending"],
     key=lambda x: x.sold_date or date.max
 )
+   today_date = today()
+for d in pending_deals:
+    d.days_pending = (today_date - d.sold_date).days if d.sold_date else 0
+    
     pending = len(pending_deals)
     return templates.TemplateResponse("dashboard.html", {
     "request": request,
@@ -427,6 +431,21 @@ async def mark_delivered(
     if month:
         redirect_url = f"/?month={month}"
 
+    return RedirectResponse(url=redirect_url, status_code=303)
+
+@app.post("/deals/{deal_id}/dead")
+async def mark_dead(
+    deal_id: int,
+    month: str | None = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
+    deal.status = "Dead"
+    await db.commit()
+
+    redirect_url = "/"
+    if month:
+        redirect_url = f"/?month={month}"
     return RedirectResponse(url=redirect_url, status_code=303)
     
 @app.post("/deals/{deal_id}/delete")
