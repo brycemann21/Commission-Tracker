@@ -1,1 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
 
+<h2 style="margin:16px 0;">Pending Deals</h2>
+
+<form method="get" action="/pending" style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">
+  <input type="text" name="q" value="{{ q }}" placeholder="Search customer/stock/model..." style="padding:8px; width: 320px;">
+  <input type="number" name="older_than" value="{{ older_than }}" placeholder="Older than days" style="padding:8px; width: 160px;">
+  <button type="submit" style="padding:8px 12px;">Filter</button>
+  <a href="/pending" style="padding:8px 12px; text-decoration:none;">Reset</a>
+</form>
+
+<table style="width:100%; border-collapse:collapse;">
+  <thead>
+    <tr style="background:#0f172a; color:white;">
+      <th style="text-align:left; padding:10px;">Sold</th>
+      <th style="text-align:left; padding:10px;">Customer</th>
+      <th style="text-align:left; padding:10px;">Model</th>
+      <th style="text-align:left; padding:10px;">Stock</th>
+      <th style="text-align:left; padding:10px;">Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for d in deals %}
+      <tr style="border-bottom:1px solid #e5e7eb;">
+        <td style="padding:10px;">{% if d.sold_date %}{{ d.sold_date }}{% else %}-{% endif %}</td>
+        <td style="padding:10px;">{{ d.customer }}</td>
+        <td style="padding:10px;">{{ d.model }}</td>
+        <td style="padding:10px;">{{ d.stock_num }}</td>
+        <td style="padding:10px;">{{ d.notes }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" style="padding:12px;">No pending deals found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}
