@@ -187,7 +187,7 @@ async def dashboard(
         "aim": {"label": "Aim Presentation", "yes": aim_yes, "den": aim_den, "pct": _pct(aim_yes, aim_den)},
     }
 units_mtd = len(delivered_mtd)
-    comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd)
+comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd)
 
     # Paid vs Pending Commission (MTD)
     paid_comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd if getattr(d, "is_paid", False))
