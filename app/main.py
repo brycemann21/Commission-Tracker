@@ -5,7 +5,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import select, func
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from .models import Base, Deal, Settings
 from .schemas import DealIn
 from .payplan import calc_commission
