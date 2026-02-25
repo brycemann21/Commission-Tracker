@@ -126,11 +126,17 @@
     <thead class="bg-slate-900 text-white">
       <tr>
         <th class="text-left p-2">Sold Date</th>
-        <th class="text-left p-2">Customer Name</th>
-        <th class="text-left p-2">Tag</th>
+        <th class="text-left p-2">Delivered Date</th>
+        <th class="text-left p-2">Customer</th>
+        <th class="text-left p-2">F&amp;I</th>
         <th class="text-left p-2">Stock #</th>
         <th class="text-left p-2">Model</th>
-        <th class="text-left p-2">Notes</th>
+        <th class="text-left p-2">F/C/L</th>
+        <th class="text-left p-2">New/Used</th>
+        <th class="text-left p-2">Comments</th>
+        <th class="text-left p-2">Status</th>
+        <th class="text-left p-2">Tag</th>
+        <th class="text-right p-2">Commission</th>
         <th class="p-2"></th>
       </tr>
     </thead>
@@ -144,11 +150,17 @@
           {% endif %}
         ">
           <td class="p-2">{{ d.sold_date or "" }}</td>
+          <td class="p-2">{{ d.delivered_date or "" }}</td>
           <td class="p-2">{{ d.customer }}</td>
-          <td class="p-2">{{ d.tag or "" }}</td>
+          <td class="p-2">{{ d.business_manager or "" }}</td>
           <td class="p-2">{{ d.stock_num or "" }}</td>
           <td class="p-2">{{ d.model }}</td>
+          <td class="p-2">{{ d.deal_type or "" }}</td>
+          <td class="p-2">{{ d.new_used or "" }}</td>
           <td class="p-2">{{ d.notes or "" }}</td>
+          <td class="p-2">{{ d.status or "" }}</td>
+          <td class="p-2">{{ d.tag or "" }}</td>
+          <td class="p-2 text-right">${{ "{:,.0f}".format(d.total_deal_comm or 0) }}</td>
           <td class="p-2 text-right">
             <div class="flex items-center justify-end gap-2">
               <a class="underline text-sm" href="/deals/{{ d.id }}/edit">Edit</a>
@@ -181,7 +193,7 @@
 
       {% if not pending_deals %}
         <tr class="border-t">
-          <td class="p-4 text-slate-500" colspan="7">No pending deals 🎉</td>
+          <td class="p-4 text-slate-500" colspan="13">No pending deals 🎉</td>
         </tr>
       {% endif %}
     </tbody>

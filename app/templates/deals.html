@@ -8,8 +8,13 @@
   <form class="md:ml-auto flex gap-2" method="get" action="/deals">
     <input class="border rounded px-3 py-2 text-sm w-56" name="q" value="{{ q }}" placeholder="Search customer / stock / model" />
     <select class="border rounded px-3 py-2 text-sm" name="status">
-      {% for s in ["All","Pending","Delivered","Dead"] %}
+      {% for s in ["All","Pending","Scheduled","Delivered","Dead"] %}
         <option value="{{ s }}" {% if status==s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <select class="border rounded px-3 py-2 text-sm" name="paid">
+      {% for p in ["All","Paid","Pending"] %}
+        <option value="{{ p }}" {% if paid==p %}selected{% endif %}>{{ p }}</option>
       {% endfor %}
     </select>
     <button class="px-3 py-2 text-sm rounded bg-slate-900 text-white">Go</button>
@@ -20,15 +25,19 @@
 <table class="min-w-full text-sm">
   <thead class="bg-slate-900 text-white">
     <tr>
-      <th class="text-left p-2">Sold</th>
-      <th class="text-left p-2">Delivered</th>
+      <th class="text-left p-2">Sold Date</th>
+      <th class="text-left p-2">Delivered Date</th>
       <th class="text-left p-2">Customer</th>
+      <th class="text-left p-2">F&amp;I</th>
       <th class="text-left p-2">Stock #</th>
       <th class="text-left p-2">Model</th>
-      <th class="text-left p-2">Type</th>
+      <th class="text-left p-2">F/C/L</th>
+      <th class="text-left p-2">New/Used</th>
+      <th class="text-left p-2">Comments</th>
       <th class="text-left p-2">Status</th>
+      <th class="text-left p-2">Tag</th>
+      <th class="text-right p-2">Commission</th>
       <th class="text-left p-2">Paid?</th>
-      <th class="text-right p-2">Total</th>
       <th class="p-2"></th>
     </tr>
   </thead>
@@ -38,10 +47,15 @@
         <td class="p-2">{{ d.sold_date or "" }}</td>
         <td class="p-2">{{ d.delivered_date or "" }}</td>
         <td class="p-2">{{ d.customer }}</td>
+        <td class="p-2">{{ d.business_manager or "" }}</td>
         <td class="p-2">{{ d.stock_num }}</td>
         <td class="p-2">{{ d.model }}</td>
+        <td class="p-2">{{ d.deal_type or "" }}</td>
         <td class="p-2">{{ d.new_used }}</td>
+        <td class="p-2">{{ d.notes or "" }}</td>
         <td class="p-2">{{ d.status }}</td>
+        <td class="p-2">{{ d.tag or "" }}</td>
+        <td class="p-2 text-right">${{ "{:,.0f}".format(d.total_deal_comm or 0) }}</td>
         <td class="p-2">
           <div class="flex items-center gap-2">
             <span class="inline-flex items-center px-2 py-1 rounded text-xs border {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-800{% else %}bg-slate-50 border-slate-200 text-slate-700{% endif %}">
@@ -53,7 +67,6 @@
             </form>
           </div>
         </td>
-        <td class="p-2 text-right">${{ "{:,.0f}".format(d.total_deal_comm or 0) }}</td>
         <td class="p-2 text-right">
           <a class="underline" href="/deals/{{ d.id }}/edit">Edit</a>
         </td>

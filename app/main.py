@@ -265,6 +265,7 @@ async def deals_list(
     request: Request,
     q: str | None = None,
     status: str | None = None,
+    paid: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Deal).order_by(
@@ -274,6 +275,12 @@ async def deals_list(
 
     if status and status != "All":
         stmt = stmt.where(Deal.status == status)
+
+    if paid and paid != "All":
+        if paid == "Paid":
+            stmt = stmt.where(Deal.is_paid.is_(True))
+        elif paid == "Pending":
+            stmt = stmt.where(Deal.is_paid.is_(False))
 
     if q and q.strip():
         like = f"%{q.strip()}%"
@@ -290,6 +297,7 @@ async def deals_list(
         "deals": deals,
         "q": q or "",
         "status": status or "All",
+        "paid": paid or "All",
     })
 
 
@@ -320,7 +328,7 @@ async def deal_save(
     sold_date: str | None = Form(default=None),
     delivered_date: str | None = Form(default=None),
     status: str = Form(default="Pending"),
-    tag: str = Form(default="Inbound"),
+    tag: str = Form(default="Shop"),
     customer: str = Form(default=""),
     stock_num: str | None = Form(default=None),
     model: str | None = Form(default=None),

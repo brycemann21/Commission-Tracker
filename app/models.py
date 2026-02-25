@@ -25,7 +25,7 @@ class Deal(Base):
     sold_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     delivered_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(24), default="Pending")
-    tag: Mapped[str] = mapped_column(String(24), default="Inbound")
+    tag: Mapped[str] = mapped_column(String(24), default="Shop")
 
     customer: Mapped[str] = mapped_column(String(120), default="")
     stock_num: Mapped[str] = mapped_column(String(40), default="")

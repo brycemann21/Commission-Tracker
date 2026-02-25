@@ -20,7 +20,7 @@
     <div>
       <label class="text-xs text-slate-500">Status</label>
       <select class="w-full border rounded px-3 py-2" name="status">
-        {% for s in ["Pending","Delivered","Dead"] %}
+        {% for s in ["Pending","Scheduled","Delivered","Dead"] %}
           <option value="{{ s }}" {% if deal and deal.status==s %}selected{% endif %}>{{ s }}</option>
         {% endfor %}
       </select>
@@ -29,8 +29,8 @@
     <div>
   <label class="text-xs text-slate-500">Tag</label>
   <select class="w-full border rounded px-3 py-2" name="tag">
-    {% set current_tag = (deal.tag if deal and deal.tag else "Inbound") %}
-    {% for t in ["Inbound","Shop","Title","FO"] %}
+    {% set current_tag = (deal.tag if deal and deal.tag else "Shop") %}
+    {% for t in ["Shop","Title"] %}
       <option value="{{ t }}" {% if current_tag == t %}selected{% endif %}>{{ t }}</option>
     {% endfor %}
   </select>
@@ -59,11 +59,16 @@
     </div>
 
     <div>
-      <label class="text-xs text-slate-500">Deal Type (F/C/L)</label>
-      <input class="w-full border rounded px-3 py-2" name="deal_type" value="{{ deal.deal_type if deal else '' }}">
+      <label class="text-xs text-slate-500">F/C/L</label>
+      <select class="w-full border rounded px-3 py-2" name="deal_type">
+        {% set cur = (deal.deal_type if deal and deal.deal_type else "") %}
+        {% for opt in ["","F","C","L"] %}
+          <option value="{{ opt }}" {% if cur==opt %}selected{% endif %}>{{ opt if opt else "--" }}</option>
+        {% endfor %}
+      </select>
     </div>
     <div>
-      <label class="text-xs text-slate-500">Business Manager</label>
+      <label class="text-xs text-slate-500">F&I</label>
       <input class="w-full border rounded px-3 py-2" name="business_manager" value="{{ deal.business_manager if deal else '' }}">
     </div>
     <div>
@@ -94,7 +99,7 @@
     </div>
 
     <div>
-      <label class="text-xs text-slate-500">Notes</label>
+      <label class="text-xs text-slate-500">Comments</label>
       <input class="w-full border rounded px-3 py-2" name="notes" value="{{ deal.notes if deal else '' }}">
     </div>
   </div>
