@@ -452,6 +452,8 @@ async def end_of_month_report(
     month: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
+    if not month:
+        month = today().strftime("%Y-%m")
     y, m = month.split("-")
     d0 = date(int(y), int(m), 1)
     start_m, end_m = month_bounds(d0)
