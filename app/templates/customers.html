@@ -22,11 +22,15 @@
   <tbody>
     {% for r in rows %}
       <tr style="border-bottom:1px solid #e5e7eb;">
-        <td style="padding:10px;">{{ r.customer }}</td>
-        <td style="padding:10px; text-align:right;">{{ r.deals }}</td>
-        <td style="padding:10px; text-align:right;">${{ "%.2f"|format(r.total_comm or 0) }}</td>
+        <td style="padding:10px;">{{ r["customer"] }}</td>
+        <td style="padding:10px; text-align:right;">{{ r["deals"] }}</td>
+        <td style="padding:10px; text-align:right;">${{ "%.2f"|format(r["total_comm"] or 0) }}</td>
         <td style="padding:10px;">
-          {% if r.last_delivered %}{{ r.last_delivered }}{% else %}-{% endif %}
+          {% if r["last_delivered"] %}
+  {{ r["last_delivered"] }}
+{% else %}
+  -
+{% endif %}
         </td>
       </tr>
     {% else %}
