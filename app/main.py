@@ -47,6 +47,8 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 app = FastAPI(title="Commission Tracker")
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["today"] = today
+templates.env.globals["current_month"] = lambda: today().strftime("%Y-%m")
+templates.env.globals["today"] = today
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(static_dir):
