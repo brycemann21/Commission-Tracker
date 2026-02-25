@@ -99,7 +99,7 @@ async def startup():
 # -----------------------------
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, month: str | None = None, db: AsyncSession = Depends(get_db)):
-    # Load all deals for recent list
+
     deals = (
         await db.execute(
             select(Deal).order_by(
@@ -109,51 +109,61 @@ async def dashboard(request: Request, month: str | None = None, db: AsyncSession
         )
     ).scalars().all()
 
-    # YTD metrics based on delivered date if available else sold date
-    year = today().year
-    start_ytd = date(year, 1, 1)
-
-    def deal_anchor(d: Deal):
-        return d.delivered_date or d.sold_date
-
-    ytd_deals = [d for d in deals if deal_anchor(d) and deal_anchor(d) >= start_ytd]
-    units_ytd = len([d for d in ytd_deals if d.status != "Dead"])
-    comm_ytd = sum((d.total_deal_comm or 0) for d in ytd_deals if d.status != "Dead")
-
-    pending = len([d for d in deals if d.status == "Pending"])
-    delivered = len([d for d in deals if d.status == "Delivered"])
-
-    # Optional: MTD metrics when month=YYYY-MM
-    mtd_units = None
-    mtd_comm = None
-    mtd_label = None
+    # -----------------------------
+    # Month Selection (Default = Current Month)
+    # -----------------------------
     if month:
         y, m = month.split("-")
         d0 = date(int(y), int(m), 1)
-        start_m, end_m = month_bounds(d0)
-        mtd_label = month
-        mtd = [
-            d for d in deals
-            if d.status == "Delivered"
-            and d.delivered_date
-            and start_m <= d.delivered_date < end_m
-        ]
-        mtd_units = len(mtd)
-        mtd_comm = sum((d.total_deal_comm or 0) for d in mtd)
+    else:
+        d0 = today()
+        month = f"{d0.year:04d}-{d0.month:02d}"
+
+    start_m, end_m = month_bounds(d0)
+
+    delivered_mtd = [
+        d for d in deals
+        if d.status == "Delivered"
+        and d.delivered_date
+        and start_m <= d.delivered_date < end_m
+    ]
+
+    units_mtd = len(delivered_mtd)
+    comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd)
+
+    new_mtd = len([d for d in delivered_mtd if (d.new_used or "").lower() == "new"])
+    used_mtd = len([d for d in delivered_mtd if (d.new_used or "").lower() == "used"])
+
+    # -----------------------------
+    # Year Trend (Delivered Units per Month)
+    # -----------------------------
+    year_selected = d0.year
+
+    delivered_year = [
+        d for d in deals
+        if d.status == "Delivered"
+        and d.delivered_date
+        and d.delivered_date.year == year_selected
+    ]
+
+    units_by_month = [0] * 12
+    for d in delivered_year:
+        units_by_month[d.delivered_date.month - 1] += 1
+
+    month_labels = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
-        "units_ytd": units_ytd,
-        "comm_ytd": comm_ytd,
-        "pending": pending,
-        "delivered": delivered,
+        "month": month,
+        "units_mtd": units_mtd,
+        "comm_mtd": comm_mtd,
+        "new_mtd": new_mtd,
+        "used_mtd": used_mtd,
+        "year": year_selected,
+        "month_labels": month_labels,
+        "units_by_month": units_by_month,
         "recent": deals[:15],
-        "year": year,
-        "mtd_units": mtd_units,
-        "mtd_comm": mtd_comm,
-        "mtd_label": mtd_label,
     })
-
 
 # -----------------------------
 # Sales Entry
