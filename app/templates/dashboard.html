@@ -114,6 +114,37 @@
       </div>
     {% endfor %}
   </div>
+
+</div>
+
+<div class="mt-6 bg-white rounded border border-slate-200 p-4">
+  <div class="text-sm text-slate-500 mb-3">Closing % (Delivered Deals)</div>
+
+  <div class="space-y-3">
+    {% for k in ["pulse","nitro","permaplate","aim"] %}
+      {% set r = closing_rates[k] %}
+      {% set pct = (r.pct if r.pct is not none else 0) %}
+      <div>
+        <div class="flex items-center justify-between text-sm mb-1">
+          <div class="font-medium text-slate-800">{{ r.label }}</div>
+          <div class="text-slate-600">
+            {% if r.pct is none %}
+              --
+            {% else %}
+              {{ "{:.1f}".format(r.pct) }}%
+            {% endif %}
+            <span class="text-xs text-slate-400 ml-2">({{ r.yes }}/{{ r.den }})</span>
+          </div>
+        </div>
+        <div class="h-3 bg-slate-200 rounded overflow-hidden">
+          <div class="h-3 bg-slate-900 rounded" style="width: {{ pct }}%"></div>
+        </div>
+        {% if k == "aim" %}
+          <div class="text-xs text-slate-400 mt-1">Aim % counts Yes/No only. X is excluded.</div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
 </div>
 
 <div class="mt-6 flex items-center justify-between">

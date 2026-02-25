@@ -17,6 +17,8 @@ class DealIn(BaseModel):
     spot_sold: bool = False
     discount_gt_200: str = "No"
 
+    aim_presentation: str = "X"
+
     permaplate: bool = False
     nitro_fill: bool = False
     pulse: bool = False

@@ -161,7 +161,32 @@ async def dashboard(
         and start_m <= d.delivered_date < end_m
     ]
 
-    units_mtd = len(delivered_mtd)
+    
+    # -----------------------------
+    # Closing % (Delivered deals in selected month)
+    # -----------------------------
+    delivered_total = len(delivered_mtd)
+
+    def _pct(n: int, d: int) -> float | None:
+        if d <= 0:
+            return None
+        return round((n / d) * 100.0, 1)
+
+    pulse_yes = sum(1 for d in delivered_mtd if getattr(d, "pulse", False))
+    nitro_yes = sum(1 for d in delivered_mtd if getattr(d, "nitro_fill", False))
+    perma_yes = sum(1 for d in delivered_mtd if getattr(d, "permaplate", False))
+
+    aim_yes = sum(1 for d in delivered_mtd if (getattr(d, "aim_presentation", "X") or "X") == "Yes")
+    aim_no = sum(1 for d in delivered_mtd if (getattr(d, "aim_presentation", "X") or "X") == "No")
+    aim_den = aim_yes + aim_no
+
+    closing_rates = {
+        "pulse": {"label": "Pulse", "yes": pulse_yes, "den": delivered_total, "pct": _pct(pulse_yes, delivered_total)},
+        "nitro": {"label": "Nitro Fill", "yes": nitro_yes, "den": delivered_total, "pct": _pct(nitro_yes, delivered_total)},
+        "permaplate": {"label": "PermaPlate", "yes": perma_yes, "den": delivered_total, "pct": _pct(perma_yes, delivered_total)},
+        "aim": {"label": "Aim Presentation", "yes": aim_yes, "den": aim_den, "pct": _pct(aim_yes, aim_den)},
+    }
+units_mtd = len(delivered_mtd)
     comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd)
 
     # Paid vs Pending Commission (MTD)
@@ -240,6 +265,7 @@ async def dashboard(
 
         # MTD
         "units_mtd": units_mtd,
+        "closing_rates": closing_rates,
         "comm_mtd": comm_mtd,
         "paid_comm_mtd": paid_comm_mtd,
         "pending_comm_mtd": pending_comm_mtd,
@@ -337,6 +363,7 @@ async def deal_save(
     business_manager: str | None = Form(default=None),
     spot_sold: int = Form(default=0),
     discount_gt_200: str = Form(default="No"),
+    aim_presentation: str = Form(default="X"),
     permaplate: int = Form(default=0),
     nitro_fill: int = Form(default=0),
     pulse: int = Form(default=0),
@@ -376,6 +403,7 @@ async def deal_save(
         business_manager=business_manager or "",
         spot_sold=bool(spot_sold),
         discount_gt_200=(discount_gt_200 or "No"),
+        aim_presentation=(aim_presentation or "X"),
         permaplate=bool(permaplate),
         nitro_fill=bool(nitro_fill),
         pulse=bool(pulse),

@@ -93,6 +93,17 @@
     </div>
 
     <div>
+      <label class="text-xs text-slate-500">Aim Presentation</label>
+      <select class="w-full border rounded px-3 py-2" name="aim_presentation">
+        {% set cur_aim = (deal.aim_presentation if deal and deal.aim_presentation else "X") %}
+        {% for opt in ["Yes","No","X"] %}
+          <option value="{{ opt }}" {% if cur_aim == opt %}selected{% endif %}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+      <div class="text-xs text-slate-400 mt-1">X = excluded from Aim %</div>
+    </div>
+
+    <div>
       <label class="text-xs text-slate-500">Hold ($)</label>
       <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="hold_amount" value="{{ deal.hold_amount if deal else 0 }}">
       <div class="text-xs text-slate-400 mt-1">Trade hold comm = floor(Hold/1000)*100</div>

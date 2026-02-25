@@ -37,6 +37,9 @@ class Deal(Base):
     spot_sold: Mapped[bool] = mapped_column(Boolean, default=False)
     discount_gt_200: Mapped[str] = mapped_column(String(8), default="No")
 
+    # AIM Presentation: Yes / No / X (X is excluded from %)
+    aim_presentation: Mapped[str] = mapped_column(String(3), default="X")
+
     permaplate: Mapped[bool] = mapped_column(Boolean, default=False)
     nitro_fill: Mapped[bool] = mapped_column(Boolean, default=False)
     pulse: Mapped[bool] = mapped_column(Boolean, default=False)
