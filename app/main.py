@@ -1,5 +1,7 @@
 import os
 import ssl
+import re
+import calendar
 from datetime import date, datetime, timedelta
 
 from fastapi import FastAPI, Request, Form, Depends
@@ -98,8 +100,12 @@ async def startup():
 # Dashboard
 # -----------------------------
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request, month: str | None = None, db: AsyncSession = Depends(get_db)):
-
+async def dashboard(
+    request: Request,
+    month: str | None = None,
+    year: int | None = None,
+    db: AsyncSession = Depends(get_db),
+):
     deals = (
         await db.execute(
             select(Deal).order_by(
@@ -110,16 +116,43 @@ async def dashboard(request: Request, month: str | None = None, db: AsyncSession
     ).scalars().all()
 
     # -----------------------------
-    # Month Selection (Default = Current Month)
+    # Month/Year Selection
+    # Supports:
+    #   /?year=2026&month=2
+    #   /?month=2026-02   (backwards compatible)
+    # Default = current month/year
     # -----------------------------
-    if month:
-        y, m = month.split("-")
-        d0 = date(int(y), int(m), 1)
-    else:
-        d0 = today()
-        month = f"{d0.year:04d}-{d0.month:02d}"
+    today_date = today()
 
+    selected_year: int
+    selected_month: int
+
+    month_str = (month or "").strip() if month else ""
+
+    # Case 1: explicit year + numeric month in query
+    if year is not None and month_str and month_str.isdigit():
+        selected_year = int(year)
+        selected_month = int(month_str)
+    else:
+        # Case 2: backwards compatible month=YYYY-MM
+        m = re.fullmatch(r"(\d{4})-(\d{1,2})", month_str)
+        if m:
+            selected_year = int(m.group(1))
+            selected_month = int(m.group(2))
+        else:
+            # Default
+            selected_year = int(year) if year is not None else today_date.year
+            selected_month = today_date.month
+
+    # Clamp month into 1..12
+    if selected_month < 1:
+        selected_month = 1
+    if selected_month > 12:
+        selected_month = 12
+
+    d0 = date(selected_year, selected_month, 1)
     start_m, end_m = month_bounds(d0)
+    month_key = f"{selected_year:04d}-{selected_month:02d}"
 
     delivered_mtd = [
         d for d in deals
@@ -137,13 +170,11 @@ async def dashboard(request: Request, month: str | None = None, db: AsyncSession
     # -----------------------------
     # Year Trend (Delivered Units per Month)
     # -----------------------------
-    year_selected = d0.year
-
     delivered_year = [
         d for d in deals
         if d.status == "Delivered"
         and d.delivered_date
-        and d.delivered_date.year == year_selected
+        and d.delivered_date.year == selected_year
     ]
 
     units_by_month = [0] * 12
@@ -151,17 +182,16 @@ async def dashboard(request: Request, month: str | None = None, db: AsyncSession
         units_by_month[d.delivered_date.month - 1] += 1
 
     month_labels = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+
     # -----------------------------
     # YTD (Delivered)
     # -----------------------------
     units_ytd = len(delivered_year)
     comm_ytd = sum((d.total_deal_comm or 0) for d in delivered_year)
 
-        # -----------------------------
+    # -----------------------------
     # Pending Deals
     # -----------------------------
-    today_date = today()
-
     pending_deals = [d for d in deals if d.status == "Pending"]
     for d in pending_deals:
         if d.sold_date:
@@ -173,12 +203,36 @@ async def dashboard(request: Request, month: str | None = None, db: AsyncSession
         pending_deals,
         key=lambda x: x.sold_date or date.max
     )
-
     pending = len(pending_deals)
+
+    # -----------------------------
+    # Selector options
+    # Years are derived from your data (delivered_date/sold_date), plus current year.
+    # -----------------------------
+    years = set([today_date.year])
+    for d in deals:
+        if d.delivered_date:
+            years.add(d.delivered_date.year)
+        if d.sold_date:
+            years.add(d.sold_date.year)
+    year_options = sorted(years, reverse=True)
+
+    month_options = [
+        {"num": i, "label": calendar.month_name[i]}
+        for i in range(1, 13)
+    ]
 
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
-        "month": month,
+
+        # For redirects/actions (keeps old behavior)
+        "month": month_key,
+
+        # Selector state/options
+        "selected_year": selected_year,
+        "selected_month": selected_month,
+        "year_options": year_options,
+        "month_options": month_options,
 
         # MTD
         "units_mtd": units_mtd,
@@ -195,14 +249,11 @@ async def dashboard(request: Request, month: str | None = None, db: AsyncSession
         "pending_deals": pending_deals[:15],
 
         # Trend
-        "year": year_selected,
+        "year": selected_year,
         "month_labels": month_labels,
         "units_by_month": units_by_month,
     })
 
-# -----------------------------
-# Sales Entry
-# -----------------------------
 @app.get("/deals", response_class=HTMLResponse)
 async def deals_list(
     request: Request,
