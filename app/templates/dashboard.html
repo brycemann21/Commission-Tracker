@@ -90,40 +90,4 @@
 </table>
 </div>
 
-<div class="mt-2 overflow-x-auto bg-white rounded border border-slate-200">
-<table class="min-w-full text-sm">
-  <thead class="bg-slate-900 text-white">
-    <tr>
-      <th class="text-left p-2">Delivered</th>
-      <th class="text-left p-2">Customer</th>
-      <th class="text-left p-2">Model</th>
-      <th class="text-left p-2">Status</th>
-      <th class="text-right p-2">Total Comm</th>
-      <th class="p-2"></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for d in recent %}
-      <tr class="border-t">
-        <td class="p-2">{{ d.delivered_date or "" }}</td>
-        <td class="p-2">{{ d.customer }}</td>
-        <td class="p-2">{{ d.model }}</td>
-        <td class="p-2">
-          {% if d.status == "Delivered" %}
-            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900">{{ d.status }}</span>
-          {% elif d.status == "Pending" %}
-            <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-900">{{ d.status }}</span>
-          {% elif d.status == "Dead" %}
-            <span class="px-2 py-0.5 rounded bg-rose-100 text-rose-900">{{ d.status }}</span>
-          {% else %}
-            <span class="px-2 py-0.5 rounded bg-slate-100">{{ d.status }}</span>
-          {% endif %}
-        </td>
-        <td class="p-2 text-right">${{ "{:,.0f}".format(d.total_deal_comm or 0) }}</td>
-        <td class="p-2 text-right"><a class="underline text-sm" href="/deals/{{ d.id }}/edit">Edit</a></td>
-      </tr>
-    {% endfor %}
-  </tbody>
-</table>
-</div>
-{% endblock %}
+
