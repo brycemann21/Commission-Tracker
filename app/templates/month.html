@@ -1,1 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
 
+<h2 style="margin:16px 0;">Current Month (Delivered)</h2>
+
+<form method="get" action="/month" style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">
+  <input type="text" name="month" value="{{ month }}" placeholder="YYYY-MM" style="padding:8px; width: 160px;">
+  <button type="submit" style="padding:8px 12px;">Go</button>
+</form>
+
+<div style="display:flex; gap:12px; margin-bottom:12px;">
+  <div style="border:1px solid #e5e7eb; padding:12px; border-radius:8px; min-width:160px;">
+    <div style="color:#64748b; font-size:12px;">Units</div>
+    <div style="font-size:22px; font-weight:700;">{{ units }}</div>
+  </div>
+  <div style="border:1px solid #e5e7eb; padding:12px; border-radius:8px; min-width:200px;">
+    <div style="color:#64748b; font-size:12px;">Total Comm</div>
+    <div style="font-size:22px; font-weight:700;">${{ "%.2f"|format(total_comm or 0) }}</div>
+  </div>
+</div>
+
+<table style="width:100%; border-collapse:collapse;">
+  <thead>
+    <tr style="background:#0f172a; color:white;">
+      <th style="text-align:left; padding:10px;">Delivered</th>
+      <th style="text-align:left; padding:10px;">Customer</th>
+      <th style="text-align:left; padding:10px;">Model</th>
+      <th style="text-align:left; padding:10px;">Status</th>
+      <th style="text-align:right; padding:10px;">Total Comm</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for d in deals %}
+      <tr style="border-bottom:1px solid #e5e7eb;">
+        <td style="padding:10px;">{% if d.delivered_date %}{{ d.delivered_date }}{% else %}-{% endif %}</td>
+        <td style="padding:10px;">{{ d.customer }}</td>
+        <td style="padding:10px;">{{ d.model }}</td>
+        <td style="padding:10px;">{{ d.status }}</td>
+        <td style="padding:10px; text-align:right;">${{ "%.2f"|format(d.total_deal_comm or 0) }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" style="padding:12px;">No delivered deals found for this month.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}
