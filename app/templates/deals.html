@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col md:flex-row md:items-end gap-3">
+  <div>
+    <h1 class="text-xl font-bold">Deals</h1>
+    <div class="text-sm text-slate-500">Search, filter, edit. Commission auto-calculates from your payplan.</div>
+  </div>
+  <form class="md:ml-auto flex gap-2" method="get" action="/deals">
+    <input class="border rounded px-3 py-2 text-sm w-56" name="q" value="{{ q }}" placeholder="Search customer / stock / model" />
+    <select class="border rounded px-3 py-2 text-sm" name="status">
+      {% for s in ["All","Pending","Delivered","Dead"] %}
+        <option value="{{ s }}" {% if status==s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <button class="px-3 py-2 text-sm rounded bg-slate-900 text-white">Go</button>
+  </form>
+</div>
+
+<div class="mt-4 overflow-x-auto bg-white rounded border border-slate-200">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-900 text-white">
+    <tr>
+      <th class="text-left p-2">Sold</th>
+      <th class="text-left p-2">Delivered</th>
+      <th class="text-left p-2">Customer</th>
+      <th class="text-left p-2">Stock #</th>
+      <th class="text-left p-2">Model</th>
+      <th class="text-left p-2">Type</th>
+      <th class="text-left p-2">Status</th>
+      <th class="text-right p-2">Total</th>
+      <th class="p-2"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for d in deals %}
+      <tr class="border-t">
+        <td class="p-2">{{ d.sold_date or "" }}</td>
+        <td class="p-2">{{ d.delivered_date or "" }}</td>
+        <td class="p-2">{{ d.customer }}</td>
+        <td class="p-2">{{ d.stock_num }}</td>
+        <td class="p-2">{{ d.model }}</td>
+        <td class="p-2">{{ d.new_used }}</td>
+        <td class="p-2">{{ d.status }}</td>
+        <td class="p-2 text-right">${{ "{:,.0f}".format(d.total_deal_comm or 0) }}</td>
+        <td class="p-2 text-right">
+          <a class="underline" href="/deals/{{ d.id }}/edit">Edit</a>
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
