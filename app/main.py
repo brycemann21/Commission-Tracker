@@ -16,6 +16,8 @@ from fastapi.templating import Jinja2Templates
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./commission.db")
 # Supabase transaction pooler requires TLS; asyncpg uses an SSL context.
 SSL_CONTEXT = ssl.create_default_context()
+SSL_CONTEXT.check_hostname = False
+SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 db_url = DATABASE_URL
 # If you provide a Supabase Postgres URL like postgres://..., convert it for SQLAlchemy asyncpg.
 if db_url.startswith("postgres://"):
