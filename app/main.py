@@ -273,6 +273,24 @@ async def deal_save(
     pay_date: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ):
+    @app.post("/deals/{deal_id}/deliver")
+async def mark_delivered(
+    deal_id: int,
+    month: str | None = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
+
+    deal.status = "Delivered"
+    deal.delivered_date = today()
+
+    await db.commit()
+
+    redirect_url = "/"
+    if month:
+        redirect_url = f"/?month={month}"
+
+    return RedirectResponse(url=redirect_url, status_code=303)
     settings = (await db.execute(select(Settings).limit(1))).scalar_one()
 
     sold = parse_date(sold_date)
