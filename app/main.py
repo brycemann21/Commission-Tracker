@@ -157,41 +157,48 @@ async def dashboard(request: Request, month: str | None = None, db: AsyncSession
     units_ytd = len(delivered_year)
     comm_ytd = sum((d.total_deal_comm or 0) for d in delivered_year)
 
-    # -----------------------------
+        # -----------------------------
     # Pending Deals
     # -----------------------------
+    today_date = today()
+
+    pending_deals = [d for d in deals if d.status == "Pending"]
+    for d in pending_deals:
+        if d.sold_date:
+            d.days_pending = (today_date - d.sold_date).days
+        else:
+            d.days_pending = 0
+
     pending_deals = sorted(
-    [d for d in deals if d.status == "Pending"],
-    key=lambda x: x.sold_date or date.max
-)
-   today_date = today()
-for d in pending_deals:
-    d.days_pending = (today_date - d.sold_date).days if d.sold_date else 0
-    
+        pending_deals,
+        key=lambda x: x.sold_date or date.max
+    )
+
     pending = len(pending_deals)
+
     return templates.TemplateResponse("dashboard.html", {
-    "request": request,
-    "month": month,
+        "request": request,
+        "month": month,
 
-    # MTD
-    "units_mtd": units_mtd,
-    "comm_mtd": comm_mtd,
-    "new_mtd": new_mtd,
-    "used_mtd": used_mtd,
+        # MTD
+        "units_mtd": units_mtd,
+        "comm_mtd": comm_mtd,
+        "new_mtd": new_mtd,
+        "used_mtd": used_mtd,
 
-    # YTD
-    "units_ytd": units_ytd,
-    "comm_ytd": comm_ytd,
+        # YTD
+        "units_ytd": units_ytd,
+        "comm_ytd": comm_ytd,
 
-    # Pending
-    "pending": pending,
-    "pending_deals": pending_deals[:15],
+        # Pending
+        "pending": pending,
+        "pending_deals": pending_deals[:15],
 
-    # Trend
-    "year": year_selected,
-    "month_labels": month_labels,
-    "units_by_month": units_by_month,
-})
+        # Trend
+        "year": year_selected,
+        "month_labels": month_labels,
+        "units_by_month": units_by_month,
+    })
 
 # -----------------------------
 # Sales Entry
