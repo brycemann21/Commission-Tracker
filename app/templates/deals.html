@@ -125,7 +125,6 @@
       <th class="text-left p-2">Status</th>
       <th class="text-left p-2">Tag</th>
       <th class="text-right p-2">Commission</th>
-      <th class="text-left p-2">Paid?</th>
       <th class="p-2"></th>
     </tr>
   </thead>
@@ -172,17 +171,20 @@
         <td class="p-2">{{ d.notes or "" }}</td>
         <td class="p-2">{{ d.status }}</td>
         <td class="p-2">{{ d.tag or "" }}</td>
-        <td class="p-2 text-right">${{ "{:,.0f}".format(d.total_deal_comm or 0) }}</td>
-        <td class="p-2">
-          <div class="flex items-center gap-2">
-            <span class="inline-flex items-center px-2 py-1 rounded text-xs border {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-800{% else %}bg-slate-50 border-slate-200 text-slate-700{% endif %}">
-              {% if d.is_paid %}Paid{% else %}Pending Pay{% endif %}
-            </span>
-            <form method="post" action="/deals/{{ d.id }}/toggle_paid">
-              <input type="hidden" name="next" value="{{ request.url }}">
-              <button class="text-xs underline" type="submit">{% if d.is_paid %}Mark Pending Pay{% else %}Mark Paid{% endif %}</button>
-            </form>
-          </div>
+        <td class="p-2 text-right">
+          <form method="post" action="/deals/{{ d.id }}/toggle_paid" class="inline">
+            <input type="hidden" name="next" value="{{ request.url }}">
+            <button
+              type="submit"
+              class="inline-flex items-center justify-end gap-2 px-2 py-1 rounded border text-sm font-semibold transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-slate-300 {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-800{% else %}bg-white border-slate-200 text-slate-900{% endif %}"
+              title="Click to toggle Paid / Pending Pay"
+            >
+              <span>${{ "{:,.0f}".format(d.total_deal_comm or 0) }}</span>
+              <span class="text-[11px] font-medium {% if d.is_paid %}text-emerald-700{% else %}text-slate-500{% endif %}">
+                {% if d.is_paid %}Paid{% else %}Pending Pay{% endif %}
+              </span>
+            </button>
+          </form>
         </td>
         <td class="p-2 text-right">
           <button type="button" class="underline" data-edit-id="{{ d.id }}" data-edit-title="{{ d.customer|e }}">Edit</button>
