@@ -18,7 +18,7 @@
       <a class="text-sm px-2 py-1 rounded hover:underline {{ 'text-slate-900 font-semibold' if path.startswith('/customers') else 'text-slate-600' }}" href="/customers">Customer Summary</a>
       <a class="text-sm px-2 py-1 rounded hover:underline {{ 'text-slate-900 font-semibold' if path.startswith('/reports/eom') else 'text-slate-600' }}" href="/reports/eom?month=2026-02">End of Month</a>
       <a class="text-sm px-2 py-1 rounded hover:underline {{ 'text-slate-900 font-semibold' if path.startswith('/reports/paycheck') else 'text-slate-600' }}" href="/reports/paycheck">Paycheck</a>
-      <a class="text-sm px-2 py-1 rounded hover:underline {{ 'text-slate-900 font-semibold' if path.startswith('/settings') else 'text-slate-600' }}" href="/settings">Settings</a>
+      <a class="text-sm px-2 py-1 rounded hover:underline {{ 'text-slate-900 font-semibold' if path.startswith('/payplan') or path.startswith('/settings') else 'text-slate-600' }}" href="/payplan">Pay Plan</a>
       <div class="ml-auto">
         <a class="inline-flex items-center px-3 py-1.5 text-sm rounded bg-slate-900 text-white" href="/deals/new">+ New Deal</a>
       </div>

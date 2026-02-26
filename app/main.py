@@ -144,6 +144,39 @@ async def startup():
             except Exception:
                 pass
 
+        # Lightweight schema migration for Settings columns (so existing DBs don't 500).
+        # SQLite doesn't support IF NOT EXISTS for ADD COLUMN in older versions,
+        # so we attempt plain ADD COLUMN and ignore failures.
+        settings_cols = [
+            ("hourly_rate_ny_offset", "FLOAT", "15.0"),
+            ("new_volume_bonus_15_16", "FLOAT", "1000.0"),
+            ("new_volume_bonus_17_18", "FLOAT", "1200.0"),
+            ("new_volume_bonus_19_20", "FLOAT", "1500.0"),
+            ("new_volume_bonus_21_24", "FLOAT", "2000.0"),
+            ("new_volume_bonus_25_plus", "FLOAT", "2800.0"),
+            ("used_volume_bonus_8_10", "FLOAT", "350.0"),
+            ("used_volume_bonus_11_12", "FLOAT", "500.0"),
+            ("used_volume_bonus_13_plus", "FLOAT", "1000.0"),
+            ("spot_bonus_5_9", "FLOAT", "50.0"),
+            ("spot_bonus_10_12", "FLOAT", "80.0"),
+            ("spot_bonus_13_plus", "FLOAT", "100.0"),
+            ("quarterly_bonus_threshold_units", "INTEGER", "60"),
+            ("quarterly_bonus_amount", "FLOAT", "1200.0"),
+        ]
+
+        for col, typ, default in settings_cols:
+            try:
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE settings ADD COLUMN {col} {typ} DEFAULT {default}"
+                )
+            except Exception:
+                try:
+                    await conn.exec_driver_sql(
+                        f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} {typ} DEFAULT {default}"
+                    )
+                except Exception:
+                    pass
+
     # seed settings if empty
     async with SessionLocal() as session:
         res = await session.execute(select(Settings).limit(1))
@@ -158,6 +191,21 @@ async def startup():
                 finance_non_subvented=40.0,
                 warranty=25.0,
                 tire_wheel=25.0,
+
+                hourly_rate_ny_offset=15.0,
+                new_volume_bonus_15_16=1000.0,
+                new_volume_bonus_17_18=1200.0,
+                new_volume_bonus_19_20=1500.0,
+                new_volume_bonus_21_24=2000.0,
+                new_volume_bonus_25_plus=2800.0,
+                used_volume_bonus_8_10=350.0,
+                used_volume_bonus_11_12=500.0,
+                used_volume_bonus_13_plus=1000.0,
+                spot_bonus_5_9=50.0,
+                spot_bonus_10_12=80.0,
+                spot_bonus_13_plus=100.0,
+                quarterly_bonus_threshold_units=60,
+                quarterly_bonus_amount=1200.0,
             )
             session.add(s)
             await session.commit()
@@ -905,16 +953,16 @@ async def paycheck_report(
 
 
 # -----------------------------
-# Settings (existing)
+# Pay Plan
 # -----------------------------
-@app.get("/settings", response_class=HTMLResponse)
-async def settings_get(request: Request, db: AsyncSession = Depends(get_db)):
+@app.get("/payplan", response_class=HTMLResponse)
+async def payplan_get(request: Request, db: AsyncSession = Depends(get_db)):
     s = (await db.execute(select(Settings).limit(1))).scalar_one()
-    return templates.TemplateResponse("settings.html", {"request": request, "s": s})
+    return templates.TemplateResponse("payplan.html", {"request": request, "s": s})
 
 
-@app.post("/settings")
-async def settings_post(
+@app.post("/payplan")
+async def payplan_post(
     unit_comm_discount_le_200: float = Form(...),
     unit_comm_discount_gt_200: float = Form(...),
     permaplate: float = Form(...),
@@ -923,6 +971,22 @@ async def settings_post(
     finance_non_subvented: float = Form(...),
     warranty: float = Form(...),
     tire_wheel: float = Form(...),
+
+    hourly_rate_ny_offset: float = Form(...),
+    new_volume_bonus_15_16: float = Form(...),
+    new_volume_bonus_17_18: float = Form(...),
+    new_volume_bonus_19_20: float = Form(...),
+    new_volume_bonus_21_24: float = Form(...),
+    new_volume_bonus_25_plus: float = Form(...),
+    used_volume_bonus_8_10: float = Form(...),
+    used_volume_bonus_11_12: float = Form(...),
+    used_volume_bonus_13_plus: float = Form(...),
+    spot_bonus_5_9: float = Form(...),
+    spot_bonus_10_12: float = Form(...),
+    spot_bonus_13_plus: float = Form(...),
+    quarterly_bonus_threshold_units: int = Form(...),
+    quarterly_bonus_amount: float = Form(...),
+
     db: AsyncSession = Depends(get_db),
 ):
     s = (await db.execute(select(Settings).limit(1))).scalar_one()
@@ -934,5 +998,32 @@ async def settings_post(
     s.finance_non_subvented = float(finance_non_subvented)
     s.warranty = float(warranty)
     s.tire_wheel = float(tire_wheel)
+
+    s.hourly_rate_ny_offset = float(hourly_rate_ny_offset)
+    s.new_volume_bonus_15_16 = float(new_volume_bonus_15_16)
+    s.new_volume_bonus_17_18 = float(new_volume_bonus_17_18)
+    s.new_volume_bonus_19_20 = float(new_volume_bonus_19_20)
+    s.new_volume_bonus_21_24 = float(new_volume_bonus_21_24)
+    s.new_volume_bonus_25_plus = float(new_volume_bonus_25_plus)
+    s.used_volume_bonus_8_10 = float(used_volume_bonus_8_10)
+    s.used_volume_bonus_11_12 = float(used_volume_bonus_11_12)
+    s.used_volume_bonus_13_plus = float(used_volume_bonus_13_plus)
+    s.spot_bonus_5_9 = float(spot_bonus_5_9)
+    s.spot_bonus_10_12 = float(spot_bonus_10_12)
+    s.spot_bonus_13_plus = float(spot_bonus_13_plus)
+    s.quarterly_bonus_threshold_units = int(quarterly_bonus_threshold_units)
+    s.quarterly_bonus_amount = float(quarterly_bonus_amount)
     await db.commit()
-    return RedirectResponse(url="/settings", status_code=303)
+    return RedirectResponse(url="/payplan", status_code=303)
+
+
+# Backwards compatibility
+@app.get("/settings")
+async def settings_redirect_get():
+    return RedirectResponse(url="/payplan", status_code=307)
+
+
+@app.post("/settings")
+async def settings_redirect_post(request: Request):
+    # In case someone posts to the old endpoint, treat it as the new one.
+    return RedirectResponse(url="/payplan", status_code=303)
