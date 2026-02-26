@@ -421,6 +421,7 @@ async def deal_new(request: Request, db: AsyncSession = Depends(get_db)):
         "request": request,
         "deal": None,
         "settings": settings,
+        "next_url": request.query_params.get("next") or "",
         "mtd": {
             "units": units_mtd,
             "comm": comm_mtd,
@@ -475,6 +476,7 @@ async def deal_edit(deal_id: int, request: Request, db: AsyncSession = Depends(g
             "request": request,
             "deal": deal,
             "settings": settings,
+            "next_url": request.query_params.get("next") or "",
             "mtd": {
                 "units": units_mtd,
                 "comm": comm_mtd,
@@ -519,6 +521,7 @@ async def deal_save(
     notes: str | None = Form(default=None),
     pay_date: str | None = Form(default=None),
     is_paid: int = Form(default=0),
+    next: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ):
 
@@ -617,7 +620,7 @@ async def deal_save(
         db.add(deal)
 
     await db.commit()
-    return RedirectResponse(url="/deals", status_code=303)
+    return RedirectResponse(url=(next or "/deals"), status_code=303)
     
 
 @app.post("/deals/{deal_id}/toggle_paid")

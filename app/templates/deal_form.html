@@ -16,7 +16,8 @@
   Matches your Excel payplan: Unit commission + add-ons + trade hold commission.
 </div>
 
-<form class="bg-white rounded border border-slate-200 p-4" method="post" action="/deals/save">
+<form id="dealForm" class="bg-white rounded border border-slate-200 p-4" method="post" action="/deals/save">
+  <input type="hidden" name="next" value="{{ next_url or '' }}" />
   {% if deal %}<input type="hidden" name="deal_id" value="{{ deal.id }}">{% endif %}
 
   <div class="grid md:grid-cols-4 gap-4">

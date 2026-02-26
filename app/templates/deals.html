@@ -84,6 +84,31 @@
   </div>
 </div>
 
+<!-- Edit modal (loads edit form in an iframe) -->
+<div id="editModal" class="fixed inset-0 z-50 hidden" aria-hidden="true">
+  <div class="absolute inset-0 bg-black/40" data-close-edit="1"></div>
+  <div class="relative mx-auto mt-10 w-[95%] max-w-5xl">
+    <div class="bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+        <div>
+          <div class="text-sm text-slate-500">Edit Deal</div>
+          <div id="editModalTitle" class="text-lg font-semibold">—</div>
+        </div>
+        <button type="button" class="px-2 py-1 rounded hover:bg-slate-100" data-close-edit="1">✕</button>
+      </div>
+      <div class="p-0">
+        <iframe
+          id="editFrame"
+          title="Edit Deal"
+          class="w-full"
+          style="height: 82vh; border: 0;"
+          src="about:blank"
+        ></iframe>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="mt-4 overflow-x-auto bg-white rounded border border-slate-200">
 <table class="min-w-full text-sm">
   <thead class="bg-slate-900 text-white">
@@ -160,7 +185,7 @@
           </div>
         </td>
         <td class="p-2 text-right">
-          <button type="button" class="underline" data-edit-id="{{ d.id }}">Edit</button>
+          <button type="button" class="underline" data-edit-id="{{ d.id }}" data-edit-title="{{ d.customer|e }}">Edit</button>
         </td>
       </tr>
     {% endfor %}
@@ -172,6 +197,10 @@
   (function () {
     const modal = document.getElementById('dealModal');
     if (!modal) return;
+
+    const editModal = document.getElementById('editModal');
+    const editFrame = document.getElementById('editFrame');
+    const editTitle = document.getElementById('editModalTitle');
 
     const els = {
       title: document.getElementById('modalTitle'),
@@ -206,7 +235,7 @@
 
     function openModal(btn) {
       const d = btn.dataset;
-      const editUrl = `/deals/${d.id}/edit`;
+      const dealId = d.id;
       els.title.textContent = d.customer || 'Deal';
       els.sold.textContent = d.sold || '—';
       els.del.textContent = d.delivered || '—';
@@ -222,7 +251,8 @@
       els.comm.textContent = d.comm || '—';
       els.notes.textContent = d.notes || '—';
       if (els.editBtn) {
-        els.editBtn.dataset.href = editUrl;
+        els.editBtn.dataset.id = dealId;
+        els.editBtn.dataset.title = d.customer || `Deal #${dealId}`;
       }
 
       const items = [];
@@ -256,6 +286,26 @@
       document.body.style.overflow = '';
     }
 
+    function openEditModal(id, title) {
+      if (!editModal || !editFrame) return;
+      if (!id) return;
+      const next = encodeURIComponent('/deals?embedded=1');
+      editFrame.src = `/deals/${id}/edit?next=${next}`;
+      if (editTitle) editTitle.textContent = title || `Deal #${id}`;
+      editModal.classList.remove('hidden');
+      editModal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeEditModal(refresh) {
+      if (!editModal || !editFrame) return;
+      editModal.classList.add('hidden');
+      editModal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+      editFrame.src = 'about:blank';
+      if (refresh) window.location.reload();
+    }
+
     document.addEventListener('click', (e) => {
       const openBtn = e.target.closest('[data-open-deal="1"]');
       if (openBtn) {
@@ -269,15 +319,24 @@
       if (editBtn) {
         e.preventDefault();
         const id = editBtn.getAttribute('data-edit-id');
-        if (id) window.location.href = `/deals/${id}/edit`;
+        const title = editBtn.getAttribute('data-edit-title') || '';
+        if (id) openEditModal(id, title);
         return;
       }
 
       const modalEdit = e.target.closest('#mEditBtn');
       if (modalEdit) {
         e.preventDefault();
-        const href = modalEdit.dataset.href;
-        if (href) window.location.href = href;
+        const id = modalEdit.dataset.id;
+        const title = modalEdit.dataset.title;
+        if (id) openEditModal(id, title);
+        return;
+      }
+
+      const closeEditBtn = e.target.closest('[data-close-edit="1"]');
+      if (closeEditBtn && editModal && !editModal.classList.contains('hidden')) {
+        e.preventDefault();
+        closeEditModal(false);
         return;
       }
       const closeBtn = e.target.closest('[data-close="1"]');
@@ -289,7 +348,26 @@
 
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+      if (e.key === 'Escape' && editModal && !editModal.classList.contains('hidden')) closeEditModal(false);
+    });
+
+    // When the edit iframe navigates to /deals?embedded=1 after saving,
+    // it will postMessage so we can close the modal and refresh this page.
+    window.addEventListener('message', (ev) => {
+      try {
+        if (ev && ev.data && ev.data.type === 'ct_deal_saved') {
+          closeEditModal(true);
+        }
+      } catch (_) {}
     });
   })();
 </script>
+
+{% if request.query_params.get('embedded') == '1' %}
+<script>
+  try {
+    window.parent.postMessage({ type: 'ct_deal_saved' }, '*');
+  } catch (e) {}
+</script>
+{% endif %}
 {% endblock %}
