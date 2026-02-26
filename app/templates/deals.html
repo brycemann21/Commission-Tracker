@@ -1,5 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
+
+<style>
+  /* Print only the modal contents */
+  @media print {
+    body * { visibility: hidden !important; }
+    #dealModal, #dealModal * { visibility: visible !important; }
+    #dealModal { position: absolute !important; inset: 0 !important; }
+    #dealModal [data-close="1"],
+    #dealModal .bg-black\/40 { display: none !important; }
+    #dealModal .mt-20 { margin-top: 0 !important; }
+    #dealModal .shadow-lg { box-shadow: none !important; }
+  }
+</style>
+
 <div class="flex flex-col md:flex-row md:items-end gap-3">
   <div>
     <h1 class="text-xl font-bold">Deals</h1>
@@ -61,6 +75,7 @@
         </div>
 
         <div class="mt-5 flex justify-end gap-2">
+          <button id="mPrintBtn" type="button" class="px-3 py-2 text-sm rounded border">Print</button>
           <a id="mEditLink" class="px-3 py-2 text-sm rounded bg-slate-900 text-white" href="#">Edit Deal</a>
           <button type="button" class="px-3 py-2 text-sm rounded border" data-close="1">Close</button>
         </div>
@@ -176,7 +191,18 @@
       addons: document.getElementById('mAddons'),
       noAddons: document.getElementById('mNoAddons'),
       editLink: document.getElementById('mEditLink'),
+      printBtn: document.getElementById('mPrintBtn'),
     };
+
+    // Print button prints the modal only (see @media print styles above)
+    if (els.printBtn) {
+      els.printBtn.addEventListener('click', () => {
+        // ensure modal is visible for print
+        modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+        window.print();
+      });
+    }
 
     function openModal(btn) {
       const d = btn.dataset;
