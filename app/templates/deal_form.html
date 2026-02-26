@@ -87,15 +87,7 @@
         {% endfor %}
       </select>
     </div>
-    <div>
-      <label class="text-xs text-slate-500">Pay Date (Fri)</label>
-      <input type="date" class="w-full border rounded px-3 py-2" name="pay_date" value="{{ deal.pay_date if deal else '' }}">
-    </div>
-
-    <div class="flex items-center gap-2 mt-6">
-      <input type="checkbox" class="h-4 w-4" name="is_paid" value="1" {% if deal and deal.is_paid %}checked{% endif %}>
-      <label class="text-sm text-slate-700">Mark as Paid</label>
-    </div>
+    {# Pay Date + Mark as Paid intentionally removed from New Deal screen (handled elsewhere) #}
 
 
     <div>
@@ -130,6 +122,24 @@
       <input class="w-full border rounded px-3 py-2" name="notes" value="{{ deal.notes if deal else '' }}">
     </div>
   </div>
+
+  <script>
+    // Spot => Delivered today, and also flip Status to Delivered for you.
+    (function () {
+      const spot = document.querySelector('input[name="spot_sold"]');
+      const status = document.querySelector('select[name="status"]');
+      if (!spot || !status) return;
+
+      spot.addEventListener('change', () => {
+        if (spot.checked) {
+          status.value = 'Delivered';
+        } else {
+          // If it was auto-set, kick it back to Pending.
+          if (status.value === 'Delivered') status.value = 'Pending';
+        }
+      });
+    })();
+  </script>
 
   <div class="mt-5">
     <div class="font-bold mb-2">Add-ons (1/0)</div>
