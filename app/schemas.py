@@ -5,7 +5,7 @@ class DealIn(BaseModel):
     sold_date: date | None = None
     delivered_date: date | None = None
     status: str = "Pending"
-    tag: str = "Shop"
+    tag: str = ""
 
     customer: str = ""
     stock_num: str = ""

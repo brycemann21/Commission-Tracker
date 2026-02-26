@@ -352,9 +352,9 @@ async def deal_edit(deal_id: int, request: Request, db: AsyncSession = Depends(g
 async def deal_save(
     deal_id: int | None = Form(default=None),
     sold_date: str | None = Form(default=None),
-    delivered_date: str | None = Form(default=None),
+    delivered_date: str | None = Form(default=None),  # legacy (no longer shown on form)
     status: str = Form(default="Pending"),
-    tag: str = Form(default="Shop"),
+    tag: str = Form(default=""),
     customer: str = Form(default=""),
     stock_num: str | None = Form(default=None),
     model: str | None = Form(default=None),
@@ -367,7 +367,7 @@ async def deal_save(
     permaplate: int = Form(default=0),
     nitro_fill: int = Form(default=0),
     pulse: int = Form(default=0),
-    finance_non_subvented: int = Form(default=0),
+    finance_non_subvented: int = Form(default=0),  # legacy (now derived from deal_type)
     warranty: int = Form(default=0),
     tire_wheel: int = Form(default=0),
     hold_amount: float = Form(default=0.0),
@@ -381,8 +381,19 @@ async def deal_save(
 
     settings = (await db.execute(select(Settings).limit(1))).scalar_one()
 
+    # If creating a new deal and Sold Date is empty, default to today
     sold = parse_date(sold_date)
-    delivered = parse_date(delivered_date)
+    if sold is None and not deal_id:
+        sold = today()
+
+    # Delivered date is no longer manually entered.
+    # If Spot? is checked, Delivered Date = today.
+    delivered = None
+    if bool(spot_sold):
+        delivered = today()
+    else:
+        # keep backwards compatibility for existing posts/edits
+        delivered = parse_date(delivered_date)
     pay = parse_date(pay_date)
 
 
@@ -390,24 +401,43 @@ async def deal_save(
     if bool(is_paid) and pay is None:
         pay = today()
 
+    # Normalize deal_type values
+    dt = (deal_type or "").strip()
+    if dt in ("F", "f"):
+        dt = "Finance"
+    elif dt in ("C", "c"):
+        dt = "Cash/Sub-Vented"
+    elif dt in ("L", "l"):
+        dt = "Lease"
+
+    # Finance (Non-Subvented) is now automatically counted when deal_type is Finance
+    auto_fin_non_sub = (dt == "Finance")
+
+    # If editing an existing deal and delivered is still None, preserve the existing delivered_date
+    existing_deal = None
+    if deal_id:
+        existing_deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
+        if delivered is None:
+            delivered = existing_deal.delivered_date
+
     deal_in = DealIn(
         sold_date=sold,
         delivered_date=delivered,
         status=status,
-        tag=tag,
+        tag=(tag or "").strip(),
         customer=customer.strip(),
         stock_num=(stock_num or "").strip(),
         model=(model or "").strip(),
         new_used=new_used or "",
-        deal_type=deal_type or "",
-        business_manager=business_manager or "",
+        deal_type=dt,
+        business_manager=(business_manager or ""),
         spot_sold=bool(spot_sold),
         discount_gt_200=(discount_gt_200 or "No"),
         aim_presentation=(aim_presentation or "X"),
         permaplate=bool(permaplate),
         nitro_fill=bool(nitro_fill),
         pulse=bool(pulse),
-        finance_non_subvented=bool(finance_non_subvented),
+        finance_non_subvented=bool(auto_fin_non_sub or finance_non_subvented),
         warranty=bool(warranty),
         tire_wheel=bool(tire_wheel),
         hold_amount=float(hold_amount or 0),
@@ -421,7 +451,7 @@ async def deal_save(
     unit_comm, addons, trade_hold, total = calc_commission(deal_in, settings)
 
     if deal_id:
-        deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
+        deal = existing_deal
         for k, v in deal_in.model_dump().items():
             setattr(deal, k, v)
         deal.unit_comm = unit_comm
