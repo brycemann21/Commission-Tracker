@@ -76,7 +76,7 @@
 
         <div class="mt-5 flex justify-end gap-2">
           <button id="mPrintBtn" type="button" class="px-3 py-2 text-sm rounded border">Print</button>
-          <a id="mEditLink" class="px-3 py-2 text-sm rounded bg-slate-900 text-white" href="#">Edit Deal</a>
+          <button id="mEditBtn" type="button" class="px-3 py-2 text-sm rounded bg-slate-900 text-white">Edit Deal</button>
           <button type="button" class="px-3 py-2 text-sm rounded border" data-close="1">Close</button>
         </div>
       </div>
@@ -160,7 +160,7 @@
           </div>
         </td>
         <td class="p-2 text-right">
-          <a class="underline" href="/deals/{{ d.id }}/edit">Edit</a>
+          <button type="button" class="underline" data-edit-id="{{ d.id }}">Edit</button>
         </td>
       </tr>
     {% endfor %}
@@ -190,7 +190,7 @@
       notes: document.getElementById('mNotes'),
       addons: document.getElementById('mAddons'),
       noAddons: document.getElementById('mNoAddons'),
-      editLink: document.getElementById('mEditLink'),
+      editBtn: document.getElementById('mEditBtn'),
       printBtn: document.getElementById('mPrintBtn'),
     };
 
@@ -206,6 +206,7 @@
 
     function openModal(btn) {
       const d = btn.dataset;
+      const editUrl = `/deals/${d.id}/edit`;
       els.title.textContent = d.customer || 'Deal';
       els.sold.textContent = d.sold || '—';
       els.del.textContent = d.delivered || '—';
@@ -220,7 +221,9 @@
       els.hold.textContent = `$${Number(d.hold || 0).toLocaleString()}`;
       els.comm.textContent = d.comm || '—';
       els.notes.textContent = d.notes || '—';
-      els.editLink.href = `/deals/${d.id}/edit`;
+      if (els.editBtn) {
+        els.editBtn.dataset.href = editUrl;
+      }
 
       const items = [];
       if (d.permaplate === '1') items.push('PermaPlate');
@@ -258,6 +261,23 @@
       if (openBtn) {
         e.preventDefault();
         openModal(openBtn);
+        return;
+      }
+
+      // Edit buttons (table + modal)
+      const editBtn = e.target.closest('[data-edit-id]');
+      if (editBtn) {
+        e.preventDefault();
+        const id = editBtn.getAttribute('data-edit-id');
+        if (id) window.location.href = `/deals/${id}/edit`;
+        return;
+      }
+
+      const modalEdit = e.target.closest('#mEditBtn');
+      if (modalEdit) {
+        e.preventDefault();
+        const href = modalEdit.dataset.href;
+        if (href) window.location.href = href;
         return;
       }
       const closeBtn = e.target.closest('[data-close="1"]');
