@@ -100,6 +100,37 @@ def month_bounds(d: date):
     return start, end
 
 
+def quarter_bounds(d: date) -> tuple[date, date]:
+    """Return [start, end) bounds for the quarter that contains date d."""
+    q_start_month = ((d.month - 1) // 3) * 3 + 1
+    start = date(d.year, q_start_month, 1)
+    # advance 3 months
+    if q_start_month == 10:
+        end = date(d.year + 1, 1, 1)
+    else:
+        end = date(d.year, q_start_month + 3, 1)
+    return start, end
+
+
+def _tiered_volume_bonus(count: int, tiers: list[tuple[int, int | None, float]]) -> tuple[float, str]:
+    """Given tiers [(min, max_or_None, amount), ...] return (amount, label)."""
+    for mn, mx, amt in tiers:
+        if count >= mn and (mx is None or count <= mx):
+            if mx is None:
+                return amt, f"{mn}+"
+            return amt, f"{mn}-{mx}"
+    return 0.0, "--"
+
+
+def _tiered_spot_bonus(count: int, tiers: list[tuple[int, int | None, float]]) -> tuple[float, float, str]:
+    """Return (total, per_spot, tier_label) for spot bonuses."""
+    for mn, mx, per in tiers:
+        if count >= mn and (mx is None or count <= mx):
+            label = f"{mn}+" if mx is None else f"{mn}-{mx}"
+            return float(count) * float(per), float(per), label
+    return 0.0, 0.0, "--"
+
+
 def get_selected_month_year(request: Request) -> tuple[int, int]:
     """Read the globally-selected month/year from cookies (set on dashboard).
     Falls back to the current month/year if missing/invalid.
@@ -221,6 +252,9 @@ async def dashboard(
     year: int | None = None,
     db: AsyncSession = Depends(get_db),
 ):
+    # Pay plan (needed for Current Bonus breakdown)
+    s = (await db.execute(select(Settings).limit(1))).scalar_one()
+
     deals = (
         await db.execute(
             select(Deal).order_by(
@@ -312,6 +346,75 @@ async def dashboard(
     used_mtd = len([d for d in delivered_mtd if (d.new_used or "").lower() == "used"])
 
     # -----------------------------
+    # Current Bonus (based on selected month)
+    # Uses pay plan tiers from Settings.
+    # - New volume bonus: based on NEW delivered count in month
+    # - Used volume bonus: based on USED delivered count in month
+    # - Spot bonus: per-spot bonus once you hit tier in month
+    # - Quarterly bonus: if QTD delivered units hit threshold
+    # -----------------------------
+    new_bonus_amt, new_bonus_tier = _tiered_volume_bonus(new_mtd, [
+        (25, None, float(s.new_volume_bonus_25_plus)),
+        (21, 24, float(s.new_volume_bonus_21_24)),
+        (19, 20, float(s.new_volume_bonus_19_20)),
+        (17, 18, float(s.new_volume_bonus_17_18)),
+        (15, 16, float(s.new_volume_bonus_15_16)),
+    ])
+
+    used_bonus_amt, used_bonus_tier = _tiered_volume_bonus(used_mtd, [
+        (13, None, float(s.used_volume_bonus_13_plus)),
+        (11, 12, float(s.used_volume_bonus_11_12)),
+        (8, 10, float(s.used_volume_bonus_8_10)),
+    ])
+
+    spot_count_mtd = sum(1 for d in delivered_mtd if getattr(d, "spot_sold", False))
+    spot_bonus_total, spot_bonus_per, spot_bonus_tier = _tiered_spot_bonus(spot_count_mtd, [
+        (13, None, float(s.spot_bonus_13_plus)),
+        (10, 12, float(s.spot_bonus_10_12)),
+        (5, 9, float(s.spot_bonus_5_9)),
+    ])
+
+    q_start, q_end = quarter_bounds(date(selected_year, selected_month, 1))
+    delivered_qtd = [
+        d for d in deals
+        if d.status == "Delivered"
+        and d.delivered_date
+        and q_start <= d.delivered_date < q_end
+    ]
+    units_qtd = len(delivered_qtd)
+    quarterly_hit = units_qtd >= int(s.quarterly_bonus_threshold_units or 0)
+    quarterly_bonus = float(s.quarterly_bonus_amount) if quarterly_hit else 0.0
+
+    current_bonus_total = float(new_bonus_amt) + float(used_bonus_amt) + float(spot_bonus_total) + float(quarterly_bonus)
+
+    bonus_breakdown = {
+        "new": {
+            "units": new_mtd,
+            "tier": new_bonus_tier,
+            "amount": float(new_bonus_amt),
+        },
+        "used": {
+            "units": used_mtd,
+            "tier": used_bonus_tier,
+            "amount": float(used_bonus_amt),
+        },
+        "spot": {
+            "spots": spot_count_mtd,
+            "tier": spot_bonus_tier,
+            "per": float(spot_bonus_per),
+            "amount": float(spot_bonus_total),
+        },
+        "quarterly": {
+            "units_qtd": units_qtd,
+            "threshold": int(s.quarterly_bonus_threshold_units or 0),
+            "hit": bool(quarterly_hit),
+            "amount": float(quarterly_bonus),
+            "q_label": f"Q{((selected_month - 1)//3)+1}",
+        },
+        "total": float(current_bonus_total),
+    }
+
+    # -----------------------------
     # Year Trend (Delivered Units per Month)
     # -----------------------------
     delivered_year = [
@@ -386,6 +489,10 @@ async def dashboard(
         "pending_comm_mtd": pending_comm_mtd,
         "new_mtd": new_mtd,
         "used_mtd": used_mtd,
+
+        # Bonus
+        "current_bonus_total": current_bonus_total,
+        "bonus_breakdown": bonus_breakdown,
 
         # YTD
         "units_ytd": units_ytd,

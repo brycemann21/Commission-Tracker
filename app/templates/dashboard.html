@@ -56,9 +56,9 @@
   </div>
 </div>
 
-<div class="grid md:grid-cols-6 gap-4">
+<div class="grid md:grid-cols-5 gap-4">
   <div class="bg-white rounded border border-slate-200 p-4">
-    <div class="text-sm text-slate-500">Units (MTD)</div>
+    <div class="text-sm text-slate-500">Units MTD</div>
     <div class="text-3xl font-bold">{{ units_mtd }}</div>
     <div class="text-xs text-slate-500 mt-1">
       New: {{ new_mtd }} · Used: {{ used_mtd }}
@@ -66,7 +66,7 @@
   </div>
 
   <div class="bg-white rounded border border-slate-200 p-4">
-    <div class="text-sm text-slate-500">Commission (MTD)</div>
+    <div class="text-sm text-slate-500">Commission MTD</div>
     <div class="text-3xl font-bold">
       ${{ "{:,.0f}".format(comm_mtd or 0) }}
     </div>
@@ -77,26 +77,90 @@
 
   </div>
 
+  <button type="button" id="openBonusModal" class="text-left bg-white rounded border border-slate-200 p-4 hover:border-slate-300 hover:shadow-sm transition">
+    <div class="text-sm text-slate-500">Current Bonus</div>
+    <div class="text-3xl font-bold">
+      ${{ "{:,.0f}".format(current_bonus_total or 0) }}
+    </div>
+    <div class="text-xs text-slate-500 mt-1">Click for breakdown</div>
+  </button>
+
   <div class="bg-white rounded border border-slate-200 p-4">
-    <div class="text-sm text-slate-500">Units (YTD)</div>
+    <div class="text-sm text-slate-500">Units YTD</div>
     <div class="text-3xl font-bold">{{ units_ytd }}</div>
   </div>
 
   <div class="bg-white rounded border border-slate-200 p-4">
-    <div class="text-sm text-slate-500">Commission (YTD)</div>
+    <div class="text-sm text-slate-500">Commission YTD</div>
     <div class="text-3xl font-bold">
       ${{ "{:,.0f}".format(comm_ytd or 0) }}
     </div>
   </div>
+</div>
 
-  <div class="bg-white rounded border border-slate-200 p-4">
-    <div class="text-sm text-slate-500">Pending</div>
-    <div class="text-3xl font-bold">{{ pending }}</div>
-  </div>
+<!-- Current Bonus Modal -->
+<div id="bonusModal" class="fixed inset-0 z-50 hidden">
+  <div class="absolute inset-0 bg-black/50" id="bonusModalBackdrop"></div>
+  <div class="absolute inset-0 flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-3xl rounded-lg shadow-lg overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-4 border-b">
+        <div>
+          <div class="text-sm text-slate-500">Current Bonus Breakdown</div>
+          <div class="text-lg font-semibold">{{ month_options[selected_month-1].label }} {{ selected_year }}</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" id="printBonus" class="text-sm px-3 py-1 rounded border border-slate-200 hover:bg-slate-50">Print</button>
+          <button type="button" id="closeBonusModal" class="text-slate-500 hover:text-slate-900 text-2xl leading-none">&times;</button>
+        </div>
+      </div>
 
-  <div class="bg-white rounded border border-slate-200 p-4">
-    <div class="text-sm text-slate-500">Year</div>
-    <div class="text-3xl font-bold">{{ year }}</div>
+      <div class="p-5" id="bonusModalContent">
+        <div class="text-sm text-slate-600 mb-3">Total: <span class="font-semibold text-slate-900">${{ "{:,.0f}".format(bonus_breakdown.total or 0) }}</span></div>
+
+        <div class="overflow-x-auto rounded border border-slate-200">
+          <table class="min-w-full text-sm">
+            <thead class="bg-slate-900 text-white">
+              <tr>
+                <th class="text-left p-2">Bonus</th>
+                <th class="text-left p-2">Progress</th>
+                <th class="text-left p-2">Tier</th>
+                <th class="text-right p-2">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-t">
+                <td class="p-2">New Volume</td>
+                <td class="p-2">{{ bonus_breakdown.new.units }} new (MTD)</td>
+                <td class="p-2">{{ bonus_breakdown.new.tier }}</td>
+                <td class="p-2 text-right">${{ "{:,.0f}".format(bonus_breakdown.new.amount or 0) }}</td>
+              </tr>
+              <tr class="border-t">
+                <td class="p-2">Used Volume</td>
+                <td class="p-2">{{ bonus_breakdown.used.units }} used (MTD)</td>
+                <td class="p-2">{{ bonus_breakdown.used.tier }}</td>
+                <td class="p-2 text-right">${{ "{:,.0f}".format(bonus_breakdown.used.amount or 0) }}</td>
+              </tr>
+              <tr class="border-t">
+                <td class="p-2">Spot Bonus</td>
+                <td class="p-2">{{ bonus_breakdown.spot.spots }} spots (MTD)</td>
+                <td class="p-2">{{ bonus_breakdown.spot.tier }} @ ${{ "{:,.0f}".format(bonus_breakdown.spot.per or 0) }}/spot</td>
+                <td class="p-2 text-right">${{ "{:,.0f}".format(bonus_breakdown.spot.amount or 0) }}</td>
+              </tr>
+              <tr class="border-t">
+                <td class="p-2">Quarterly</td>
+                <td class="p-2">{{ bonus_breakdown.quarterly.units_qtd }} units ({{ bonus_breakdown.quarterly.q_label }} to date)</td>
+                <td class="p-2">{{ 'Hit' if bonus_breakdown.quarterly.hit else 'Not hit' }} ({{ bonus_breakdown.quarterly.threshold }})</td>
+                <td class="p-2 text-right">${{ "{:,.0f}".format(bonus_breakdown.quarterly.amount or 0) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="text-xs text-slate-500 mt-3">
+          * Bonuses are calculated from Delivered deals for the selected month (MTD). Quarterly is based on Delivered units in the current quarter.
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -296,6 +360,64 @@
     if (openBtn) openBtn.addEventListener('click', open);
     if (closeBtn) closeBtn.addEventListener('click', close);
     if (backdrop) backdrop.addEventListener('click', close);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') close();
+    });
+  })();
+</script>
+
+<script>
+  (function () {
+    const openBtn = document.getElementById('openBonusModal');
+    const modal = document.getElementById('bonusModal');
+    const closeBtn = document.getElementById('closeBonusModal');
+    const backdrop = document.getElementById('bonusModalBackdrop');
+    const printBtn = document.getElementById('printBonus');
+    const content = document.getElementById('bonusModalContent');
+
+    function open() {
+      if (!modal) return;
+      modal.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function close() {
+      if (!modal) return;
+      modal.classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    function print() {
+      if (!content) return;
+      const w = window.open('', '_blank');
+      if (!w) return;
+      w.document.write(`
+        <html>
+          <head>
+            <title>Bonus Breakdown</title>
+            <style>
+              body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; padding: 20px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+              th, td { border: 1px solid #e2e8f0; padding: 8px; font-size: 13px; }
+              th { background: #0f172a; color: white; text-align: left; }
+              .muted { color: #64748b; font-size: 12px; }
+            </style>
+          </head>
+          <body>
+            ${content.innerHTML}
+          </body>
+        </html>
+      `);
+      w.document.close();
+      w.focus();
+      w.print();
+      w.close();
+    }
+
+    if (openBtn) openBtn.addEventListener('click', open);
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    if (backdrop) backdrop.addEventListener('click', close);
+    if (printBtn) printBtn.addEventListener('click', print);
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') close();
     });
