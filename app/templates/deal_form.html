@@ -154,7 +154,8 @@
       ] %}
       {% for name,label,val in flags %}
         <label class="flex items-center gap-2 bg-slate-50 border rounded p-2">
-          <input type="checkbox" name="{{ name }}" value="1" {% if (deal and getattr(deal,name)) or (not deal and name in ["permaplate","nitro_fill","pulse"]) %}checked{% endif %}>
+          {# Jinja does not expose Python's getattr() by default; use the built-in attr filter instead. #}
+          <input type="checkbox" name="{{ name }}" value="1" {% if (deal and (deal|attr(name))) or (not deal and name in ["permaplate","nitro_fill","pulse"]) %}checked{% endif %}>
           <span class="text-sm">{{ label }}</span>
           <span class="ml-auto text-xs text-slate-500">${{ val }}</span>
         </label>
