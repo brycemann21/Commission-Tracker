@@ -2,6 +2,7 @@ import os
 import ssl
 import re
 import calendar
+import traceback
 from datetime import date, datetime, timedelta
 
 from fastapi import FastAPI, Request, Form, Depends
@@ -55,6 +56,21 @@ templates.env.globals["today"] = today
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+# -----------------------------
+# Friendlier error pages
+# -----------------------------
+# Developing locally: show actionable tracebacks instead of a blank "Internal Server Error".
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    tb = traceback.format_exc()
+    return HTMLResponse(
+        f"<h1>Internal Server Error</h1>"
+        f"<p><b>URL:</b> {request.url}</p>"
+        f"<pre style='white-space:pre-wrap'>{tb}</pre>",
+        status_code=500,
+    )
 
 
 async def get_db():
@@ -454,17 +470,25 @@ async def deal_edit(deal_id: int, request: Request, db: AsyncSession = Depends(g
     comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd)
     avg_per_copy = (comm_mtd / units_mtd) if units_mtd else 0.0
 
-    return templates.TemplateResponse("deal_form.html", {
-        "request": request,
-        "deal": deal,
-        "settings": settings,
-        "mtd": {
-            "units": units_mtd,
-            "comm": comm_mtd,
-            "avg": avg_per_copy,
-            "month_label": today().strftime("%B %Y"),
-        },
-    })
+    try:
+        return templates.TemplateResponse("deal_form.html", {
+            "request": request,
+            "deal": deal,
+            "settings": settings,
+            "mtd": {
+                "units": units_mtd,
+                "comm": comm_mtd,
+                "avg": avg_per_copy,
+                "month_label": today().strftime("%B %Y"),
+            },
+        })
+    except Exception:
+        # Template errors can happen; show them plainly.
+        return HTMLResponse(
+            f"<h1>Internal Server Error</h1><p>Failed to render edit form for id={deal_id}.</p>"
+            f"<pre style='white-space:pre-wrap'>{traceback.format_exc()}</pre>",
+            status_code=500,
+        )
 
 
 @app.post("/deals/save")
