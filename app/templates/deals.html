@@ -290,7 +290,7 @@
       if (!editModal || !editFrame) return;
       if (!id) return;
       const next = encodeURIComponent('/deals?embedded=1');
-      editFrame.src = `/deals/${id}/edit?next=${next}`;
+      editFrame.src = `/deals/${id}/edit?embed=1&next=${next}`;
       if (editTitle) editTitle.textContent = title || `Deal #${id}`;
       editModal.classList.remove('hidden');
       editModal.setAttribute('aria-hidden', 'false');

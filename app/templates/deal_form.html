@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-{% if mtd %}
+{% if mtd and not embed %}
   <div class="mb-3 rounded border border-slate-200 bg-white px-4 py-3">
     <div class="text-xs text-slate-500">This month so far ({{ mtd.month_label }})</div>
     <div class="mt-1 flex flex-wrap gap-x-6 gap-y-2 text-sm">

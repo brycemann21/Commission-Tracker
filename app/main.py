@@ -454,6 +454,8 @@ async def deal_edit(deal_id: int, request: Request, db: AsyncSession = Depends(g
             status_code=500,
         )
 
+    embed = (request.query_params.get("embed") == "1")
+
     # This-month-so-far strip (current month, Delivered only)
     start_m, end_m = month_bounds(today())
     delivered_mtd = (
@@ -477,6 +479,7 @@ async def deal_edit(deal_id: int, request: Request, db: AsyncSession = Depends(g
             "deal": deal,
             "settings": settings,
             "next_url": request.query_params.get("next") or "",
+            "embed": embed,
             "mtd": {
                 "units": units_mtd,
                 "comm": comm_mtd,
