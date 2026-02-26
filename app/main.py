@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_, and_
 
 from .models import Base, Deal, Settings
 from .schemas import DealIn
@@ -70,6 +70,30 @@ def month_bounds(d: date):
     else:
         end = date(d.year, d.month + 1, 1)
     return start, end
+
+
+def get_selected_month_year(request: Request) -> tuple[int, int]:
+    """Read the globally-selected month/year from cookies (set on dashboard).
+    Falls back to the current month/year if missing/invalid.
+    """
+    td = today()
+
+    try:
+        y = int(request.cookies.get("ct_year") or td.year)
+    except Exception:
+        y = td.year
+
+    try:
+        m = int(request.cookies.get("ct_month") or td.month)
+    except Exception:
+        m = td.month
+
+    if m < 1:
+        m = 1
+    if m > 12:
+        m = 12
+
+    return y, m
 
 
 @app.on_event("startup")
@@ -251,7 +275,7 @@ async def dashboard(
         for i in range(1, 13)
     ]
 
-    return templates.TemplateResponse("dashboard.html", {
+    resp = templates.TemplateResponse("dashboard.html", {
         "request": request,
 
         # For redirects/actions (keeps old behavior)
@@ -286,6 +310,12 @@ async def dashboard(
         "units_by_month": units_by_month,
     })
 
+    # Persist selected Month/Year so other pages (like Sales Entry) follow the dashboard.
+    # Stored as simple cookies.
+    resp.set_cookie("ct_year", str(selected_year), httponly=False, samesite="lax")
+    resp.set_cookie("ct_month", str(selected_month), httponly=False, samesite="lax")
+    return resp
+
 @app.get("/deals", response_class=HTMLResponse)
 async def deals_list(
     request: Request,
@@ -294,10 +324,31 @@ async def deals_list(
     paid: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
+    # Sales Entry follows the Month/Year selected on the dashboard.
+    # Base rule:
+    #   - show deals SOLD in the selected month/year
+    #   - PLUS carryover deals tagged Inbound or FO from prior months until they are Delivered
+    selected_year, selected_month = get_selected_month_year(request)
+    start_sel, end_sel = month_bounds(date(selected_year, selected_month, 1))
+
     stmt = select(Deal).order_by(
         Deal.delivered_date.desc().nullslast(),
         Deal.sold_date.desc().nullslast(),
     )
+
+    carry_tags = ["inbound", "fo"]
+    base_filter = or_(
+        and_(
+            Deal.sold_date.is_not(None),
+            Deal.sold_date >= start_sel,
+            Deal.sold_date < end_sel,
+        ),
+        and_(
+            func.lower(func.coalesce(Deal.tag, "")).in_(carry_tags),
+            Deal.status != "Delivered",
+        ),
+    )
+    stmt = stmt.where(base_filter)
 
     if status and status != "All":
         stmt = stmt.where(Deal.status == status)
@@ -324,6 +375,8 @@ async def deals_list(
         "q": q or "",
         "status": status or "All",
         "paid": paid or "All",
+        "selected_year": selected_year,
+        "selected_month": selected_month,
     })
 
 

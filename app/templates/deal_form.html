@@ -48,7 +48,7 @@
   <select class="w-full border rounded px-3 py-2" name="tag">
     {% set current_tag = (deal.tag if deal and deal.tag is not none else "") %}
     <option value="" {% if current_tag == "" %}selected{% endif %}>—</option>
-    {% for t in ["Shop","Title"] %}
+    {% for t in ["Shop","Title","Inbound","FO"] %}
       <option value="{{ t }}" {% if current_tag == t %}selected{% endif %}>{{ t }}</option>
     {% endfor %}
   </select>

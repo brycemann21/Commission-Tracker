@@ -3,7 +3,7 @@
 <div class="flex flex-col md:flex-row md:items-end gap-3">
   <div>
     <h1 class="text-xl font-bold">Deals</h1>
-    <div class="text-sm text-slate-500">Search, filter, edit. Commission auto-calculates from your payplan.</div>
+    <div class="text-sm text-slate-500">Showing {{ selected_month }}/{{ selected_year }} (plus Inbound/FO carryovers until Delivered).</div>
   </div>
   <form class="md:ml-auto flex gap-2" method="get" action="/deals">
     <input class="border rounded px-3 py-2 text-sm w-56" name="q" value="{{ q }}" placeholder="Search customer / stock / model" />
