@@ -124,32 +124,65 @@
                 <th class="text-left p-2">Bonus</th>
                 <th class="text-left p-2">Progress</th>
                 <th class="text-left p-2">Tier</th>
+                <th class="text-left p-2">Next</th>
                 <th class="text-right p-2">Amount</th>
               </tr>
             </thead>
             <tbody>
               <tr class="border-t">
-                <td class="p-2">New Volume</td>
-                <td class="p-2">{{ bonus_breakdown.new.units }} new (MTD)</td>
-                <td class="p-2">{{ bonus_breakdown.new.tier }}</td>
-                <td class="p-2 text-right">${{ "{:,.0f}".format(bonus_breakdown.new.amount or 0) }}</td>
+                <td class="p-2">Volume Bonus</td>
+                <td class="p-2">{{ bonus_breakdown.volume.units }} units (MTD) <span class="text-slate-500">— {{ bonus_breakdown.volume.new_units }} new / {{ bonus_breakdown.volume.used_units }} used</span></td>
+                <td class="p-2">{{ bonus_breakdown.volume.tier }}</td>
+                <td class="p-2">
+                  {% set n = bonus_breakdown.volume.next %}
+                  {% if n.tier == 'Maxed' %}
+                    <span class="text-slate-500">Maxed</span>
+                  {% else %}
+                    {{ n.tier }} → ${{ "{:,.0f}".format(n.amount or 0) }} <span class="text-slate-500">(need {{ n.need }})</span>
+                  {% endif %}
+                </td>
+                <td class="p-2 text-right">${{ "{:,.0f}".format(bonus_breakdown.volume.amount or 0) }}</td>
               </tr>
               <tr class="border-t">
                 <td class="p-2">Used Volume</td>
                 <td class="p-2">{{ bonus_breakdown.used.units }} used (MTD)</td>
                 <td class="p-2">{{ bonus_breakdown.used.tier }}</td>
+                <td class="p-2">
+                  {% set n = bonus_breakdown.used.next %}
+                  {% if n.tier == 'Maxed' %}
+                    <span class="text-slate-500">Maxed</span>
+                  {% else %}
+                    {{ n.tier }} → ${{ "{:,.0f}".format(n.amount or 0) }} <span class="text-slate-500">(need {{ n.need }})</span>
+                  {% endif %}
+                </td>
                 <td class="p-2 text-right">${{ "{:,.0f}".format(bonus_breakdown.used.amount or 0) }}</td>
               </tr>
               <tr class="border-t">
                 <td class="p-2">Spot Bonus</td>
                 <td class="p-2">{{ bonus_breakdown.spot.spots }} spots (MTD)</td>
                 <td class="p-2">{{ bonus_breakdown.spot.tier }} @ ${{ "{:,.0f}".format(bonus_breakdown.spot.per or 0) }}/spot</td>
+                <td class="p-2">
+                  {% set n = bonus_breakdown.spot.next %}
+                  {% if n.tier == 'Maxed' %}
+                    <span class="text-slate-500">Maxed</span>
+                  {% else %}
+                    {{ n.tier }} @ ${{ "{:,.0f}".format(n.per or 0) }}/spot <span class="text-slate-500">(need {{ n.need }})</span>
+                  {% endif %}
+                </td>
                 <td class="p-2 text-right">${{ "{:,.0f}".format(bonus_breakdown.spot.amount or 0) }}</td>
               </tr>
               <tr class="border-t">
                 <td class="p-2">Quarterly</td>
                 <td class="p-2">{{ bonus_breakdown.quarterly.units_qtd }} units ({{ bonus_breakdown.quarterly.q_label }} to date)</td>
                 <td class="p-2">{{ 'Hit' if bonus_breakdown.quarterly.hit else 'Not hit' }} ({{ bonus_breakdown.quarterly.threshold }})</td>
+                <td class="p-2">
+                  {% set n = bonus_breakdown.quarterly.next %}
+                  {% if bonus_breakdown.quarterly.hit %}
+                    <span class="text-slate-500">Hit</span>
+                  {% else %}
+                    {{ n.tier }} → ${{ "{:,.0f}".format(n.amount or 0) }} <span class="text-slate-500">(need {{ n.need }})</span>
+                  {% endif %}
+                </td>
                 <td class="p-2 text-right">${{ "{:,.0f}".format(bonus_breakdown.quarterly.amount or 0) }}</td>
               </tr>
             </tbody>

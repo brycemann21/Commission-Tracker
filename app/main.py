@@ -348,12 +348,14 @@ async def dashboard(
     # -----------------------------
     # Current Bonus (based on selected month)
     # Uses pay plan tiers from Settings.
-    # - New volume bonus: based on NEW delivered count in month
-    # - Used volume bonus: based on USED delivered count in month
+    # - Volume bonus: based on TOTAL delivered count in month (new+used)
+    # - Used bonus: based on USED delivered count in month
     # - Spot bonus: per-spot bonus once you hit tier in month
     # - Quarterly bonus: if QTD delivered units hit threshold
     # -----------------------------
-    new_bonus_amt, new_bonus_tier = _tiered_volume_bonus(new_mtd, [
+    # Volume bonus uses the existing "new_volume_bonus_*" settings fields (they are really total volume tiers).
+    volume_units_mtd = units_mtd
+    volume_bonus_amt, volume_bonus_tier = _tiered_volume_bonus(volume_units_mtd, [
         (25, None, float(s.new_volume_bonus_25_plus)),
         (21, 24, float(s.new_volume_bonus_21_24)),
         (19, 20, float(s.new_volume_bonus_19_20)),
@@ -385,24 +387,77 @@ async def dashboard(
     quarterly_hit = units_qtd >= int(s.quarterly_bonus_threshold_units or 0)
     quarterly_bonus = float(s.quarterly_bonus_amount) if quarterly_hit else 0.0
 
-    current_bonus_total = float(new_bonus_amt) + float(used_bonus_amt) + float(spot_bonus_total) + float(quarterly_bonus)
+    current_bonus_total = float(volume_bonus_amt) + float(used_bonus_amt) + float(spot_bonus_total) + float(quarterly_bonus)
+
+    def _next_volume(count: int, tiers_desc: list[tuple[int, int | None, float]]):
+        """tiers_desc is ordered from highest to lowest (min, max, amount)."""
+        asc = sorted([(mn, mx, amt) for (mn, mx, amt) in tiers_desc], key=lambda x: x[0])
+        for mn, mx, amt in asc:
+            if count < mn:
+                return {
+                    "tier": f"{mn}+" if mx is None else f"{mn}–{mx}",
+                    "at": mn,
+                    "need": mn - count,
+                    "amount": float(amt),
+                }
+        return {"tier": "Maxed", "at": None, "need": 0, "amount": 0.0}
+
+    def _next_spot(count: int, tiers_desc: list[tuple[int, int | None, float]]):
+        asc = sorted([(mn, mx, per) for (mn, mx, per) in tiers_desc], key=lambda x: x[0])
+        for mn, mx, per in asc:
+            if count < mn:
+                return {
+                    "tier": f"{mn}+" if mx is None else f"{mn}–{mx}",
+                    "at": mn,
+                    "need": mn - count,
+                    "per": float(per),
+                }
+        return {"tier": "Maxed", "at": None, "need": 0, "per": 0.0}
+
+    volume_next = _next_volume(volume_units_mtd, [
+        (25, None, float(s.new_volume_bonus_25_plus)),
+        (21, 24, float(s.new_volume_bonus_21_24)),
+        (19, 20, float(s.new_volume_bonus_19_20)),
+        (17, 18, float(s.new_volume_bonus_17_18)),
+        (15, 16, float(s.new_volume_bonus_15_16)),
+    ])
+    used_next = _next_volume(used_mtd, [
+        (13, None, float(s.used_volume_bonus_13_plus)),
+        (11, 12, float(s.used_volume_bonus_11_12)),
+        (8, 10, float(s.used_volume_bonus_8_10)),
+    ])
+    spot_next = _next_spot(spot_count_mtd, [
+        (13, None, float(s.spot_bonus_13_plus)),
+        (10, 12, float(s.spot_bonus_10_12)),
+        (5, 9, float(s.spot_bonus_5_9)),
+    ])
+    quarterly_next = {
+        "tier": "Hit" if quarterly_hit else f"{int(s.quarterly_bonus_threshold_units or 0)} units",
+        "need": 0 if quarterly_hit else max(0, int(s.quarterly_bonus_threshold_units or 0) - units_qtd),
+        "amount": float(s.quarterly_bonus_amount or 0),
+    }
 
     bonus_breakdown = {
-        "new": {
-            "units": new_mtd,
-            "tier": new_bonus_tier,
-            "amount": float(new_bonus_amt),
+        "volume": {
+            "units": volume_units_mtd,
+            "new_units": new_mtd,
+            "used_units": used_mtd,
+            "tier": volume_bonus_tier,
+            "amount": float(volume_bonus_amt),
+            "next": volume_next,
         },
         "used": {
             "units": used_mtd,
             "tier": used_bonus_tier,
             "amount": float(used_bonus_amt),
+            "next": used_next,
         },
         "spot": {
             "spots": spot_count_mtd,
             "tier": spot_bonus_tier,
             "per": float(spot_bonus_per),
             "amount": float(spot_bonus_total),
+            "next": spot_next,
         },
         "quarterly": {
             "units_qtd": units_qtd,
@@ -410,6 +465,7 @@ async def dashboard(
             "hit": bool(quarterly_hit),
             "amount": float(quarterly_bonus),
             "q_label": f"Q{((selected_month - 1)//3)+1}",
+            "next": quarterly_next,
         },
         "total": float(current_bonus_total),
     }
