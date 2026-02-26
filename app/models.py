@@ -24,6 +24,8 @@ class Deal(Base):
 
     sold_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     delivered_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
+    # When status is Scheduled, this stores the appointment date.
+    scheduled_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(24), default="Pending")
     tag: Mapped[str] = mapped_column(String(24), default="")
 

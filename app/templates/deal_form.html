@@ -42,6 +42,17 @@
           <option value="{{ s }}" {% if deal and deal.status==s %}selected{% endif %}>{{ s }}</option>
         {% endfor %}
       </select>
+
+      <div id="scheduledPickerRow" class="mt-2 hidden">
+        <label class="text-xs text-slate-500">Scheduled date</label>
+        <input
+          type="date"
+          class="w-full border rounded px-3 py-2"
+          name="scheduled_date"
+          id="scheduled_date_input"
+          value="{{ deal.scheduled_date.isoformat() if deal and deal.scheduled_date else '' }}"
+        >
+      </div>
     </div>
 
     <div>
@@ -242,6 +253,76 @@
             }
             // keep live calc in sync
             if (typeof window.__ct_calc_live_comm === 'function') window.__ct_calc_live_comm();
+          });
+        }
+      }
+
+      // Scheduled status => date picker + show "Scheduled M/D" in the dropdown.
+      {
+        const status = document.getElementById('status_select');
+        const wrap = document.getElementById('scheduledPickerRow');
+        const input = document.getElementById('scheduled_date_input');
+
+        if (status && wrap && input) {
+          const scheduledOpt = Array.from(status.options).find(o => o.value === 'Scheduled');
+          const fmtMD = (iso) => {
+            if (!iso) return '';
+            const d = new Date(iso + 'T00:00:00');
+            const m = d.getMonth() + 1;
+            const day = d.getDate();
+            return `${m}/${day}`;
+          };
+
+          const updateLabel = () => {
+            if (!scheduledOpt) return;
+            const md = fmtMD(input.value);
+            scheduledOpt.text = md ? `Scheduled ${md}` : 'Scheduled';
+          };
+
+          const show = (autoOpen=false) => {
+            wrap.classList.remove('hidden');
+            updateLabel();
+            if (autoOpen) {
+              setTimeout(() => {
+                try {
+                  if (typeof input.showPicker === 'function') input.showPicker();
+                  else input.focus();
+                } catch (_) {
+                  input.focus();
+                }
+              }, 50);
+            }
+          };
+
+          const hide = (clear=false) => {
+            wrap.classList.add('hidden');
+            if (clear) input.value = '';
+            updateLabel();
+          };
+
+          // init
+          if (status.value === 'Scheduled') {
+            show(false);
+          } else {
+            hide(false);
+          }
+
+          updateLabel();
+
+          status.addEventListener('change', () => {
+            if (status.value === 'Scheduled') {
+              // default to today so the label has something, then let user pick
+              if (!input.value) {
+                input.value = new Date().toISOString().slice(0, 10);
+              }
+              show(true);
+            } else {
+              hide(true);
+            }
+          });
+
+          input.addEventListener('change', () => {
+            updateLabel();
           });
         }
       }

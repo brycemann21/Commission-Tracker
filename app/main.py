@@ -117,6 +117,21 @@ async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+        # Lightweight schema migration (SQLite/Postgres): add scheduled_date if missing.
+        # create_all() won't add new columns to existing tables.
+        try:
+            await conn.exec_driver_sql(
+                "ALTER TABLE deals ADD COLUMN scheduled_date DATE"
+            )
+        except Exception:
+            # Column likely already exists (or backend requires IF NOT EXISTS).
+            try:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE deals ADD COLUMN IF NOT EXISTS scheduled_date DATE"
+                )
+            except Exception:
+                pass
+
     # seed settings if empty
     async with SessionLocal() as session:
         res = await session.execute(select(Settings).limit(1))
@@ -501,6 +516,7 @@ async def deal_save(
     deal_id: int | None = Form(default=None),
     sold_date: str | None = Form(default=None),
     delivered_date: str | None = Form(default=None),  # legacy (no longer shown on form)
+    scheduled_date: str | None = Form(default=None),
     status: str = Form(default="Pending"),
     tag: str = Form(default=""),
     customer: str = Form(default=""),
@@ -545,6 +561,15 @@ async def deal_save(
         delivered = parse_date(delivered_date)
     pay = parse_date(pay_date)
 
+    sched = parse_date(scheduled_date)
+    if (status or "").strip() == "Scheduled" and sched is None:
+        # If user flips to Scheduled but doesn't pick a date, default to today.
+        sched = today()
+
+    # If not Scheduled, clear scheduled date.
+    if (status or "").strip() != "Scheduled":
+        sched = None
+
 
     # If marked paid but no pay date provided, default to today
     if bool(is_paid) and pay is None:
@@ -577,6 +602,7 @@ async def deal_save(
     deal_in = DealIn(
         sold_date=sold,
         delivered_date=delivered,
+        scheduled_date=sched,
         status=status,
         tag=(tag or "").strip(),
         customer=customer.strip(),
