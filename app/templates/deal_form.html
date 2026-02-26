@@ -137,116 +137,7 @@
     </div>
   </div>
 
-  <script>
-    // Spot => Delivered today, and also flip Status to Delivered for you.
-    (function () {
-      const spot = document.querySelector('input[name="spot_sold"]');
-      const status = document.querySelector('select[name="status"]');
-      if (!spot || !status) return;
 
-      spot.addEventListener('change', () => {
-        if (spot.checked) {
-          status.value = 'Delivered';
-        } else {
-          // If it was auto-set, kick it back to Pending.
-          if (status.value === 'Delivered') status.value = 'Pending';
-        }
-      });
-    })();
-  </script>
-
-  <script>
-    // Live commission calculator (mirrors app/payplan.py)
-    (function () {
-      const SETTINGS = {
-        unit_le: {{ settings.unit_comm_discount_le_200 or 0 }},
-        unit_gt: {{ settings.unit_comm_discount_gt_200 or 0 }},
-        permaplate: {{ settings.permaplate or 0 }},
-        nitro_fill: {{ settings.nitro_fill or 0 }},
-        pulse: {{ settings.pulse or 0 }},
-        finance_non_subvented: {{ settings.finance_non_subvented or 0 }},
-        warranty: {{ settings.warranty or 0 }},
-        tire_wheel: {{ settings.tire_wheel or 0 }},
-      };
-
-      const fmt = (n) => {
-        const v = Number.isFinite(n) ? n : 0;
-        return '$' + Math.round(v).toLocaleString();
-      };
-
-      const $ = (sel) => document.querySelector(sel);
-
-      const els = {
-        customer: $('input[name="customer"]'),
-        discount: $('select[name="discount_gt_200"]'),
-        hold: $('input[name="hold_amount"]'),
-        dealType: $('select[name="deal_type"]'),
-        permaplate: $('input[name="permaplate"]'),
-        nitro: $('input[name="nitro_fill"]'),
-        pulse: $('input[name="pulse"]'),
-        warranty: $('input[name="warranty"]'),
-        tire: $('input[name="tire_wheel"]'),
-
-        outUnit: $('#lc_unit'),
-        outAddons: $('#lc_addons'),
-        outHold: $('#lc_hold'),
-        outTotal: $('#lc_total'),
-        hint: $('#lc_hint'),
-      };
-
-      function calc() {
-        const customer = (els.customer?.value || '').trim();
-        if (!customer) {
-          els.outUnit.textContent = '$0';
-          els.outAddons.textContent = '$0';
-          els.outHold.textContent = '$0';
-          els.outTotal.textContent = '$0';
-          if (els.hint) els.hint.textContent = 'Enter a customer name to see totals.';
-          return;
-        }
-
-        const discYes = (els.discount?.value || 'No').toLowerCase() === 'yes';
-        const unit = discYes ? SETTINGS.unit_gt : SETTINGS.unit_le;
-
-        const dt = (els.dealType?.value || '').trim();
-        const autoFinNonSub = (dt === 'Finance');
-
-        let addons = 0;
-        if (els.permaplate?.checked) addons += SETTINGS.permaplate;
-        if (els.nitro?.checked) addons += SETTINGS.nitro_fill;
-        if (els.pulse?.checked) addons += SETTINGS.pulse;
-        if (autoFinNonSub) addons += SETTINGS.finance_non_subvented;
-        if (els.warranty?.checked) addons += SETTINGS.warranty;
-        if (els.tire?.checked) addons += SETTINGS.tire_wheel;
-
-        const holdAmt = parseFloat(els.hold?.value || '0') || 0;
-        const holdComm = Math.floor(holdAmt / 1000) * 100;
-
-        const total = unit + addons + holdComm;
-
-        els.outUnit.textContent = fmt(unit);
-        els.outAddons.textContent = fmt(addons);
-        els.outHold.textContent = fmt(holdComm);
-        els.outTotal.textContent = fmt(total);
-
-        if (els.hint) {
-          els.hint.textContent = autoFinNonSub ? 'Includes Finance (Non-Subvented) automatically.' : '';
-        }
-      }
-
-      const watch = [
-        els.customer, els.discount, els.hold, els.dealType,
-        els.permaplate, els.nitro, els.pulse, els.warranty, els.tire,
-      ].filter(Boolean);
-
-      watch.forEach((el) => {
-        el.addEventListener('input', calc);
-        el.addEventListener('change', calc);
-      });
-
-      calc();
-    })();
-  </script>
 
   <div class="mt-5">
     <div class="font-bold mb-2">Add-ons (1/0)</div>
@@ -310,5 +201,125 @@
       </div>
     </div>
   </div>
+
+  <script>
+    // New Deal screen helpers
+    document.addEventListener('DOMContentLoaded', () => {
+      // Spot => Delivered today, and also flip Status to Delivered for you.
+      {
+        const spot = document.querySelector('input[name="spot_sold"]');
+        const status = document.querySelector('select[name="status"]');
+        if (spot && status) {
+          spot.addEventListener('change', () => {
+            if (spot.checked) {
+              status.value = 'Delivered';
+            } else {
+              // If it was auto-set, kick it back to Pending.
+              if (status.value === 'Delivered') status.value = 'Pending';
+            }
+            // keep live calc in sync
+            if (typeof window.__ct_calc_live_comm === 'function') window.__ct_calc_live_comm();
+          });
+        }
+      }
+
+      // Live commission calculator (mirrors app/payplan.py)
+      {
+        const SETTINGS = {
+          unit_le: {{ settings.unit_comm_discount_le_200 or 0 }},
+          unit_gt: {{ settings.unit_comm_discount_gt_200 or 0 }},
+          permaplate: {{ settings.permaplate or 0 }},
+          nitro_fill: {{ settings.nitro_fill or 0 }},
+          pulse: {{ settings.pulse or 0 }},
+          finance_non_subvented: {{ settings.finance_non_subvented or 0 }},
+          warranty: {{ settings.warranty or 0 }},
+          tire_wheel: {{ settings.tire_wheel or 0 }},
+        };
+
+        const fmt = (n) => {
+          const v = Number.isFinite(n) ? n : 0;
+          return '$' + Math.round(v).toLocaleString();
+        };
+
+        const $ = (sel) => document.querySelector(sel);
+
+        const els = {
+          customer: $('input[name="customer"]'),
+          discount: $('select[name="discount_gt_200"]'),
+          hold: $('input[name="hold_amount"]'),
+          dealType: $('select[name="deal_type"]'),
+          permaplate: $('input[name="permaplate"]'),
+          nitro: $('input[name="nitro_fill"]'),
+          pulse: $('input[name="pulse"]'),
+          warranty: $('input[name="warranty"]'),
+          tire: $('input[name="tire_wheel"]'),
+
+          outUnit: $('#lc_unit'),
+          outAddons: $('#lc_addons'),
+          outHold: $('#lc_hold'),
+          outTotal: $('#lc_total'),
+          hint: $('#lc_hint'),
+        };
+
+        function calc() {
+          // If the live box isn't on the page, don't do anything.
+          if (!els.outUnit || !els.outAddons || !els.outHold || !els.outTotal) return;
+
+          const customer = (els.customer?.value || '').trim();
+          if (!customer) {
+            els.outUnit.textContent = '$0';
+            els.outAddons.textContent = '$0';
+            els.outHold.textContent = '$0';
+            els.outTotal.textContent = '$0';
+            if (els.hint) els.hint.textContent = 'Enter a customer name to see totals.';
+            return;
+          }
+
+          const discYes = (els.discount?.value || 'No').toLowerCase() === 'yes';
+          const unit = discYes ? SETTINGS.unit_gt : SETTINGS.unit_le;
+
+          const dt = (els.dealType?.value || '').trim();
+          const autoFinNonSub = (dt === 'Finance');
+
+          let addons = 0;
+          if (els.permaplate?.checked) addons += SETTINGS.permaplate;
+          if (els.nitro?.checked) addons += SETTINGS.nitro_fill;
+          if (els.pulse?.checked) addons += SETTINGS.pulse;
+          if (autoFinNonSub) addons += SETTINGS.finance_non_subvented;
+          if (els.warranty?.checked) addons += SETTINGS.warranty;
+          if (els.tire?.checked) addons += SETTINGS.tire_wheel;
+
+          const holdAmt = parseFloat(els.hold?.value || '0') || 0;
+          const holdComm = Math.floor(holdAmt / 1000) * 100;
+
+          const total = unit + addons + holdComm;
+
+          els.outUnit.textContent = fmt(unit);
+          els.outAddons.textContent = fmt(addons);
+          els.outHold.textContent = fmt(holdComm);
+          els.outTotal.textContent = fmt(total);
+
+          if (els.hint) {
+            els.hint.textContent = autoFinNonSub ? 'Includes Finance (Non-Subvented) automatically.' : '';
+          }
+        }
+
+        // expose so other handlers can trigger recalcs
+        window.__ct_calc_live_comm = calc;
+
+        const watch = [
+          els.customer, els.discount, els.hold, els.dealType,
+          els.permaplate, els.nitro, els.pulse, els.warranty, els.tire,
+        ].filter(Boolean);
+
+        watch.forEach((el) => {
+          el.addEventListener('input', calc);
+          el.addEventListener('change', calc);
+        });
+
+        calc();
+      }
+    });
+  </script>
 </form>
 {% endblock %}
