@@ -49,6 +49,18 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 # -----------------------------
 app = FastAPI(title="Commission Tracker")
 templates = Jinja2Templates(directory="app/templates")
+
+# Jinja helpers
+def _md_date(value):
+    """Format a date as M/D (e.g., 3/16)."""
+    try:
+        if value is None:
+            return ""
+        return f"{value.month}/{value.day}"
+    except Exception:
+        return ""
+
+templates.env.filters["md"] = _md_date
 templates.env.globals["today"] = today
 templates.env.globals["current_month"] = lambda: today().strftime("%Y-%m")
 templates.env.globals["today"] = today

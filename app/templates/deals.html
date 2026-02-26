@@ -143,6 +143,7 @@
             data-sold="{{ d.sold_date or '' }}"
             data-delivered="{{ d.delivered_date or '' }}"
             data-status="{{ d.status|e }}"
+            data-scheduled="{{ (d.scheduled_date|md) if d.scheduled_date else '' }}"
             data-tag="{{ (d.tag or '')|e }}"
             data-stock="{{ d.stock_num|e }}"
             data-model="{{ d.model|e }}"
@@ -169,7 +170,9 @@
         <td class="p-2">{{ d.deal_type or "" }}</td>
         <td class="p-2">{{ d.new_used }}</td>
         <td class="p-2">{{ d.notes or "" }}</td>
-        <td class="p-2">{{ d.status }}</td>
+        <td class="p-2">
+          {{ d.status }}{% if d.status == 'Scheduled' and d.scheduled_date %} {{ d.scheduled_date|md }}{% endif %}
+        </td>
         <td class="p-2">{{ d.tag or "" }}</td>
         <td class="p-2 text-right">
           <form method="post" action="/deals/{{ d.id }}/toggle_paid" class="inline">
@@ -241,7 +244,11 @@
       els.title.textContent = d.customer || 'Deal';
       els.sold.textContent = d.sold || '—';
       els.del.textContent = d.delivered || '—';
-      els.status.textContent = d.status || '—';
+      if ((d.status || '') === 'Scheduled' && d.scheduled) {
+        els.status.textContent = `Scheduled ${d.scheduled}`;
+      } else {
+        els.status.textContent = d.status || '—';
+      }
       els.tag.textContent = d.tag || '—';
       els.stock.textContent = d.stock || '—';
       els.model.textContent = d.model || '—';
