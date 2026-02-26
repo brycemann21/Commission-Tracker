@@ -1,5 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
+{% if mtd %}
+  <div class="mb-3 rounded border border-slate-200 bg-white px-4 py-3">
+    <div class="text-xs text-slate-500">This month so far ({{ mtd.month_label }})</div>
+    <div class="mt-1 flex flex-wrap gap-x-6 gap-y-2 text-sm">
+      <div><span class="text-slate-500">Cars:</span> <b>{{ mtd.units }}</b></div>
+      <div><span class="text-slate-500">Gross Comm:</span> <b>${{ "{:,.0f}".format(mtd.comm or 0) }}</b></div>
+      <div><span class="text-slate-500">Avg Per Copy:</span> <b>${{ "{:,.0f}".format(mtd.avg or 0) }}</b></div>
+    </div>
+  </div>
+{% endif %}
+
 <h1 class="text-xl font-bold mb-1">{{ "Edit Deal" if deal else "New Deal" }}</h1>
 <div class="text-sm text-slate-500 mb-4">
   Matches your Excel payplan: Unit commission + add-ons + trade hold commission.
@@ -7,6 +18,9 @@
 
 <form class="bg-white rounded border border-slate-200 p-4" method="post" action="/deals/save">
   {% if deal %}<input type="hidden" name="deal_id" value="{{ deal.id }}">{% endif %}
+
+  <div class="grid md:grid-cols-4 gap-4">
+    <div class="md:col-span-3">
 
   <div class="grid md:grid-cols-3 gap-4">
     <div>
@@ -141,6 +155,99 @@
     })();
   </script>
 
+  <script>
+    // Live commission calculator (mirrors app/payplan.py)
+    (function () {
+      const SETTINGS = {
+        unit_le: {{ settings.unit_comm_discount_le_200 or 0 }},
+        unit_gt: {{ settings.unit_comm_discount_gt_200 or 0 }},
+        permaplate: {{ settings.permaplate or 0 }},
+        nitro_fill: {{ settings.nitro_fill or 0 }},
+        pulse: {{ settings.pulse or 0 }},
+        finance_non_subvented: {{ settings.finance_non_subvented or 0 }},
+        warranty: {{ settings.warranty or 0 }},
+        tire_wheel: {{ settings.tire_wheel or 0 }},
+      };
+
+      const fmt = (n) => {
+        const v = Number.isFinite(n) ? n : 0;
+        return '$' + Math.round(v).toLocaleString();
+      };
+
+      const $ = (sel) => document.querySelector(sel);
+
+      const els = {
+        customer: $('input[name="customer"]'),
+        discount: $('select[name="discount_gt_200"]'),
+        hold: $('input[name="hold_amount"]'),
+        dealType: $('select[name="deal_type"]'),
+        permaplate: $('input[name="permaplate"]'),
+        nitro: $('input[name="nitro_fill"]'),
+        pulse: $('input[name="pulse"]'),
+        warranty: $('input[name="warranty"]'),
+        tire: $('input[name="tire_wheel"]'),
+
+        outUnit: $('#lc_unit'),
+        outAddons: $('#lc_addons'),
+        outHold: $('#lc_hold'),
+        outTotal: $('#lc_total'),
+        hint: $('#lc_hint'),
+      };
+
+      function calc() {
+        const customer = (els.customer?.value || '').trim();
+        if (!customer) {
+          els.outUnit.textContent = '$0';
+          els.outAddons.textContent = '$0';
+          els.outHold.textContent = '$0';
+          els.outTotal.textContent = '$0';
+          if (els.hint) els.hint.textContent = 'Enter a customer name to see totals.';
+          return;
+        }
+
+        const discYes = (els.discount?.value || 'No').toLowerCase() === 'yes';
+        const unit = discYes ? SETTINGS.unit_gt : SETTINGS.unit_le;
+
+        const dt = (els.dealType?.value || '').trim();
+        const autoFinNonSub = (dt === 'Finance');
+
+        let addons = 0;
+        if (els.permaplate?.checked) addons += SETTINGS.permaplate;
+        if (els.nitro?.checked) addons += SETTINGS.nitro_fill;
+        if (els.pulse?.checked) addons += SETTINGS.pulse;
+        if (autoFinNonSub) addons += SETTINGS.finance_non_subvented;
+        if (els.warranty?.checked) addons += SETTINGS.warranty;
+        if (els.tire?.checked) addons += SETTINGS.tire_wheel;
+
+        const holdAmt = parseFloat(els.hold?.value || '0') || 0;
+        const holdComm = Math.floor(holdAmt / 1000) * 100;
+
+        const total = unit + addons + holdComm;
+
+        els.outUnit.textContent = fmt(unit);
+        els.outAddons.textContent = fmt(addons);
+        els.outHold.textContent = fmt(holdComm);
+        els.outTotal.textContent = fmt(total);
+
+        if (els.hint) {
+          els.hint.textContent = autoFinNonSub ? 'Includes Finance (Non-Subvented) automatically.' : '';
+        }
+      }
+
+      const watch = [
+        els.customer, els.discount, els.hold, els.dealType,
+        els.permaplate, els.nitro, els.pulse, els.warranty, els.tire,
+      ].filter(Boolean);
+
+      watch.forEach((el) => {
+        el.addEventListener('input', calc);
+        el.addEventListener('change', calc);
+      });
+
+      calc();
+    })();
+  </script>
+
   <div class="mt-5">
     <div class="font-bold mb-2">Add-ons (1/0)</div>
     <div class="grid md:grid-cols-3 gap-3">
@@ -180,5 +287,28 @@
       = <b>${{ "{:,.0f}".format(deal.total_deal_comm or 0) }}</b>
     </div>
   {% endif %}
+
+    </div>
+
+    <!-- Live commission box -->
+    <div>
+      <div class="sticky top-4 rounded border border-slate-200 bg-slate-50 p-3">
+        <div class="text-sm font-bold">Live Commission</div>
+        <div class="text-xs text-slate-500">Updates as you change fields</div>
+
+        <div class="mt-3 space-y-2 text-sm">
+          <div class="flex justify-between"><span class="text-slate-600">Unit</span><b id="lc_unit">$0</b></div>
+          <div class="flex justify-between"><span class="text-slate-600">Add-ons</span><b id="lc_addons">$0</b></div>
+          <div class="flex justify-between"><span class="text-slate-600">Money Held Comm</span><b id="lc_hold">$0</b></div>
+          <div class="border-t border-slate-200 pt-2 flex justify-between text-base">
+            <span class="text-slate-700 font-bold">Total</span>
+            <span class="font-bold" id="lc_total">$0</span>
+          </div>
+        </div>
+
+        <div class="mt-3 text-xs text-slate-500" id="lc_hint"></div>
+      </div>
+    </div>
+  </div>
 </form>
 {% endblock %}

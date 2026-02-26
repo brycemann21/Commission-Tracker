@@ -330,10 +330,34 @@ async def deals_list(
 @app.get("/deals/new", response_class=HTMLResponse)
 async def deal_new(request: Request, db: AsyncSession = Depends(get_db)):
     settings = (await db.execute(select(Settings).limit(1))).scalar_one()
+
+    # This-month-so-far strip (current month, Delivered only)
+    start_m, end_m = month_bounds(today())
+    delivered_mtd = (
+        await db.execute(
+            select(Deal).where(
+                Deal.status == "Delivered",
+                Deal.delivered_date.is_not(None),
+                Deal.delivered_date >= start_m,
+                Deal.delivered_date < end_m,
+            )
+        )
+    ).scalars().all()
+
+    units_mtd = len(delivered_mtd)
+    comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd)
+    avg_per_copy = (comm_mtd / units_mtd) if units_mtd else 0.0
+
     return templates.TemplateResponse("deal_form.html", {
         "request": request,
         "deal": None,
         "settings": settings,
+        "mtd": {
+            "units": units_mtd,
+            "comm": comm_mtd,
+            "avg": avg_per_copy,
+            "month_label": today().strftime("%B %Y"),
+        },
     })
 
 
@@ -341,10 +365,34 @@ async def deal_new(request: Request, db: AsyncSession = Depends(get_db)):
 async def deal_edit(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
     settings = (await db.execute(select(Settings).limit(1))).scalar_one()
+
+    # This-month-so-far strip (current month, Delivered only)
+    start_m, end_m = month_bounds(today())
+    delivered_mtd = (
+        await db.execute(
+            select(Deal).where(
+                Deal.status == "Delivered",
+                Deal.delivered_date.is_not(None),
+                Deal.delivered_date >= start_m,
+                Deal.delivered_date < end_m,
+            )
+        )
+    ).scalars().all()
+
+    units_mtd = len(delivered_mtd)
+    comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd)
+    avg_per_copy = (comm_mtd / units_mtd) if units_mtd else 0.0
+
     return templates.TemplateResponse("deal_form.html", {
         "request": request,
         "deal": deal,
         "settings": settings,
+        "mtd": {
+            "units": units_mtd,
+            "comm": comm_mtd,
+            "avg": avg_per_copy,
+            "month_label": today().strftime("%B %Y"),
+        },
     })
 
 
