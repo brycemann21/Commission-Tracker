@@ -346,6 +346,7 @@ async def dashboard(
         # Pending
         "pending": pending,
         "pending_deals": pending_deals[:15],
+        "pending_deals_all": pending_deals,
 
         # Trend
         "year": selected_year,
@@ -722,44 +723,6 @@ async def deal_delete(deal_id: int, db: AsyncSession = Depends(get_db)):
     await db.delete(deal)
     await db.commit()
     return RedirectResponse(url="/deals", status_code=303)
-
-
-# -----------------------------
-# Pending deals (sort/prioritize)
-# -----------------------------
-@app.get("/pending", response_class=HTMLResponse)
-async def pending_view(
-    request: Request,
-    q: str | None = None,
-    older_than: int | None = None,  # days
-    db: AsyncSession = Depends(get_db),
-):
-    stmt = select(Deal).where(Deal.status == "Pending")
-
-    if q and q.strip():
-        like = f"%{q.strip()}%"
-        stmt = stmt.where(
-            (Deal.customer.ilike(like)) |
-            (Deal.stock_num.ilike(like)) |
-            (Deal.model.ilike(like))
-        )
-
-    # Oldest sold date first (best chase list)
-    stmt = stmt.order_by(Deal.sold_date.asc().nullslast())
-
-    deals = (await db.execute(stmt)).scalars().all()
-
-    if older_than is not None:
-        cutoff = today() - timedelta(days=int(older_than))
-        deals = [d for d in deals if d.sold_date and d.sold_date <= cutoff]
-
-    return templates.TemplateResponse("pending.html", {
-        "request": request,
-        "deals": deals,
-        "q": q or "",
-        "older_than": older_than or "",
-        "today": today(),
-    })
 
 
 # -----------------------------

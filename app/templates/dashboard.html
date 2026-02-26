@@ -149,7 +149,7 @@
 
 <div class="mt-6 flex items-center justify-between">
   <h2 class="text-lg font-bold">Pending Deals</h2>
-  <a class="text-sm underline" href="/pending">View all</a>
+  <button id="openPendingModal" type="button" class="text-sm underline">View all</button>
 </div>
 
 <div class="mt-2 overflow-x-auto bg-white rounded border border-slate-200">
@@ -183,13 +183,13 @@
           <td class="p-2 text-right whitespace-nowrap">
             <a class="underline mr-2" href="/deals/{{ d.id }}/edit">Edit</a>
             <form method="post" action="/deals/{{ d.id }}/mark_delivered" class="inline">
-              <input type="hidden" name="redirect" value="/?month={{ month_str }}">
+              <input type="hidden" name="redirect" value="/?month={{ month }}">
               <button class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded mr-1" type="submit">
                 Delivered
               </button>
             </form>
             <form method="post" action="/deals/{{ d.id }}/mark_dead" class="inline">
-              <input type="hidden" name="redirect" value="/?month={{ month_str }}">
+              <input type="hidden" name="redirect" value="/?month={{ month }}">
               <button class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded" type="submit">
                 Dead
               </button>
@@ -205,5 +205,101 @@
     </tbody>
   </table>
 </div>
+
+<!-- View All Pending Modal -->
+<div id="pendingModal" class="fixed inset-0 z-50 hidden">
+  <div class="absolute inset-0 bg-black/50" id="pendingModalBackdrop"></div>
+  <div class="absolute inset-0 flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-6xl rounded-lg shadow-lg overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-4 border-b">
+        <div>
+          <div class="text-sm text-slate-500">Pending Deals</div>
+          <div class="text-lg font-semibold">All Pending</div>
+        </div>
+        <button type="button" id="closePendingModal" class="text-slate-500 hover:text-slate-900 text-2xl leading-none">&times;</button>
+      </div>
+
+      <div class="p-4 overflow-auto" style="max-height: 75vh;">
+        <div class="overflow-x-auto bg-white rounded border border-slate-200">
+          <table class="min-w-full text-sm">
+            <thead class="bg-slate-900 text-white">
+              <tr>
+                <th class="text-left p-2">Sold Date</th>
+                <th class="text-left p-2">Customer</th>
+                <th class="text-left p-2">Tag</th>
+                <th class="text-left p-2">Stock #</th>
+                <th class="text-left p-2">Model</th>
+                <th class="text-left p-2">Notes</th>
+                <th class="p-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for d in pending_deals_all %}
+                <tr class="border-t
+                  {% if d.days_pending >= 7 %}
+                    bg-rose-100
+                  {% elif d.days_pending >= 3 %}
+                    bg-amber-100
+                  {% endif %}
+                ">
+                  <td class="p-2">{{ d.sold_date or "" }}</td>
+                  <td class="p-2">{{ d.customer }}</td>
+                  <td class="p-2">{{ d.tag }}</td>
+                  <td class="p-2">{{ d.stock_num }}</td>
+                  <td class="p-2">{{ d.model }}</td>
+                  <td class="p-2">{{ d.notes or "" }}</td>
+                  <td class="p-2 text-right whitespace-nowrap">
+                    <a class="underline mr-2" href="/deals/{{ d.id }}/edit">Edit</a>
+                    <form method="post" action="/deals/{{ d.id }}/mark_delivered" class="inline">
+                      <input type="hidden" name="redirect" value="/?month={{ month }}">
+                      <button class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded mr-1" type="submit">Delivered</button>
+                    </form>
+                    <form method="post" action="/deals/{{ d.id }}/mark_dead" class="inline">
+                      <input type="hidden" name="redirect" value="/?month={{ month }}">
+                      <button class="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded" type="submit">Dead</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+              {% if pending_deals_all|length == 0 %}
+                <tr class="border-t">
+                  <td class="p-3 text-slate-500" colspan="7">No pending deals.</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    const openBtn = document.getElementById('openPendingModal');
+    const modal = document.getElementById('pendingModal');
+    const closeBtn = document.getElementById('closePendingModal');
+    const backdrop = document.getElementById('pendingModalBackdrop');
+
+    function open() {
+      if (!modal) return;
+      modal.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function close() {
+      if (!modal) return;
+      modal.classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    if (openBtn) openBtn.addEventListener('click', open);
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    if (backdrop) backdrop.addEventListener('click', close);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') close();
+    });
+  })();
+</script>
 
 {% endblock %}
