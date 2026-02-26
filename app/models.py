@@ -31,7 +31,9 @@ class Deal(Base):
     stock_num: Mapped[str] = mapped_column(String(40), default="")
     model: Mapped[str] = mapped_column(String(120), default="")
     new_used: Mapped[str] = mapped_column(String(16), default="")
-    deal_type: Mapped[str] = mapped_column(String(8), default="")
+    # Used to store values like "Finance", "Cash/Sub-Vented", "Lease".
+    # Keep this wide enough for those strings.
+    deal_type: Mapped[str] = mapped_column(String(32), default="")
     business_manager: Mapped[str] = mapped_column(String(80), default="")
 
     spot_sold: Mapped[bool] = mapped_column(Boolean, default=False)

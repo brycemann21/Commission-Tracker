@@ -416,8 +416,26 @@ async def deal_new(request: Request, db: AsyncSession = Depends(get_db)):
 
 @app.get("/deals/{deal_id}/edit", response_class=HTMLResponse)
 async def deal_edit(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
-    settings = (await db.execute(select(Settings).limit(1))).scalar_one()
+    # Be defensive here: if a deal id is stale/missing, don't hard-crash the app.
+    # (scalar_one() raises NoResultFound -> 500)
+    try:
+        deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one_or_none()
+        if deal is None:
+            return RedirectResponse(url="/deals", status_code=303)
+
+        settings = (await db.execute(select(Settings).limit(1))).scalar_one_or_none()
+        if settings is None:
+            # Settings should always exist (seeded on startup), but just in case
+            return HTMLResponse(
+                "<h1>Missing settings</h1><p>Settings row not found. Restart the app to re-seed.</p>",
+                status_code=500,
+            )
+    except Exception as e:
+        # Show a helpful error page instead of a blank 500.
+        return HTMLResponse(
+            f"<h1>Internal Server Error</h1><p>Failed to open Edit Deal for id={deal_id}.</p><pre>{str(e)}</pre>",
+            status_code=500,
+        )
 
     # This-month-so-far strip (current month, Delivered only)
     start_m, end_m = month_bounds(today())
