@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: commission-tracker
-    env: python
-    plan: free
-    pythonVersion: 3.12.3
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
