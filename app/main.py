@@ -61,6 +61,12 @@ engine = create_async_engine(
     connect_args=connect_args,
     poolclass=NullPool,
 )
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+SessionLocal = async_sessionmaker(
+    engine,
+    expire_on_commit=False
+)
 
 
 # -----------------------------
