@@ -12,6 +12,36 @@
 </div>
 {% endif %}
 
+{# ── Today's Deliveries ── #}
+{% if todays_deliveries %}
+<div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+  <div class="flex items-center gap-2 mb-2">
+    <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+    <span class="text-sm font-bold text-blue-800">Today's Deliveries ({{ todays_deliveries|length }})</span>
+  </div>
+  <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+    {% for d in todays_deliveries %}
+      <div class="flex items-center gap-3 bg-white rounded-lg px-3 py-2 border border-blue-100">
+        <div class="flex-1 min-w-0">
+          <div class="font-medium text-sm text-slate-900 truncate">{{ d.customer }}</div>
+          <div class="text-xs text-slate-500">#{{ d.stock_num }}{% if d.model %} · {{ d.model }}{% endif %}{% if d.business_manager %} · {{ d.business_manager }}{% endif %}</div>
+        </div>
+        {% if d.on_delivery_board and d.gas_ready and d.inspection_ready and d.insurance_ready %}
+          <span class="shrink-0 text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">READY</span>
+        {% elif d.on_delivery_board %}
+          <span class="shrink-0 text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">PREP</span>
+        {% else %}
+          <a href="/delivery/{{ d.id }}/push" class="shrink-0 text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full hover:bg-blue-200 transition"
+             onclick="event.preventDefault(); fetch('/delivery/{{ d.id }}/push', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'}}).then(()=>location.reload());">
+            → Board
+          </a>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 {# ── Month/Year Selector ── #}
 <div class="mb-4 bg-white rounded-lg border border-slate-200 p-4">
   <div class="flex flex-wrap items-end justify-between gap-3">

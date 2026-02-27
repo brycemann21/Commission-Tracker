@@ -7,7 +7,7 @@ import calendar
 import traceback
 from datetime import date, datetime, timedelta
 
-from fastapi import FastAPI, Request, Form, Depends
+from fastapi import FastAPI, Request, Form, Depends, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -454,6 +454,13 @@ async def dashboard(
         "has_custom": goal_row is not None,
     }
 
+    # --- Today's deliveries (scheduled for today or on delivery board) ---
+    todays_deliveries = [
+        d for d in deals
+        if d.status not in ("Delivered", "Dead")
+        and d.scheduled_date == today_date
+    ]
+
     # --- Year selector ---
     years = set([today_date.year])
     for d in deals:
@@ -514,6 +521,9 @@ async def dashboard(
 
         # New: milestones
         "milestones": milestones,
+
+        # New: today's deliveries
+        "todays_deliveries": todays_deliveries,
     })
 
     resp.set_cookie("ct_year", str(selected_year), httponly=False, samesite="lax")
@@ -1052,6 +1062,155 @@ async def export_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+# =============================================
+# CSV Import (Bulk Upload)
+# =============================================
+@app.get("/import", response_class=HTMLResponse)
+async def import_page(request: Request):
+    return templates.TemplateResponse("import.html", {
+        "request": request,
+        "result": None,
+    })
+
+
+@app.post("/import", response_class=HTMLResponse)
+async def import_csv(
+    request: Request,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    settings = (await db.execute(select(Settings).limit(1))).scalar_one()
+
+    content = await file.read()
+    text = content.decode("utf-8-sig")  # handles BOM from Excel
+    reader = csv.DictReader(io.StringIO(text))
+
+    imported = 0
+    skipped = 0
+    errors = []
+
+    for i, row in enumerate(reader, start=2):  # row 2 = first data row
+        try:
+            customer = (row.get("Customer") or row.get("customer") or "").strip()
+            if not customer:
+                skipped += 1
+                continue
+
+            sold = parse_date(row.get("Sold Date") or row.get("sold_date") or "")
+            delivered = parse_date(row.get("Delivered Date") or row.get("delivered_date") or "")
+            sched = parse_date(row.get("Scheduled Date") or row.get("scheduled_date") or "")
+
+            status_raw = (row.get("Status") or row.get("status") or "Pending").strip()
+            if status_raw.lower() in ("delivered", "d"):
+                status_val = "Delivered"
+            elif status_raw.lower() in ("dead", "x"):
+                status_val = "Dead"
+            elif status_raw.lower() in ("scheduled", "sched"):
+                status_val = "Scheduled"
+            else:
+                status_val = "Pending"
+
+            nu = (row.get("New/Used") or row.get("new_used") or "").strip()
+            if nu.lower() in ("n", "new"):
+                nu = "New"
+            elif nu.lower() in ("u", "used"):
+                nu = "Used"
+
+            dt = (row.get("F/C/L") or row.get("deal_type") or "").strip()
+            if dt.lower() in ("f", "finance"):
+                dt = "Finance"
+            elif dt.lower() in ("c", "cash", "cash/sub-vented"):
+                dt = "Cash/Sub-Vented"
+            elif dt.lower() in ("l", "lease"):
+                dt = "Lease"
+
+            def _yn(val):
+                return (val or "").strip().lower() in ("y", "yes", "1", "true")
+
+            spot = _yn(row.get("Spot") or row.get("spot_sold") or "")
+            disc = "Yes" if _yn(row.get("Discount>200") or row.get("discount_gt_200") or "") else "No"
+            aim = (row.get("Aim") or row.get("aim_presentation") or "X").strip()
+            if aim.lower() in ("y", "yes"):
+                aim = "Yes"
+            elif aim.lower() in ("n", "no"):
+                aim = "No"
+            else:
+                aim = "X"
+
+            permaplate = _yn(row.get("PermaPlate") or row.get("permaplate") or "")
+            nitro = _yn(row.get("Nitro Fill") or row.get("nitro_fill") or "")
+            pulse_v = _yn(row.get("Pulse") or row.get("pulse") or "")
+            finance_ns = _yn(row.get("Finance") or row.get("finance_non_subvented") or "")
+            warranty = _yn(row.get("Warranty") or row.get("warranty") or "")
+            tire = _yn(row.get("Tire&Wheel") or row.get("tire_wheel") or "")
+
+            # Auto-detect finance_non_subvented from deal_type if not explicitly set
+            if not finance_ns and dt in ("Finance", "Lease"):
+                finance_ns = True
+
+            hold = 0.0
+            try:
+                hold = float(row.get("Hold Amount") or row.get("hold_amount") or "0")
+            except ValueError:
+                pass
+
+            pay = parse_date(row.get("Pay Date") or row.get("pay_date") or "")
+            is_paid = _yn(row.get("Paid") or row.get("is_paid") or "")
+
+            deal_in = DealIn(
+                sold_date=sold,
+                delivered_date=delivered,
+                scheduled_date=sched,
+                status=status_val,
+                tag=(row.get("Tag") or row.get("tag") or "").strip(),
+                customer=customer,
+                stock_num=(row.get("Stock #") or row.get("stock_num") or "").strip(),
+                model=(row.get("Model") or row.get("model") or "").strip(),
+                new_used=nu,
+                deal_type=dt,
+                business_manager=(row.get("F&I") or row.get("business_manager") or "").strip(),
+                spot_sold=spot,
+                discount_gt_200=disc,
+                aim_presentation=aim,
+                permaplate=permaplate,
+                nitro_fill=nitro,
+                pulse=pulse_v,
+                finance_non_subvented=finance_ns,
+                warranty=warranty,
+                tire_wheel=tire,
+                hold_amount=hold,
+                notes=(row.get("Notes") or row.get("notes") or "").strip(),
+                pay_date=pay,
+                is_paid=is_paid,
+            )
+
+            unit_comm, addons, trade_hold, total = calc_commission(deal_in, settings)
+
+            deal = Deal(
+                **deal_in.model_dump(),
+                unit_comm=unit_comm,
+                add_ons=addons,
+                trade_hold_comm=trade_hold,
+                total_deal_comm=total,
+            )
+            db.add(deal)
+            imported += 1
+
+        except Exception as e:
+            errors.append(f"Row {i}: {str(e)}")
+
+    await db.commit()
+
+    return templates.TemplateResponse("import.html", {
+        "request": request,
+        "result": {
+            "imported": imported,
+            "skipped": skipped,
+            "errors": errors,
+        },
+    })
 
 
 # =============================================

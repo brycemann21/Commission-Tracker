@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="max-w-3xl">
+  <h1 class="text-xl font-bold mb-1">Import Deals from CSV</h1>
+  <p class="text-sm text-slate-500 mb-6">Upload a CSV or Excel-exported CSV to bulk import deals. Commission will be auto-calculated based on your pay plan.</p>
+
+  {% if result %}
+    <div class="mb-6 rounded-lg border p-4 {{ 'bg-emerald-50 border-emerald-200' if result.imported > 0 else 'bg-amber-50 border-amber-200' }}">
+      <div class="font-semibold {{ 'text-emerald-800' if result.imported > 0 else 'text-amber-800' }}">
+        {% if result.imported > 0 %}
+          ✓ Imported {{ result.imported }} deal{{ 's' if result.imported != 1 else '' }} successfully
+        {% else %}
+          No deals imported
+        {% endif %}
+      </div>
+      {% if result.skipped > 0 %}
+        <div class="text-sm text-slate-600 mt-1">{{ result.skipped }} row{{ 's' if result.skipped != 1 else '' }} skipped (missing customer name)</div>
+      {% endif %}
+      {% if result.errors %}
+        <div class="mt-2 text-sm text-rose-700">
+          <div class="font-medium">Errors:</div>
+          {% for e in result.errors[:10] %}
+            <div class="mt-0.5">{{ e }}</div>
+          {% endfor %}
+          {% if result.errors|length > 10 %}
+            <div class="mt-1 text-slate-500">...and {{ result.errors|length - 10 }} more</div>
+          {% endif %}
+        </div>
+      {% endif %}
+      {% if result.imported > 0 %}
+        <a href="/deals" class="inline-flex items-center gap-1 mt-3 px-4 py-2 rounded bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition">
+          View Deals →
+        </a>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {# Upload form #}
+  <form method="post" action="/import" enctype="multipart/form-data" id="importForm">
+    <div id="dropZone" class="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:border-slate-400 transition cursor-pointer"
+         onclick="document.getElementById('fileInput').click()">
+      <svg class="w-10 h-10 text-slate-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+      <div class="font-medium text-slate-700" id="dropLabel">Drop your CSV file here or click to browse</div>
+      <div class="text-xs text-slate-400 mt-1">Accepts .csv files exported from Excel or Google Sheets</div>
+      <input type="file" name="file" id="fileInput" accept=".csv" class="hidden" required>
+    </div>
+
+    <button type="submit" id="uploadBtn" class="mt-4 w-full px-4 py-3 rounded-lg bg-slate-900 text-white font-medium hover:bg-slate-800 active:bg-slate-700 transition disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+      Upload & Import
+    </button>
+  </form>
+
+  {# Column mapping guide #}
+  <div class="mt-8 bg-white rounded-lg border border-slate-200 p-4">
+    <div class="font-semibold mb-2">Expected CSV Columns</div>
+    <p class="text-xs text-slate-500 mb-3">Your CSV header row should use these column names. Only <b>Customer</b> is required — everything else is optional. Column order doesn't matter.</p>
+
+    <div class="overflow-x-auto">
+      <table class="text-xs w-full">
+        <thead>
+          <tr class="border-b">
+            <th class="text-left py-1.5 pr-4 text-slate-500 font-semibold">Column</th>
+            <th class="text-left py-1.5 pr-4 text-slate-500 font-semibold">Format</th>
+            <th class="text-left py-1.5 text-slate-500 font-semibold">Example</th>
+          </tr>
+        </thead>
+        <tbody class="text-slate-600">
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4 font-medium text-slate-900">Customer *</td><td class="pr-4">Text</td><td>John Smith</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Sold Date</td><td class="pr-4">YYYY-MM-DD or M/D/YYYY</td><td>2026-02-15</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Delivered Date</td><td class="pr-4">YYYY-MM-DD or M/D/YYYY</td><td>2026-02-18</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Scheduled Date</td><td class="pr-4">YYYY-MM-DD or M/D/YYYY</td><td>2026-02-20</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Status</td><td class="pr-4">Pending / Delivered / Dead / Scheduled</td><td>Delivered</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Stock #</td><td class="pr-4">Text</td><td>A12345</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Model</td><td class="pr-4">Text</td><td>2026 Explorer</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">New/Used</td><td class="pr-4">New / Used (or N / U)</td><td>New</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">F/C/L</td><td class="pr-4">Finance / Cash/Sub-Vented / Lease (or F / C / L)</td><td>Finance</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">F&I</td><td class="pr-4">Text (initials)</td><td>RGO</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Tag</td><td class="pr-4">Shop / Title / Inbound / FO</td><td>Shop</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Spot</td><td class="pr-4">Y / N</td><td>N</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Discount>200</td><td class="pr-4">Y / N</td><td>No</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">PermaPlate</td><td class="pr-4">Y / N</td><td>Y</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Nitro Fill</td><td class="pr-4">Y / N</td><td>Y</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Pulse</td><td class="pr-4">Y / N</td><td>Y</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Warranty</td><td class="pr-4">Y / N</td><td>N</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Tire&Wheel</td><td class="pr-4">Y / N</td><td>N</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Aim</td><td class="pr-4">Yes / No / X</td><td>Yes</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Hold Amount</td><td class="pr-4">Number</td><td>3000</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Paid</td><td class="pr-4">Y / N</td><td>Y</td></tr>
+          <tr class="border-b border-slate-100"><td class="py-1.5 pr-4">Pay Date</td><td class="pr-4">YYYY-MM-DD</td><td>2026-02-28</td></tr>
+          <tr><td class="py-1.5 pr-4">Notes</td><td class="pr-4">Text</td><td>Trade-in pending</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-4 p-3 bg-slate-50 rounded-lg text-xs text-slate-500">
+      <b>Tip:</b> Export a deal from this app first using the CSV button on the dashboard — it'll give you a file with the exact headers. Then paste your data under those headers.
+    </div>
+  </div>
+</div>
+
+<script>
+  const fileInput = document.getElementById('fileInput');
+  const dropZone = document.getElementById('dropZone');
+  const dropLabel = document.getElementById('dropLabel');
+  const uploadBtn = document.getElementById('uploadBtn');
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length > 0) {
+      dropLabel.textContent = fileInput.files[0].name;
+      dropZone.classList.add('border-emerald-400', 'bg-emerald-50');
+      dropZone.classList.remove('border-slate-300');
+      uploadBtn.disabled = false;
+    }
+  });
+
+  // Drag & drop
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-blue-400', 'bg-blue-50'); });
+  dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('border-blue-400', 'bg-blue-50'); });
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('border-blue-400', 'bg-blue-50');
+    if (e.dataTransfer.files.length > 0) {
+      fileInput.files = e.dataTransfer.files;
+      fileInput.dispatchEvent(new Event('change'));
+    }
+  });
+</script>
+
+{% endblock %}
