@@ -1,0 +1,487 @@
+{% extends "base.html" %}
+{% block content %}
+{% if mtd and not embed %}
+  <div class="mb-3 rounded border border-slate-200 bg-white px-4 py-3">
+    <div class="text-xs text-slate-500">This month so far ({{ mtd.month_label }})</div>
+    <div class="mt-1 flex flex-wrap gap-x-6 gap-y-2 text-sm">
+      <div><span class="text-slate-500">Cars:</span> <b>{{ mtd.units }}</b></div>
+      <div><span class="text-slate-500">Gross Comm:</span> <b>${{ "{:,.0f}".format(mtd.comm or 0) }}</b></div>
+      <div><span class="text-slate-500">Avg Per Copy:</span> <b>${{ "{:,.0f}".format(mtd.avg or 0) }}</b></div>
+    </div>
+  </div>
+{% endif %}
+
+<h1 class="text-xl font-bold mb-1">{{ "Edit Deal" if deal else "New Deal" }}</h1>
+<div class="text-sm text-slate-500 mb-4">
+  Matches your Excel payplan: Unit commission + add-ons + trade hold commission.
+</div>
+
+<form id="dealForm" class="bg-white rounded border border-slate-200 p-4" method="post" action="/deals/save">
+  <input type="hidden" name="next" value="{{ next_url or '' }}" />
+  {% if deal %}<input type="hidden" name="deal_id" value="{{ deal.id }}">{% endif %}
+
+  <div class="grid md:grid-cols-4 gap-4">
+    <div class="md:col-span-3">
+
+  <div class="grid md:grid-cols-3 gap-4">
+    <div>
+      <label class="text-xs text-slate-500">Sold Date</label>
+      <input type="date" class="w-full border rounded px-3 py-2" name="sold_date" value="{{ deal.sold_date.isoformat() if deal and deal.sold_date else today().isoformat() }}">
+    </div>
+    <div>
+      <label class="text-xs text-slate-500">Spot?</label>
+      <div class="flex items-center gap-2 mt-2">
+      <input type="checkbox" class="h-4 w-4" name="spot_sold" value="1" {% if deal and deal.spot_sold %}checked{% endif %}>
+        <span class="text-sm text-slate-700">Yes (sets Delivered Date = today)</span>
+      </div>
+    </div>
+    <div>
+      <label class="text-xs text-slate-500">Status</label>
+      <select class="w-full border rounded px-3 py-2" name="status" id="status_select">
+        {% for s in ["Pending","Scheduled","Delivered","Dead"] %}
+          <option value="{{ s }}" {% if deal and deal.status==s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+
+      <div id="scheduledPickerRow" class="mt-2 hidden">
+        <label class="text-xs text-slate-500">Scheduled date</label>
+        <input
+          type="date"
+          class="w-full border rounded px-3 py-2"
+          name="scheduled_date"
+          id="scheduled_date_input"
+          value="{{ deal.scheduled_date.isoformat() if deal and deal.scheduled_date else '' }}"
+        >
+      </div>
+    </div>
+
+    <div>
+  <label class="text-xs text-slate-500">Tag</label>
+  <select class="w-full border rounded px-3 py-2" name="tag">
+    {% set current_tag = (deal.tag if deal and deal.tag is not none else "") %}
+    <option value="" {% if current_tag == "" %}selected{% endif %}>—</option>
+    {% for t in ["Shop","Title","Inbound","FO"] %}
+      <option value="{{ t }}" {% if current_tag == t %}selected{% endif %}>{{ t }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+    <div class="md:col-span-2">
+      <label class="text-xs text-slate-500">Customer</label>
+      <input class="w-full border rounded px-3 py-2" name="customer" id="customer_input" value="{{ deal.customer if deal else '' }}" placeholder="Customer name">
+      <div class="text-xs text-rose-600 mt-1 hidden" id="err_customer">Customer is required.</div>
+    </div>
+    <div>
+      <label class="text-xs text-slate-500">Stock #</label>
+      <input class="w-full border rounded px-3 py-2" name="stock_num" value="{{ deal.stock_num if deal else '' }}">
+    </div>
+
+    <div class="md:col-span-2">
+      <label class="text-xs text-slate-500">Model</label>
+      <input class="w-full border rounded px-3 py-2" name="model" id="model_input" value="{{ deal.model if deal else '' }}" placeholder="e.g., 2024 Explorer">
+      <div class="text-xs text-amber-600 mt-1 hidden" id="warn_model">Model is blank (you can still save).</div>
+    </div>
+    <div>
+      <label class="text-xs text-slate-500">New/Used</label>
+      <select class="w-full border rounded px-3 py-2" name="new_used">
+        {% for s in ["","New","Used"] %}
+          <option value="{{ s }}" {% if deal and deal.new_used==s %}selected{% endif %}>{{ s or "—" }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div>
+      <label class="text-xs text-slate-500">F/C/L</label>
+      <select class="w-full border rounded px-3 py-2" name="deal_type">
+        {% set cur = (deal.deal_type if deal and deal.deal_type else "") %}
+        {# Back-compat for old saved values: F/C/L #}
+        {% if cur == "F" %}{% set cur = "Finance" %}{% endif %}
+        {% if cur == "C" %}{% set cur = "Cash/Sub-Vented" %}{% endif %}
+        {% if cur == "L" %}{% set cur = "Lease" %}{% endif %}
+
+        <option value="" {% if cur=="" %}selected{% endif %}>--</option>
+        {% for opt in ["Finance","Cash/Sub-Vented","Lease"] %}
+          <option value="{{ opt }}" {% if cur==opt %}selected{% endif %}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-500">F&I</label>
+      <select class="w-full border rounded px-3 py-2" name="business_manager">
+        {% set cur_bm = (deal.business_manager if deal and deal.business_manager else "") %}
+        <option value="" {% if cur_bm=="" %}selected{% endif %}>--</option>
+        {% for opt in ["RGO","KMC","DAB","JGA"] %}
+          <option value="{{ opt }}" {% if cur_bm==opt %}selected{% endif %}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {# Pay Date + Mark as Paid intentionally removed from New Deal screen (handled elsewhere) #}
+
+
+    <div>
+      <label class="text-xs text-slate-500">Discount</label>
+      <select class="w-full border rounded px-3 py-2" name="discount_gt_200">
+        {% for s in ["No","Yes"] %}
+          <option value="{{ s }}" {% if deal and deal.discount_gt_200==s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+      <div class="text-xs text-slate-400 mt-1">Unit comm = {{ settings.unit_comm_discount_le_200 }} (No) / {{ settings.unit_comm_discount_gt_200 }} (Yes)</div>
+    </div>
+
+    <div>
+      <label class="text-xs text-slate-500">Aim Presentation</label>
+      <select class="w-full border rounded px-3 py-2" name="aim_presentation">
+        {% set cur_aim = (deal.aim_presentation if deal and deal.aim_presentation else "X") %}
+        {% for opt in ["Yes","No","X"] %}
+          <option value="{{ opt }}" {% if cur_aim == opt %}selected{% endif %}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+      <div class="text-xs text-slate-400 mt-1">X = excluded from Aim %</div>
+    </div>
+
+    <div>
+      <label class="text-xs text-slate-500">Money Held?</label>
+      <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="hold_amount" id="hold_input" value="{{ deal.hold_amount if deal else 0 }}">
+      <div class="text-xs text-slate-400 mt-1">Trade hold comm = floor(Hold/1000)*100</div>
+      <div class="text-xs text-rose-600 mt-1 hidden" id="err_hold">Money Held can't be negative.</div>
+    </div>
+
+    <div>
+      <label class="text-xs text-slate-500">Comments</label>
+      <input class="w-full border rounded px-3 py-2" name="notes" value="{{ deal.notes if deal else '' }}">
+    </div>
+  </div>
+
+
+
+  <div class="mt-5">
+    <div class="font-bold mb-2">Add-ons (1/0)</div>
+    <div class="grid md:grid-cols-3 gap-3">
+      {% set flags = [
+        ("permaplate","PermaPlate", settings.permaplate),
+        ("nitro_fill","Nitro Fill", settings.nitro_fill),
+        ("pulse","Pulse", settings.pulse),
+        ("warranty","Warranty", settings.warranty),
+        ("tire_wheel","Tire & Wheel", settings.tire_wheel),
+      ] %}
+      {% for name,label,val in flags %}
+        <label class="flex items-center gap-2 bg-slate-50 border rounded p-2">
+          {# Jinja does not expose Python's getattr() by default; use the built-in attr filter instead. #}
+          <input type="checkbox" name="{{ name }}" value="1" {% if (deal and (deal|attr(name))) or (not deal and name in ["permaplate","nitro_fill","pulse"]) %}checked{% endif %}>
+          <span class="text-sm">{{ label }}</span>
+          <span class="ml-auto text-xs text-slate-500">${{ val }}</span>
+        </label>
+      {% endfor %}
+    </div>
+    <div class="text-xs text-slate-400 mt-2">Finance (Non-Subvented) is now counted automatically when F/C/L = <b>Finance</b> or <b>Lease</b>.</div>
+  </div>
+
+  <div class="mt-5 flex items-center gap-3">
+    <button class="px-4 py-2 rounded bg-slate-900 text-white">Save</button>
+    <a class="px-4 py-2 rounded border" href="/deals">Cancel</a>
+    {% if deal %}
+      <form method="post" action="/deals/{{ deal.id }}/delete" class="ml-auto">
+        <button class="px-4 py-2 rounded bg-rose-600 text-white" formmethod="post" formaction="/deals/{{ deal.id }}/delete">Delete</button>
+      </form>
+    {% endif %}
+  </div>
+
+  {% if deal %}
+    <div class="mt-4 text-sm text-slate-500">
+      Current calc: Unit <b>${{ "{:,.0f}".format(deal.unit_comm or 0) }}</b> +
+      Add-ons <b>${{ "{:,.0f}".format(deal.add_ons or 0) }}</b> +
+      Trade Hold <b>${{ "{:,.0f}".format(deal.trade_hold_comm or 0) }}</b>
+      = <b>${{ "{:,.0f}".format(deal.total_deal_comm or 0) }}</b>
+    </div>
+  {% endif %}
+
+    </div>
+
+    <!-- Live commission box -->
+    <div>
+      <div class="sticky top-4 rounded border border-slate-200 bg-slate-50 p-3">
+        <div class="text-sm font-bold">Live Commission</div>
+        <div class="text-xs text-slate-500">Updates as you change fields</div>
+
+        <div class="mt-3 space-y-2 text-sm">
+          <div class="flex justify-between"><span class="text-slate-600">Unit</span><b id="lc_unit">$0</b></div>
+          <div class="flex justify-between"><span class="text-slate-600">Add-ons</span><b id="lc_addons">$0</b></div>
+          <div class="flex justify-between"><span class="text-slate-600">Money Held Comm</span><b id="lc_hold">$0</b></div>
+          <div class="border-t border-slate-200 pt-2 flex justify-between text-base">
+            <span class="text-slate-700 font-bold">Total</span>
+            <span class="font-bold" id="lc_total">$0</span>
+          </div>
+        </div>
+
+        <div class="mt-3 text-xs text-slate-500" id="lc_hint"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // New Deal screen helpers
+    document.addEventListener('DOMContentLoaded', () => {
+      // Spot => Delivered today, and also flip Status to Delivered + lock it.
+      {
+        const spot = document.querySelector('input[name="spot_sold"]');
+        const status = document.querySelector('select[name="status"]');
+        if (spot && status) {
+          let prevStatus = status.value || 'Pending';
+
+          const lockStatus = (locked) => {
+            status.disabled = !!locked;
+            status.classList.toggle('opacity-60', !!locked);
+            status.classList.toggle('cursor-not-allowed', !!locked);
+          };
+
+          // init
+          if (spot.checked) {
+            prevStatus = status.value || 'Pending';
+            status.value = 'Delivered';
+            lockStatus(true);
+          }
+
+          spot.addEventListener('change', () => {
+            if (spot.checked) {
+              prevStatus = status.value || prevStatus || 'Pending';
+              status.value = 'Delivered';
+              lockStatus(true);
+            } else {
+              lockStatus(false);
+              // restore what you had before Spot forced it, otherwise default Pending
+              status.value = prevStatus || 'Pending';
+            }
+            // keep live calc in sync
+            if (typeof window.__ct_calc_live_comm === 'function') window.__ct_calc_live_comm();
+          });
+        }
+      }
+
+      // Scheduled status => date picker + show "Scheduled M/D" in the dropdown.
+      {
+        const status = document.getElementById('status_select');
+        const wrap = document.getElementById('scheduledPickerRow');
+        const input = document.getElementById('scheduled_date_input');
+
+        if (status && wrap && input) {
+          const scheduledOpt = Array.from(status.options).find(o => o.value === 'Scheduled');
+          const fmtMD = (iso) => {
+            if (!iso) return '';
+            const d = new Date(iso + 'T00:00:00');
+            const m = d.getMonth() + 1;
+            const day = d.getDate();
+            return `${m}/${day}`;
+          };
+
+          const updateLabel = () => {
+            if (!scheduledOpt) return;
+            const md = fmtMD(input.value);
+            scheduledOpt.text = md ? `Scheduled ${md}` : 'Scheduled';
+          };
+
+          const show = (autoOpen=false) => {
+            wrap.classList.remove('hidden');
+            updateLabel();
+            if (autoOpen) {
+              setTimeout(() => {
+                try {
+                  if (typeof input.showPicker === 'function') input.showPicker();
+                  else input.focus();
+                } catch (_) {
+                  input.focus();
+                }
+              }, 50);
+            }
+          };
+
+          const hide = (clear=false) => {
+            wrap.classList.add('hidden');
+            if (clear) input.value = '';
+            updateLabel();
+          };
+
+          // init
+          if (status.value === 'Scheduled') {
+            show(false);
+          } else {
+            hide(false);
+          }
+
+          updateLabel();
+
+          status.addEventListener('change', () => {
+            if (status.value === 'Scheduled') {
+              // default to today so the label has something, then let user pick
+              if (!input.value) {
+                input.value = new Date().toISOString().slice(0, 10);
+              }
+              show(true);
+            } else {
+              hide(true);
+            }
+          });
+
+          input.addEventListener('change', () => {
+            updateLabel();
+          });
+        }
+      }
+
+      // Basic validation (client-side):
+      // - Customer required (block save)
+      // - Money Held can't be negative / NaN (block save)
+      // - Model missing shows warning but allows save
+      {
+        const form = document.querySelector('form[action="/deals/save"]');
+        const customer = document.getElementById('customer_input');
+        const model = document.getElementById('model_input');
+        const hold = document.getElementById('hold_input');
+        const errCustomer = document.getElementById('err_customer');
+        const warnModel = document.getElementById('warn_model');
+        const errHold = document.getElementById('err_hold');
+
+        const setErr = (el, msgEl, on) => {
+          if (!el || !msgEl) return;
+          msgEl.classList.toggle('hidden', !on);
+          el.classList.toggle('border-rose-500', !!on);
+        };
+
+        const setWarn = (el, msgEl, on) => {
+          if (!el || !msgEl) return;
+          msgEl.classList.toggle('hidden', !on);
+          el.classList.toggle('border-amber-500', !!on);
+        };
+
+        const validate = () => {
+          const custOk = !!(customer?.value || '').trim();
+          setErr(customer, errCustomer, !custOk);
+
+          const holdValRaw = (hold?.value ?? '').toString().trim();
+          const holdVal = holdValRaw === '' ? 0 : Number(holdValRaw);
+          const holdOk = Number.isFinite(holdVal) && holdVal >= 0;
+          setErr(hold, errHold, !holdOk);
+
+          const modelBlank = !((model?.value || '').trim());
+          setWarn(model, warnModel, modelBlank);
+
+          return custOk && holdOk;
+        };
+
+        [customer, model, hold].filter(Boolean).forEach((el) => {
+          el.addEventListener('input', validate);
+          el.addEventListener('change', validate);
+        });
+
+        if (form) {
+          form.addEventListener('submit', (e) => {
+            if (!validate()) {
+              e.preventDefault();
+              // bring you to the top of the form so you see the error
+              (customer || form).scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          });
+        }
+
+        validate();
+      }
+
+      // Live commission calculator (mirrors app/payplan.py)
+      {
+        const SETTINGS = {
+          unit_le: {{ settings.unit_comm_discount_le_200 or 0 }},
+          unit_gt: {{ settings.unit_comm_discount_gt_200 or 0 }},
+          permaplate: {{ settings.permaplate or 0 }},
+          nitro_fill: {{ settings.nitro_fill or 0 }},
+          pulse: {{ settings.pulse or 0 }},
+          finance_non_subvented: {{ settings.finance_non_subvented or 0 }},
+          warranty: {{ settings.warranty or 0 }},
+          tire_wheel: {{ settings.tire_wheel or 0 }},
+        };
+
+        const fmt = (n) => {
+          const v = Number.isFinite(n) ? n : 0;
+          return '$' + Math.round(v).toLocaleString();
+        };
+
+        const $ = (sel) => document.querySelector(sel);
+
+        const els = {
+          customer: $('input[name="customer"]'),
+          discount: $('select[name="discount_gt_200"]'),
+          hold: $('input[name="hold_amount"]'),
+          dealType: $('select[name="deal_type"]'),
+          permaplate: $('input[name="permaplate"]'),
+          nitro: $('input[name="nitro_fill"]'),
+          pulse: $('input[name="pulse"]'),
+          warranty: $('input[name="warranty"]'),
+          tire: $('input[name="tire_wheel"]'),
+
+          outUnit: $('#lc_unit'),
+          outAddons: $('#lc_addons'),
+          outHold: $('#lc_hold'),
+          outTotal: $('#lc_total'),
+          hint: $('#lc_hint'),
+        };
+
+        function calc() {
+          // If the live box isn't on the page, don't do anything.
+          if (!els.outUnit || !els.outAddons || !els.outHold || !els.outTotal) return;
+
+          const customer = (els.customer?.value || '').trim();
+          if (!customer) {
+            els.outUnit.textContent = '$0';
+            els.outAddons.textContent = '$0';
+            els.outHold.textContent = '$0';
+            els.outTotal.textContent = '$0';
+            if (els.hint) els.hint.textContent = 'Enter a customer name to see totals.';
+            return;
+          }
+
+          const discYes = (els.discount?.value || 'No').toLowerCase() === 'yes';
+          const unit = discYes ? SETTINGS.unit_gt : SETTINGS.unit_le;
+
+          const dt = (els.dealType?.value || '').trim();
+          const autoFinNonSub = (dt === 'Finance' || dt === 'Lease');
+
+          let addons = 0;
+          if (els.permaplate?.checked) addons += SETTINGS.permaplate;
+          if (els.nitro?.checked) addons += SETTINGS.nitro_fill;
+          if (els.pulse?.checked) addons += SETTINGS.pulse;
+          if (autoFinNonSub) addons += SETTINGS.finance_non_subvented;
+          if (els.warranty?.checked) addons += SETTINGS.warranty;
+          if (els.tire?.checked) addons += SETTINGS.tire_wheel;
+
+          const holdAmt = parseFloat(els.hold?.value || '0') || 0;
+          const holdComm = Math.floor(holdAmt / 1000) * 100;
+
+          const total = unit + addons + holdComm;
+
+          els.outUnit.textContent = fmt(unit);
+          els.outAddons.textContent = fmt(addons);
+          els.outHold.textContent = fmt(holdComm);
+          els.outTotal.textContent = fmt(total);
+
+          if (els.hint) {
+            els.hint.textContent = autoFinNonSub ? 'Includes Finance/Lease (Non-Subvented) automatically.' : '';
+          }
+        }
+
+        // expose so other handlers can trigger recalcs
+        window.__ct_calc_live_comm = calc;
+
+        const watch = [
+          els.customer, els.discount, els.hold, els.dealType,
+          els.permaplate, els.nitro, els.pulse, els.warranty, els.tire,
+        ].filter(Boolean);
+
+        watch.forEach((el) => {
+          el.addEventListener('input', calc);
+          el.addEventListener('change', calc);
+        });
+
+        calc();
+      }
+    });
+  </script>
+</form>
+{% endblock %}

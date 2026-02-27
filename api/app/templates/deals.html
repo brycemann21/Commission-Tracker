@@ -1,0 +1,392 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  /* Print only the modal contents */
+  @media print {
+    body * { visibility: hidden !important; }
+    #dealModal, #dealModal * { visibility: visible !important; }
+    #dealModal { position: absolute !important; inset: 0 !important; }
+    #dealModal [data-close="1"],
+    #dealModal .bg-black\/40 { display: none !important; }
+    #dealModal .mt-20 { margin-top: 0 !important; }
+    #dealModal .shadow-lg { box-shadow: none !important; }
+  }
+</style>
+
+<div class="flex flex-col md:flex-row md:items-end gap-3">
+  <div>
+    <h1 class="text-xl font-bold">Deals</h1>
+    <div class="text-sm text-slate-500">Showing {{ selected_month }}/{{ selected_year }} (plus Inbound/FO carryovers until Delivered).</div>
+  </div>
+  <form class="md:ml-auto flex gap-2" method="get" action="/deals">
+    <input class="border rounded px-3 py-2 text-sm w-56" name="q" value="{{ q }}" placeholder="Search customer / stock / model" />
+    <select class="border rounded px-3 py-2 text-sm" name="status">
+      {% for s in ["All","Pending","Scheduled","Delivered","Dead"] %}
+        <option value="{{ s }}" {% if status==s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <select class="border rounded px-3 py-2 text-sm" name="paid">
+      <option value="All" {% if paid=="All" %}selected{% endif %}>All</option>
+      <option value="Paid" {% if paid=="Paid" %}selected{% endif %}>Paid</option>
+      <option value="Pending" {% if paid=="Pending" %}selected{% endif %}>Pending Pay</option>
+    </select>
+    <button class="px-3 py-2 text-sm rounded bg-slate-900 text-white">Go</button>
+  </form>
+</div>
+
+<!-- Deal details modal -->
+<div id="dealModal" class="fixed inset-0 z-50 hidden" aria-hidden="true">
+  <div class="absolute inset-0 bg-black/40" data-close="1"></div>
+  <div class="relative mx-auto mt-20 w-[95%] max-w-2xl">
+    <div class="bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+        <div>
+          <div class="text-sm text-slate-500">Deal Details</div>
+          <div id="modalTitle" class="text-lg font-semibold">—</div>
+        </div>
+        <button type="button" class="px-2 py-1 rounded hover:bg-slate-100" data-close="1">✕</button>
+      </div>
+      <div class="p-4">
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div><div class="text-slate-500">Sold Date</div><div id="mSold">—</div></div>
+          <div><div class="text-slate-500">Delivered Date</div><div id="mDel">—</div></div>
+          <div><div class="text-slate-500">Status</div><div id="mStatus">—</div></div>
+          <div><div class="text-slate-500">Tag</div><div id="mTag">—</div></div>
+          <div><div class="text-slate-500">Stock #</div><div id="mStock">—</div></div>
+          <div><div class="text-slate-500">Model</div><div id="mModel">—</div></div>
+          <div><div class="text-slate-500">F/C/L</div><div id="mType">—</div></div>
+          <div><div class="text-slate-500">New/Used</div><div id="mNU">—</div></div>
+          <div><div class="text-slate-500">F&amp;I</div><div id="mFI">—</div></div>
+          <div><div class="text-slate-500">Discount</div><div id="mDiscount">—</div></div>
+          <div><div class="text-slate-500">Money Held</div><div id="mHold">—</div></div>
+          <div><div class="text-slate-500">Commission</div><div id="mComm" class="font-semibold">—</div></div>
+        </div>
+
+        <div class="mt-4">
+          <div class="text-sm font-semibold">Add-ons Purchased</div>
+          <ul id="mAddons" class="mt-2 text-sm list-disc pl-5 text-slate-700"></ul>
+          <div id="mNoAddons" class="mt-2 text-sm text-slate-500 hidden">No add-ons selected.</div>
+        </div>
+
+        <div class="mt-4">
+          <div class="text-sm font-semibold">Comments</div>
+          <div id="mNotes" class="mt-1 text-sm text-slate-700 whitespace-pre-wrap">—</div>
+        </div>
+
+        <div class="mt-5 flex justify-end gap-2">
+          <button id="mPrintBtn" type="button" class="px-3 py-2 text-sm rounded border">Print</button>
+          <button id="mEditBtn" type="button" class="px-3 py-2 text-sm rounded bg-slate-900 text-white">Edit Deal</button>
+          <button type="button" class="px-3 py-2 text-sm rounded border" data-close="1">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit modal (loads edit form in an iframe) -->
+<div id="editModal" class="fixed inset-0 z-50 hidden" aria-hidden="true">
+  <div class="absolute inset-0 bg-black/40" data-close-edit="1"></div>
+  <div class="relative mx-auto mt-10 w-[95%] max-w-5xl">
+    <div class="bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+        <div>
+          <div class="text-sm text-slate-500">Edit Deal</div>
+          <div id="editModalTitle" class="text-lg font-semibold">—</div>
+        </div>
+        <button type="button" class="px-2 py-1 rounded hover:bg-slate-100" data-close-edit="1">✕</button>
+      </div>
+      <div class="p-0">
+        <iframe
+          id="editFrame"
+          title="Edit Deal"
+          class="w-full"
+          style="height: 82vh; border: 0;"
+          src="about:blank"
+        ></iframe>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mt-4 overflow-x-auto bg-white rounded border border-slate-200">
+<table class="min-w-full text-sm">
+  <thead class="bg-slate-900 text-white">
+    <tr>
+      <th class="text-left p-2">Sold Date</th>
+      <th class="text-left p-2">Delivered Date</th>
+      <th class="text-left p-2">Customer</th>
+      <th class="text-left p-2">F&amp;I</th>
+      <th class="text-left p-2">Stock #</th>
+      <th class="text-left p-2">Model</th>
+      <th class="text-left p-2">F/C/L</th>
+      <th class="text-left p-2">New/Used</th>
+      <th class="text-left p-2">Comments</th>
+      <th class="text-left p-2">Status</th>
+      <th class="text-left p-2">Tag</th>
+      <th class="text-right p-2">Commission</th>
+      <th class="p-2"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for d in deals %}
+      <tr class="border-t">
+        <td class="p-2">{{ d.sold_date or "" }}</td>
+        <td class="p-2">{{ d.delivered_date or "" }}</td>
+        <td class="p-2">
+          <button
+            type="button"
+            class="underline text-left"
+            data-open-deal="1"
+            data-id="{{ d.id }}"
+            data-customer="{{ d.customer|e }}"
+            data-sold="{{ d.sold_date or '' }}"
+            data-delivered="{{ d.delivered_date or '' }}"
+            data-status="{{ d.status|e }}"
+            data-scheduled="{{ (d.scheduled_date|md) if d.scheduled_date else '' }}"
+            data-tag="{{ (d.tag or '')|e }}"
+            data-stock="{{ d.stock_num|e }}"
+            data-model="{{ d.model|e }}"
+            data-type="{{ (d.deal_type or '')|e }}"
+            data-nu="{{ (d.new_used or '')|e }}"
+            data-fi="{{ (d.business_manager or '')|e }}"
+            data-discount="{{ (d.discount_gt_200 or '')|e }}"
+            data-hold="{{ d.hold_amount or 0 }}"
+            data-comm="${{ '{:,.0f}'.format(d.total_deal_comm or 0) }}"
+            data-notes="{{ (d.notes or '')|e }}"
+            data-permaplate="{{ 1 if d.permaplate else 0 }}"
+            data-nitro="{{ 1 if d.nitro_fill else 0 }}"
+            data-pulse="{{ 1 if d.pulse else 0 }}"
+            data-finance="{{ 1 if d.finance_non_subvented else 0 }}"
+            data-warranty="{{ 1 if d.warranty else 0 }}"
+            data-tire="{{ 1 if d.tire_wheel else 0 }}"
+          >
+            {{ d.customer }}
+          </button>
+        </td>
+        <td class="p-2">{{ d.business_manager or "" }}</td>
+        <td class="p-2">{{ d.stock_num }}</td>
+        <td class="p-2">{{ d.model }}</td>
+        <td class="p-2">{{ d.deal_type or "" }}</td>
+        <td class="p-2">{{ d.new_used }}</td>
+        <td class="p-2">{{ d.notes or "" }}</td>
+        <td class="p-2">
+          {{ d.status }}{% if d.status == 'Scheduled' and d.scheduled_date %} {{ d.scheduled_date|md }}{% endif %}
+        </td>
+        <td class="p-2">{{ d.tag or "" }}</td>
+        <td class="p-2 text-right">
+          <form method="post" action="/deals/{{ d.id }}/toggle_paid" class="inline">
+            <input type="hidden" name="next" value="{{ request.url }}">
+            <button
+              type="submit"
+              class="inline-flex items-center justify-end gap-2 px-2 py-1 rounded border text-sm font-semibold transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-slate-300 {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-800{% else %}bg-white border-slate-200 text-slate-900{% endif %}"
+              title="Click to toggle Paid / Pending Pay"
+            >
+              <span>${{ "{:,.0f}".format(d.total_deal_comm or 0) }}</span>
+              <span class="text-[11px] font-medium {% if d.is_paid %}text-emerald-700{% else %}text-slate-500{% endif %}">
+                {% if d.is_paid %}Paid{% else %}Pending Pay{% endif %}
+              </span>
+            </button>
+          </form>
+        </td>
+        <td class="p-2 text-right whitespace-nowrap">
+          <button type="button" class="underline text-sm" data-edit-id="{{ d.id }}" data-edit-title="{{ d.customer|e }}">Edit</button>
+          {% if not d.on_delivery_board and d.status != 'Delivered' and d.status != 'Dead' %}
+            <form method="post" action="/delivery/{{ d.id }}/push" class="inline ml-1">
+              <input type="hidden" name="next" value="/deals">
+              <button type="submit" class="px-2 py-1 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 text-[11px] font-medium transition" title="Push to Delivery Board">
+                🚗 Prep
+              </button>
+            </form>
+          {% elif d.on_delivery_board and d.status != 'Delivered' %}
+            <span class="ml-1 px-2 py-1 rounded bg-emerald-50 text-emerald-700 text-[11px] font-medium">On Board</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<script>
+  (function () {
+    const modal = document.getElementById('dealModal');
+    if (!modal) return;
+
+    const editModal = document.getElementById('editModal');
+    const editFrame = document.getElementById('editFrame');
+    const editTitle = document.getElementById('editModalTitle');
+
+    const els = {
+      title: document.getElementById('modalTitle'),
+      sold: document.getElementById('mSold'),
+      del: document.getElementById('mDel'),
+      status: document.getElementById('mStatus'),
+      tag: document.getElementById('mTag'),
+      stock: document.getElementById('mStock'),
+      model: document.getElementById('mModel'),
+      type: document.getElementById('mType'),
+      nu: document.getElementById('mNU'),
+      fi: document.getElementById('mFI'),
+      discount: document.getElementById('mDiscount'),
+      hold: document.getElementById('mHold'),
+      comm: document.getElementById('mComm'),
+      notes: document.getElementById('mNotes'),
+      addons: document.getElementById('mAddons'),
+      noAddons: document.getElementById('mNoAddons'),
+      editBtn: document.getElementById('mEditBtn'),
+      printBtn: document.getElementById('mPrintBtn'),
+    };
+
+    // Print button prints the modal only (see @media print styles above)
+    if (els.printBtn) {
+      els.printBtn.addEventListener('click', () => {
+        // ensure modal is visible for print
+        modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+        window.print();
+      });
+    }
+
+    function openModal(btn) {
+      const d = btn.dataset;
+      const dealId = d.id;
+      els.title.textContent = d.customer || 'Deal';
+      els.sold.textContent = d.sold || '—';
+      els.del.textContent = d.delivered || '—';
+      if ((d.status || '') === 'Scheduled' && d.scheduled) {
+        els.status.textContent = `Scheduled ${d.scheduled}`;
+      } else {
+        els.status.textContent = d.status || '—';
+      }
+      els.tag.textContent = d.tag || '—';
+      els.stock.textContent = d.stock || '—';
+      els.model.textContent = d.model || '—';
+      els.type.textContent = d.type || '—';
+      els.nu.textContent = d.nu || '—';
+      els.fi.textContent = d.fi || '—';
+      els.discount.textContent = (d.discount === 'Yes') ? 'Yes' : 'No';
+      els.hold.textContent = `$${Number(d.hold || 0).toLocaleString()}`;
+      els.comm.textContent = d.comm || '—';
+      els.notes.textContent = d.notes || '—';
+      if (els.editBtn) {
+        els.editBtn.dataset.id = dealId;
+        els.editBtn.dataset.title = d.customer || `Deal #${dealId}`;
+      }
+
+      const items = [];
+      if (d.permaplate === '1') items.push('PermaPlate');
+      if (d.nitro === '1') items.push('Nitro Fill');
+      if (d.pulse === '1') items.push('Pulse');
+      if (d.finance === '1') items.push('Finance (Non-Subvented)');
+      if (d.warranty === '1') items.push('Warranty');
+      if (d.tire === '1') items.push('Tire & Wheel');
+
+      els.addons.innerHTML = '';
+      if (items.length) {
+        els.noAddons.classList.add('hidden');
+        for (const name of items) {
+          const li = document.createElement('li');
+          li.textContent = name;
+          els.addons.appendChild(li);
+        }
+      } else {
+        els.noAddons.classList.remove('hidden');
+      }
+
+      modal.classList.remove('hidden');
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeModal() {
+      modal.classList.add('hidden');
+      modal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    }
+
+    function openEditModal(id, title) {
+      if (!editModal || !editFrame) return;
+      if (!id) return;
+      const next = encodeURIComponent('/deals?embedded=1');
+      editFrame.src = `/deals/${id}/edit?embed=1&next=${next}`;
+      if (editTitle) editTitle.textContent = title || `Deal #${id}`;
+      editModal.classList.remove('hidden');
+      editModal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeEditModal(refresh) {
+      if (!editModal || !editFrame) return;
+      editModal.classList.add('hidden');
+      editModal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+      editFrame.src = 'about:blank';
+      if (refresh) window.location.reload();
+    }
+
+    document.addEventListener('click', (e) => {
+      const openBtn = e.target.closest('[data-open-deal="1"]');
+      if (openBtn) {
+        e.preventDefault();
+        openModal(openBtn);
+        return;
+      }
+
+      // Edit buttons (table + modal)
+      const editBtn = e.target.closest('[data-edit-id]');
+      if (editBtn) {
+        e.preventDefault();
+        const id = editBtn.getAttribute('data-edit-id');
+        const title = editBtn.getAttribute('data-edit-title') || '';
+        if (id) openEditModal(id, title);
+        return;
+      }
+
+      const modalEdit = e.target.closest('#mEditBtn');
+      if (modalEdit) {
+        e.preventDefault();
+        const id = modalEdit.dataset.id;
+        const title = modalEdit.dataset.title;
+        if (id) openEditModal(id, title);
+        return;
+      }
+
+      const closeEditBtn = e.target.closest('[data-close-edit="1"]');
+      if (closeEditBtn && editModal && !editModal.classList.contains('hidden')) {
+        e.preventDefault();
+        closeEditModal(false);
+        return;
+      }
+      const closeBtn = e.target.closest('[data-close="1"]');
+      if (closeBtn && !modal.classList.contains('hidden')) {
+        e.preventDefault();
+        closeModal();
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+      if (e.key === 'Escape' && editModal && !editModal.classList.contains('hidden')) closeEditModal(false);
+    });
+
+    // When the edit iframe navigates to /deals?embedded=1 after saving,
+    // it will postMessage so we can close the modal and refresh this page.
+    window.addEventListener('message', (ev) => {
+      try {
+        if (ev && ev.data && ev.data.type === 'ct_deal_saved') {
+          closeEditModal(true);
+        }
+      } catch (_) {}
+    });
+  })();
+</script>
+
+{% if request.query_params.get('embedded') == '1' %}
+<script>
+  try {
+    window.parent.postMessage({ type: 'ct_deal_saved' }, '*');
+  } catch (e) {}
+</script>
+{% endif %}
+{% endblock %}

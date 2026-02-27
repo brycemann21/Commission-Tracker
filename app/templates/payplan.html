@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex items-end justify-between gap-3 mb-4">
+  <div>
+    <h1 class="text-xl font-bold">Pay Plan</h1>
+    <div class="text-sm text-slate-500">Edit your pay plan values. These values drive commission calculations and reports.</div>
+  </div>
+</div>
+
+<form method="post" action="/payplan" class="space-y-6">
+
+  <!-- Core per-deal values -->
+  <div class="bg-white rounded border border-slate-200 p-4">
+    <div class="font-semibold mb-3">Per-Deal Values</div>
+    <div class="grid md:grid-cols-2 gap-4">
+      <div>
+        <label class="text-xs text-slate-500">Unit Commission (Discount ≤ $200)</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="unit_comm_discount_le_200" value="{{ s.unit_comm_discount_le_200 }}">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500">Unit Commission (Discount &gt; $200)</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="unit_comm_discount_gt_200" value="{{ s.unit_comm_discount_gt_200 }}">
+      </div>
+
+      <div>
+        <label class="text-xs text-slate-500">PermaPlate</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="permaplate" value="{{ s.permaplate }}">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500">Nitro Fill</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="nitro_fill" value="{{ s.nitro_fill }}">
+      </div>
+
+      <div>
+        <label class="text-xs text-slate-500">Pulse</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="pulse" value="{{ s.pulse }}">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500">Finance (Non-Subvented)</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="finance_non_subvented" value="{{ s.finance_non_subvented }}">
+      </div>
+
+      <div>
+        <label class="text-xs text-slate-500">Warranty</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="warranty" value="{{ s.warranty }}">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500">Tire &amp; Wheel</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="tire_wheel" value="{{ s.tire_wheel }}">
+      </div>
+    </div>
+  </div>
+
+  <!-- Hourly -->
+  <div class="bg-white rounded border border-slate-200 p-4">
+    <div class="font-semibold mb-3">Hourly</div>
+    <div class="grid md:grid-cols-2 gap-4">
+      <div>
+        <label class="text-xs text-slate-500">Hourly Rate (NY Offset)</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="hourly_rate_ny_offset" value="{{ s.hourly_rate_ny_offset }}">
+      </div>
+    </div>
+  </div>
+
+  <!-- Volume bonuses -->
+  <div class="bg-white rounded border border-slate-200 p-4">
+    <div class="font-semibold mb-3">Volume Bonuses</div>
+
+    <div class="text-sm font-semibold mb-2">Volume Bonus</div>
+    <div class="grid md:grid-cols-3 gap-4 mb-4">
+      <div>
+        <label class="text-xs text-slate-500">15–16</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="new_volume_bonus_15_16" value="{{ s.new_volume_bonus_15_16 }}">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500">17–18</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="new_volume_bonus_17_18" value="{{ s.new_volume_bonus_17_18 }}">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500">19–20</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="new_volume_bonus_19_20" value="{{ s.new_volume_bonus_19_20 }}">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500">21–24</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="new_volume_bonus_21_24" value="{{ s.new_volume_bonus_21_24 }}">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500">25+</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="new_volume_bonus_25_plus" value="{{ s.new_volume_bonus_25_plus }}">
+      </div>
+    </div>
+
+    <div class="text-sm font-semibold mb-2">Used Volume Bonus</div>
+    <div class="grid md:grid-cols-3 gap-4">
+      <div>
+        <label class="text-xs text-slate-500">8–10</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="used_volume_bonus_8_10" value="{{ s.used_volume_bonus_8_10 }}">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500">11–12</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="used_volume_bonus_11_12" value="{{ s.used_volume_bonus_11_12 }}">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500">13+</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="used_volume_bonus_13_plus" value="{{ s.used_volume_bonus_13_plus }}">
+      </div>
+    </div>
+  </div>
+
+  <!-- Spot bonuses -->
+  <div class="bg-white rounded border border-slate-200 p-4">
+    <div class="font-semibold mb-3">Spot Bonuses (per spot)</div>
+    <div class="grid md:grid-cols-3 gap-4">
+      <div>
+        <label class="text-xs text-slate-500">5–9</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="spot_bonus_5_9" value="{{ s.spot_bonus_5_9 }}">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500">10–12</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="spot_bonus_10_12" value="{{ s.spot_bonus_10_12 }}">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500">13+</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="spot_bonus_13_plus" value="{{ s.spot_bonus_13_plus }}">
+      </div>
+    </div>
+  </div>
+
+  <!-- Quarterly bonus -->
+  <div class="bg-white rounded border border-slate-200 p-4">
+    <div class="font-semibold mb-3">Quarterly Bonus</div>
+    <div class="grid md:grid-cols-2 gap-4">
+      <div>
+        <label class="text-xs text-slate-500">Quarterly Bonus Threshold (units per quarter)</label>
+        <input type="number" step="1" class="w-full border rounded px-3 py-2" name="quarterly_bonus_threshold_units" value="{{ s.quarterly_bonus_threshold_units }}">
+      </div>
+      <div>
+        <label class="text-xs text-slate-500">Quarterly Bonus Amount</label>
+        <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="quarterly_bonus_amount" value="{{ s.quarterly_bonus_amount }}">
+      </div>
+    </div>
+  </div>
+
+  <div class="flex gap-2">
+    <button class="px-4 py-2 rounded bg-slate-900 text-white">Save</button>
+    <a class="px-4 py-2 rounded border" href="/">Back</a>
+  </div>
+
+</form>
+{% endblock %}
