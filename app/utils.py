@@ -6,7 +6,7 @@ def parse_date(s: str | None):
     s = s.strip()
     if not s:
         return None
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y"):
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y"):
         try:
             return datetime.strptime(s, fmt).date()
         except ValueError:

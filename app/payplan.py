@@ -3,13 +3,6 @@ from .schemas import DealIn
 from .models import Settings
 
 def calc_commission(deal: DealIn, settings: Settings):
-    """
-    Mirrors the key formulas in your Excel:
-    Unit Comm = IF(Discount>200, Config!B5, Config!B4)
-    Add-ons = sum(1/0 flags * config values)
-    Trade Hold Comm = INT(Hold/1000) * 100
-    Total = Unit + Add-ons + TradeHold
-    """
     if not deal.customer:
         return 0.0, 0.0, 0.0, 0.0
 

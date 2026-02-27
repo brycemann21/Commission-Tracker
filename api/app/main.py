@@ -14,63 +14,54 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.pool import NullPool
 from sqlalchemy import select, func, or_, and_
 
-from .models import Base, Deal, Settings, Goal
+from .models import Base, User, Deal, Settings, Goal
 from .schemas import DealIn
 from .payplan import calc_commission
 from .utils import parse_date, today
+from .auth import (
+    hash_password, verify_password,
+    create_session, get_user_id_from_session, destroy_session,
+    get_session_token, get_current_user, get_or_create_settings,
+)
 
 
-# -----------------------------
-# DB setup
-# -----------------------------
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:////tmp/commission.db")
+# ─── DB setup ───
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:////tmp/commission.db").strip()
 
-def sanitize_db_url(url: str) -> str:
-    """Remove libpq-only query params (e.g. sslmode) that asyncpg doesn't accept."""
+def _sanitize_url(url: str) -> str:
     try:
-        parsed = urllib.parse.urlsplit(url)
-        qs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
-        qs = [(k, v) for (k, v) in qs if k.lower() not in {"sslmode", "sslrootcert", "sslcert", "sslkey"}]
-        new_query = urllib.parse.urlencode(qs)
-        return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
+        p = urllib.parse.urlsplit(url)
+        qs = [(k, v) for k, v in urllib.parse.parse_qsl(p.query, keep_blank_values=True)
+              if k.lower() not in {"sslmode", "sslrootcert", "sslcert", "sslkey"}]
+        return urllib.parse.urlunsplit((p.scheme, p.netloc, p.path, urllib.parse.urlencode(qs), p.fragment))
     except Exception:
         return url
 
-SSL_CONTEXT = ssl.create_default_context()
-SSL_CONTEXT.check_hostname = False
-SSL_CONTEXT.verify_mode = ssl.CERT_NONE
-
-db_url = sanitize_db_url(DATABASE_URL)
+db_url = _sanitize_url(DATABASE_URL)
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
-elif db_url.startswith("postgresql://"):
+elif db_url.startswith("postgresql://") and "+asyncpg" not in db_url:
     db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 connect_args = {}
-if db_url.startswith("postgresql+asyncpg://"):
-    connect_args = {"ssl": SSL_CONTEXT, "statement_cache_size": 0, "prepared_statement_cache_size": 0}
+if "asyncpg" in db_url:
+    _ssl = ssl.create_default_context()
+    _ssl.check_hostname = False
+    _ssl.verify_mode = ssl.CERT_NONE
+    connect_args = {"ssl": _ssl, "statement_cache_size": 0, "prepared_statement_cache_size": 0}
 
-engine = create_async_engine(db_url, echo=False, future=True, connect_args=connect_args)
+engine = create_async_engine(db_url, echo=False, future=True, connect_args=connect_args, poolclass=NullPool)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
-# -----------------------------
-# App setup
-# -----------------------------
+# ─── App setup ───
 app = FastAPI(title="Commission Tracker")
 templates = Jinja2Templates(directory="app/templates")
 
-def _md_date(value):
-    try:
-        if value is None:
-            return ""
-        return f"{value.month}/{value.day}"
-    except Exception:
-        return ""
-
-templates.env.filters["md"] = _md_date
+templates.env.filters["md"] = lambda v: f"{v.month}/{v.day}" if v else ""
 templates.env.globals["today"] = today
 templates.env.globals["current_month"] = lambda: today().strftime("%Y-%m")
 
@@ -80,172 +71,213 @@ if os.path.isdir(static_dir):
 
 
 @app.exception_handler(Exception)
-async def _unhandled_exception_handler(request: Request, exc: Exception):
-    tb = traceback.format_exc()
+async def _exc(request: Request, exc: Exception):
     return HTMLResponse(
-        f"<h1>Internal Server Error</h1>"
-        f"<p><b>URL:</b> {request.url}</p>"
-        f"<pre style='white-space:pre-wrap'>{tb}</pre>",
+        f"<h1>Server Error</h1><p>{request.url}</p><pre style='white-space:pre-wrap'>{traceback.format_exc()}</pre>",
         status_code=500,
     )
-
 
 async def get_db():
     async with SessionLocal() as session:
         yield session
 
 
+# ─── Auth helpers ───
+PUBLIC_PATHS = {"/login", "/register"}
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    if path in PUBLIC_PATHS or path.startswith("/static"):
+        return await call_next(request)
+    token = get_session_token(request)
+    uid = get_user_id_from_session(token)
+    if uid is None:
+        return RedirectResponse(url="/login", status_code=303)
+    request.state.user_id = uid
+    return await call_next(request)
+
+
+def uid(request: Request) -> int:
+    return request.state.user_id
+
+async def _user(request: Request, db: AsyncSession) -> User:
+    return (await db.execute(select(User).where(User.id == uid(request)))).scalar_one()
+
+
+# ─── Startup / Migrations ───
+@app.on_event("startup")
+async def startup():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        # Add user_id columns to existing tables (backward compat migration)
+        for tbl in ("deals", "settings", "goals"):
+            try:
+                await conn.exec_driver_sql(f"ALTER TABLE {tbl} ADD COLUMN user_id INTEGER REFERENCES users(id)")
+            except Exception:
+                try:
+                    await conn.exec_driver_sql(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id)")
+                except Exception:
+                    pass
+        # Legacy column migrations
+        for col, typ, dflt in [
+            ("scheduled_date", "DATE", "NULL"),
+            ("on_delivery_board", "BOOLEAN", "false"),
+            ("gas_ready", "BOOLEAN", "false"),
+            ("inspection_ready", "BOOLEAN", "false"),
+            ("insurance_ready", "BOOLEAN", "false"),
+        ]:
+            try:
+                await conn.exec_driver_sql(f"ALTER TABLE deals ADD COLUMN IF NOT EXISTS {col} {typ} DEFAULT {dflt}")
+            except Exception:
+                pass
+        for col, typ, dflt in [
+            ("hourly_rate_ny_offset", "FLOAT", "15.0"),
+            ("new_volume_bonus_15_16", "FLOAT", "1000.0"), ("new_volume_bonus_17_18", "FLOAT", "1200.0"),
+            ("new_volume_bonus_19_20", "FLOAT", "1500.0"), ("new_volume_bonus_21_24", "FLOAT", "2000.0"),
+            ("new_volume_bonus_25_plus", "FLOAT", "2800.0"),
+            ("used_volume_bonus_8_10", "FLOAT", "350.0"), ("used_volume_bonus_11_12", "FLOAT", "500.0"),
+            ("used_volume_bonus_13_plus", "FLOAT", "1000.0"),
+            ("spot_bonus_5_9", "FLOAT", "50.0"), ("spot_bonus_10_12", "FLOAT", "80.0"),
+            ("spot_bonus_13_plus", "FLOAT", "100.0"),
+            ("quarterly_bonus_threshold_units", "INTEGER", "60"),
+            ("quarterly_bonus_amount", "FLOAT", "1200.0"),
+        ]:
+            try:
+                await conn.exec_driver_sql(f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} {typ} DEFAULT {dflt}")
+            except Exception:
+                pass
+
+
+# ─── Utility functions ───
 def month_bounds(d: date):
     start = date(d.year, d.month, 1)
-    if d.month == 12:
-        end = date(d.year + 1, 1, 1)
-    else:
-        end = date(d.year, d.month + 1, 1)
+    end = date(d.year + 1, 1, 1) if d.month == 12 else date(d.year, d.month + 1, 1)
     return start, end
 
-
-def quarter_bounds(d: date) -> tuple[date, date]:
-    q_start_month = ((d.month - 1) // 3) * 3 + 1
-    start = date(d.year, q_start_month, 1)
-    if q_start_month == 10:
-        end = date(d.year + 1, 1, 1)
-    else:
-        end = date(d.year, q_start_month + 3, 1)
+def quarter_bounds(d: date):
+    q = ((d.month - 1) // 3) * 3 + 1
+    start = date(d.year, q, 1)
+    end = date(d.year + 1, 1, 1) if q == 10 else date(d.year, q + 3, 1)
     return start, end
 
-
-def _tiered_volume_bonus(count: int, tiers: list[tuple[int, int | None, float]]) -> tuple[float, str]:
+def _tiered(count, tiers):
     for mn, mx, amt in tiers:
         if count >= mn and (mx is None or count <= mx):
-            if mx is None:
-                return amt, f"{mn}+"
-            return amt, f"{mn}-{mx}"
+            return amt, (f"{mn}+" if mx is None else f"{mn}-{mx}")
     return 0.0, "--"
 
-
-def _tiered_spot_bonus(count: int, tiers: list[tuple[int, int | None, float]]) -> tuple[float, float, str]:
+def _tiered_spot(count, tiers):
     for mn, mx, per in tiers:
         if count >= mn and (mx is None or count <= mx):
             label = f"{mn}+" if mx is None else f"{mn}-{mx}"
             return float(count) * float(per), float(per), label
     return 0.0, 0.0, "--"
 
+def _next_tier(count, tiers):
+    asc = sorted(tiers, key=lambda x: x[0])
+    for mn, mx, amt in asc:
+        if count < mn:
+            return {"tier": f"{mn}+" if mx is None else f"{mn}–{mx}", "at": mn, "need": mn - count, "amount": float(amt)}
+    return {"tier": "Maxed", "at": None, "need": 0, "amount": 0.0}
 
-def get_selected_month_year(request: Request) -> tuple[int, int]:
-    td = today()
-    try:
-        y = int(request.cookies.get("ct_year") or td.year)
-    except Exception:
-        y = td.year
-    try:
-        m = int(request.cookies.get("ct_month") or td.month)
-    except Exception:
-        m = td.month
-    if m < 1:
-        m = 1
-    if m > 12:
-        m = 12
-    return y, m
+def _next_spot(count, tiers):
+    asc = sorted(tiers, key=lambda x: x[0])
+    for mn, mx, per in asc:
+        if count < mn:
+            return {"tier": f"{mn}+" if mx is None else f"{mn}–{mx}", "at": mn, "need": mn - count, "per": float(per)}
+    return {"tier": "Maxed", "at": None, "need": 0, "per": 0.0}
 
-
-@app.on_event("startup")
-async def startup():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-        try:
-            await conn.exec_driver_sql("ALTER TABLE deals ADD COLUMN scheduled_date DATE")
-        except Exception:
-            try:
-                await conn.exec_driver_sql("ALTER TABLE deals ADD COLUMN IF NOT EXISTS scheduled_date DATE")
-            except Exception:
-                pass
-
-        # Delivery board columns
-        delivery_cols = [
-            ("on_delivery_board", "BOOLEAN", "0"),
-            ("gas_ready", "BOOLEAN", "0"),
-            ("inspection_ready", "BOOLEAN", "0"),
-            ("insurance_ready", "BOOLEAN", "0"),
-        ]
-        for col, typ, default in delivery_cols:
-            try:
-                await conn.exec_driver_sql(
-                    f"ALTER TABLE deals ADD COLUMN {col} {typ} DEFAULT {default}"
-                )
-            except Exception:
-                try:
-                    await conn.exec_driver_sql(
-                        f"ALTER TABLE deals ADD COLUMN IF NOT EXISTS {col} {typ} DEFAULT {default}"
-                    )
-                except Exception:
-                    pass
-
-        settings_cols = [
-            ("hourly_rate_ny_offset", "FLOAT", "15.0"),
-            ("new_volume_bonus_15_16", "FLOAT", "1000.0"),
-            ("new_volume_bonus_17_18", "FLOAT", "1200.0"),
-            ("new_volume_bonus_19_20", "FLOAT", "1500.0"),
-            ("new_volume_bonus_21_24", "FLOAT", "2000.0"),
-            ("new_volume_bonus_25_plus", "FLOAT", "2800.0"),
-            ("used_volume_bonus_8_10", "FLOAT", "350.0"),
-            ("used_volume_bonus_11_12", "FLOAT", "500.0"),
-            ("used_volume_bonus_13_plus", "FLOAT", "1000.0"),
-            ("spot_bonus_5_9", "FLOAT", "50.0"),
-            ("spot_bonus_10_12", "FLOAT", "80.0"),
-            ("spot_bonus_13_plus", "FLOAT", "100.0"),
-            ("quarterly_bonus_threshold_units", "INTEGER", "60"),
-            ("quarterly_bonus_amount", "FLOAT", "1200.0"),
-        ]
-
-        for col, typ, default in settings_cols:
-            try:
-                await conn.exec_driver_sql(
-                    f"ALTER TABLE settings ADD COLUMN {col} {typ} DEFAULT {default}"
-                )
-            except Exception:
-                try:
-                    await conn.exec_driver_sql(
-                        f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} {typ} DEFAULT {default}"
-                    )
-                except Exception:
-                    pass
-
-    async with SessionLocal() as session:
-        res = await session.execute(select(Settings).limit(1))
-        s = res.scalar_one_or_none()
-        if not s:
-            s = Settings(
-                unit_comm_discount_le_200=190.0,
-                unit_comm_discount_gt_200=140.0,
-                permaplate=40.0,
-                nitro_fill=40.0,
-                pulse=40.0,
-                finance_non_subvented=40.0,
-                warranty=25.0,
-                tire_wheel=25.0,
-                hourly_rate_ny_offset=15.0,
-                new_volume_bonus_15_16=1000.0,
-                new_volume_bonus_17_18=1200.0,
-                new_volume_bonus_19_20=1500.0,
-                new_volume_bonus_21_24=2000.0,
-                new_volume_bonus_25_plus=2800.0,
-                used_volume_bonus_8_10=350.0,
-                used_volume_bonus_11_12=500.0,
-                used_volume_bonus_13_plus=1000.0,
-                spot_bonus_5_9=50.0,
-                spot_bonus_10_12=80.0,
-                spot_bonus_13_plus=100.0,
-                quarterly_bonus_threshold_units=60,
-                quarterly_bonus_amount=1200.0,
-            )
-            session.add(s)
-            await session.commit()
+def _pct(n, d):
+    return round((n / d) * 100.0, 1) if d > 0 else None
 
 
-# =============================================
-# Dashboard
-# =============================================
+# ════════════════════════════════════════════════
+# AUTH ROUTES
+# ════════════════════════════════════════════════
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, error: str = ""):
+    return templates.TemplateResponse("login.html", {"request": request, "error": error, "mode": "login"})
+
+@app.post("/login")
+async def login_post(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    username = username.strip().lower()
+    user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
+    if not user or not verify_password(password, user.password_hash, user.password_salt):
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Invalid username or password",
+            "mode": "login",
+        })
+    token = create_session(user.id)
+    resp = RedirectResponse(url="/", status_code=303)
+    resp.set_cookie("ct_session", token, httponly=True, samesite="lax", max_age=60*60*24*30)
+    return resp
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request, error: str = ""):
+    return templates.TemplateResponse("login.html", {"request": request, "error": error, "mode": "register"})
+
+@app.post("/register")
+async def register_post(
+    request: Request,
+    username: str = Form(...),
+    display_name: str = Form(""),
+    password: str = Form(...),
+    password2: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    username = username.strip().lower()
+    errors = []
+    if len(username) < 3:
+        errors.append("Username must be at least 3 characters")
+    if len(password) < 6:
+        errors.append("Password must be at least 6 characters")
+    if password != password2:
+        errors.append("Passwords don't match")
+    existing = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
+    if existing:
+        errors.append("Username already taken")
+    if errors:
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": ". ".join(errors),
+            "mode": "register",
+        })
+    pw_hash, pw_salt = hash_password(password)
+    user = User(
+        username=username,
+        display_name=(display_name.strip() or username),
+        password_hash=pw_hash,
+        password_salt=pw_salt,
+        created_at=datetime.utcnow().isoformat(),
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    # Auto-create settings for the new user
+    await get_or_create_settings(db, user.id)
+    token = create_session(user.id)
+    resp = RedirectResponse(url="/", status_code=303)
+    resp.set_cookie("ct_session", token, httponly=True, samesite="lax", max_age=60*60*24*30)
+    return resp
+
+@app.get("/logout")
+async def logout(request: Request):
+    destroy_session(get_session_token(request))
+    resp = RedirectResponse(url="/login", status_code=303)
+    resp.delete_cookie("ct_session")
+    return resp
+
+
+# ════════════════════════════════════════════════
+# DASHBOARD
+# ════════════════════════════════════════════════
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
@@ -253,1033 +285,526 @@ async def dashboard(
     year: int | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    s = (await db.execute(select(Settings).limit(1))).scalar_one()
+    user_id = uid(request)
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one()
+    s = await get_or_create_settings(db, user_id)
 
-    deals = (
-        await db.execute(
-            select(Deal).order_by(
-                Deal.delivered_date.desc().nullslast(),
-                Deal.sold_date.desc().nullslast(),
-            )
-        )
-    ).scalars().all()
+    deals = (await db.execute(
+        select(Deal).where(Deal.user_id == user_id)
+        .order_by(Deal.delivered_date.desc().nullslast(), Deal.sold_date.desc().nullslast())
+    )).scalars().all()
 
     today_date = today()
-    selected_year: int
-    selected_month: int
 
-    month_str = (month or "").strip() if month else ""
+    # Parse month/year
+    month_str = (month or "").strip()
     if year is not None and month_str and month_str.isdigit():
-        selected_year = int(year)
-        selected_month = int(month_str)
+        sel_y, sel_m = int(year), int(month_str)
     else:
         m = re.fullmatch(r"(\d{4})-(\d{1,2})", month_str)
         if m:
-            selected_year = int(m.group(1))
-            selected_month = int(m.group(2))
+            sel_y, sel_m = int(m.group(1)), int(m.group(2))
         else:
-            selected_year = int(year) if year is not None else today_date.year
-            selected_month = today_date.month
+            sel_y = int(year) if year is not None else today_date.year
+            sel_m = today_date.month
+    sel_m = max(1, min(12, sel_m))
 
-    if selected_month < 1:
-        selected_month = 1
-    if selected_month > 12:
-        selected_month = 12
-
-    d0 = date(selected_year, selected_month, 1)
+    d0 = date(sel_y, sel_m, 1)
     start_m, end_m = month_bounds(d0)
-    month_key = f"{selected_year:04d}-{selected_month:02d}"
+    month_key = f"{sel_y:04d}-{sel_m:02d}"
 
-    delivered_mtd = [
-        d for d in deals
-        if d.status == "Delivered"
-        and d.delivered_date
-        and start_m <= d.delivered_date < end_m
-    ]
+    delivered_mtd = [d for d in deals if d.status == "Delivered" and d.delivered_date and start_m <= d.delivered_date < end_m]
 
-    # --- Previous month for comparison ---
-    if selected_month == 1:
-        prev_year, prev_month = selected_year - 1, 12
-    else:
-        prev_year, prev_month = selected_year, selected_month - 1
-    prev_d0 = date(prev_year, prev_month, 1)
-    prev_start, prev_end = month_bounds(prev_d0)
-    prev_delivered = [
-        d for d in deals
-        if d.status == "Delivered"
-        and d.delivered_date
-        and prev_start <= d.delivered_date < prev_end
-    ]
-    prev_units = len(prev_delivered)
-    prev_comm = sum((d.total_deal_comm or 0) for d in prev_delivered)
+    # Previous month
+    py, pm = (sel_y - 1, 12) if sel_m == 1 else (sel_y, sel_m - 1)
+    ps, pe = month_bounds(date(py, pm, 1))
+    prev_del = [d for d in deals if d.status == "Delivered" and d.delivered_date and ps <= d.delivered_date < pe]
 
-    # --- Closing rates ---
-    delivered_total = len(delivered_mtd)
-
-    def _pct(n: int, d: int) -> float | None:
-        if d <= 0:
-            return None
-        return round((n / d) * 100.0, 1)
-
-    pulse_yes = sum(1 for d in delivered_mtd if getattr(d, "pulse", False))
-    nitro_yes = sum(1 for d in delivered_mtd if getattr(d, "nitro_fill", False))
-    perma_yes = sum(1 for d in delivered_mtd if getattr(d, "permaplate", False))
-    aim_yes = sum(1 for d in delivered_mtd if (getattr(d, "aim_presentation", "X") or "X") == "Yes")
-    aim_no = sum(1 for d in delivered_mtd if (getattr(d, "aim_presentation", "X") or "X") == "No")
-    aim_den = aim_yes + aim_no
-
-    closing_rates = {
-        "pulse": {"label": "Pulse", "yes": pulse_yes, "den": delivered_total, "pct": _pct(pulse_yes, delivered_total)},
-        "nitro": {"label": "Nitro Fill", "yes": nitro_yes, "den": delivered_total, "pct": _pct(nitro_yes, delivered_total)},
-        "permaplate": {"label": "PermaPlate", "yes": perma_yes, "den": delivered_total, "pct": _pct(perma_yes, delivered_total)},
-        "aim": {"label": "Aim Presentation", "yes": aim_yes, "den": aim_den, "pct": _pct(aim_yes, aim_den)},
-    }
-
+    # Stats
     units_mtd = len(delivered_mtd)
     comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd)
-    paid_comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd if getattr(d, "is_paid", False))
-    pending_comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd if not getattr(d, "is_paid", False))
+    paid_comm = sum((d.total_deal_comm or 0) for d in delivered_mtd if d.is_paid)
     new_mtd = len([d for d in delivered_mtd if (d.new_used or "").lower() == "new"])
     used_mtd = len([d for d in delivered_mtd if (d.new_used or "").lower() == "used"])
-    avg_per_deal = (comm_mtd / units_mtd) if units_mtd > 0 else 0.0
+    avg_deal = comm_mtd / units_mtd if units_mtd else 0.0
 
-    # --- Bonus calculation ---
-    volume_units_mtd = units_mtd
-    volume_tiers = [
-        (25, None, float(s.new_volume_bonus_25_plus)),
-        (21, 24, float(s.new_volume_bonus_21_24)),
-        (19, 20, float(s.new_volume_bonus_19_20)),
-        (17, 18, float(s.new_volume_bonus_17_18)),
-        (15, 16, float(s.new_volume_bonus_15_16)),
-    ]
-    used_tiers = [
-        (13, None, float(s.used_volume_bonus_13_plus)),
-        (11, 12, float(s.used_volume_bonus_11_12)),
-        (8, 10, float(s.used_volume_bonus_8_10)),
-    ]
-    spot_tiers = [
-        (13, None, float(s.spot_bonus_13_plus)),
-        (10, 12, float(s.spot_bonus_10_12)),
-        (5, 9, float(s.spot_bonus_5_9)),
-    ]
-
-    volume_bonus_amt, volume_bonus_tier = _tiered_volume_bonus(volume_units_mtd, volume_tiers)
-    used_bonus_amt, used_bonus_tier = _tiered_volume_bonus(used_mtd, used_tiers)
-    spot_count_mtd = sum(1 for d in delivered_mtd if getattr(d, "spot_sold", False))
-    spot_bonus_total, spot_bonus_per, spot_bonus_tier = _tiered_spot_bonus(spot_count_mtd, spot_tiers)
-
-    q_start, q_end = quarter_bounds(date(selected_year, selected_month, 1))
-    delivered_qtd = [
-        d for d in deals
-        if d.status == "Delivered" and d.delivered_date and q_start <= d.delivered_date < q_end
-    ]
-    units_qtd = len(delivered_qtd)
-    quarterly_hit = units_qtd >= int(s.quarterly_bonus_threshold_units or 0)
-    quarterly_bonus = float(s.quarterly_bonus_amount) if quarterly_hit else 0.0
-    current_bonus_total = float(volume_bonus_amt) + float(used_bonus_amt) + float(spot_bonus_total) + float(quarterly_bonus)
-
-    # --- Projected (delivered + pending) ---
-    pending_deals_list = [d for d in deals if d.status == "Pending"]
-    pending_in_month = [
-        d for d in pending_deals_list
-        if d.sold_date and start_m <= d.sold_date < end_m
-    ]
-    proj_units = units_mtd + len(pending_in_month)
-    proj_comm = comm_mtd + sum((d.total_deal_comm or 0) for d in pending_in_month)
-    proj_used = used_mtd + len([d for d in pending_in_month if (d.new_used or "").lower() == "used"])
-    proj_vol_bonus, _ = _tiered_volume_bonus(proj_units, volume_tiers)
-    proj_used_bonus, _ = _tiered_volume_bonus(proj_used, used_tiers)
-    proj_bonus_total = float(proj_vol_bonus) + float(proj_used_bonus) + float(spot_bonus_total) + float(quarterly_bonus)
-    bonus_uplift = proj_bonus_total - current_bonus_total
-
-    # --- Next tier helpers ---
-    def _next_volume(count: int, tiers_desc):
-        asc = sorted([(mn, mx, amt) for (mn, mx, amt) in tiers_desc], key=lambda x: x[0])
-        for mn, mx, amt in asc:
-            if count < mn:
-                return {"tier": f"{mn}+" if mx is None else f"{mn}–{mx}", "at": mn, "need": mn - count, "amount": float(amt)}
-        return {"tier": "Maxed", "at": None, "need": 0, "amount": 0.0}
-
-    def _next_spot(count: int, tiers_desc):
-        asc = sorted([(mn, mx, per) for (mn, mx, per) in tiers_desc], key=lambda x: x[0])
-        for mn, mx, per in asc:
-            if count < mn:
-                return {"tier": f"{mn}+" if mx is None else f"{mn}–{mx}", "at": mn, "need": mn - count, "per": float(per)}
-        return {"tier": "Maxed", "at": None, "need": 0, "per": 0.0}
-
-    volume_next = _next_volume(volume_units_mtd, volume_tiers)
-    used_next = _next_volume(used_mtd, used_tiers)
-    spot_next = _next_spot(spot_count_mtd, spot_tiers)
-    quarterly_next = {
-        "tier": "Hit" if quarterly_hit else f"{int(s.quarterly_bonus_threshold_units or 0)} units",
-        "need": 0 if quarterly_hit else max(0, int(s.quarterly_bonus_threshold_units or 0) - units_qtd),
-        "amount": float(s.quarterly_bonus_amount or 0),
+    # Closing rates
+    dt = len(delivered_mtd)
+    pulse_y = sum(1 for d in delivered_mtd if d.pulse)
+    nitro_y = sum(1 for d in delivered_mtd if d.nitro_fill)
+    perma_y = sum(1 for d in delivered_mtd if d.permaplate)
+    aim_y = sum(1 for d in delivered_mtd if (d.aim_presentation or "X") == "Yes")
+    aim_n = sum(1 for d in delivered_mtd if (d.aim_presentation or "X") == "No")
+    closing_rates = {
+        "pulse": {"label": "Pulse", "yes": pulse_y, "den": dt, "pct": _pct(pulse_y, dt)},
+        "nitro": {"label": "Nitro Fill", "yes": nitro_y, "den": dt, "pct": _pct(nitro_y, dt)},
+        "permaplate": {"label": "PermaPlate", "yes": perma_y, "den": dt, "pct": _pct(perma_y, dt)},
+        "aim": {"label": "Aim", "yes": aim_y, "den": aim_y + aim_n, "pct": _pct(aim_y, aim_y + aim_n)},
     }
+
+    # Bonus tiers
+    vol_tiers = [(25,None,float(s.new_volume_bonus_25_plus)),(21,24,float(s.new_volume_bonus_21_24)),
+                 (19,20,float(s.new_volume_bonus_19_20)),(17,18,float(s.new_volume_bonus_17_18)),(15,16,float(s.new_volume_bonus_15_16))]
+    used_tiers = [(13,None,float(s.used_volume_bonus_13_plus)),(11,12,float(s.used_volume_bonus_11_12)),(8,10,float(s.used_volume_bonus_8_10))]
+    spot_tiers = [(13,None,float(s.spot_bonus_13_plus)),(10,12,float(s.spot_bonus_10_12)),(5,9,float(s.spot_bonus_5_9))]
+
+    vol_amt, vol_tier = _tiered(units_mtd, vol_tiers)
+    used_amt, used_tier = _tiered(used_mtd, used_tiers)
+    spots = sum(1 for d in delivered_mtd if d.spot_sold)
+    spot_total, spot_per, spot_tier = _tiered_spot(spots, spot_tiers)
+
+    qs, qe = quarter_bounds(d0)
+    qtd = [d for d in deals if d.status == "Delivered" and d.delivered_date and qs <= d.delivered_date < qe]
+    q_hit = len(qtd) >= int(s.quarterly_bonus_threshold_units or 0)
+    q_bonus = float(s.quarterly_bonus_amount) if q_hit else 0.0
+    bonus_total = float(vol_amt) + float(used_amt) + float(spot_total) + q_bonus
+
+    # Projections
+    pending_all = [d for d in deals if d.status == "Pending"]
+    pend_month = [d for d in pending_all if d.sold_date and start_m <= d.sold_date < end_m]
+    proj_units = units_mtd + len(pend_month)
+    proj_comm = comm_mtd + sum((d.total_deal_comm or 0) for d in pend_month)
+    proj_used = used_mtd + len([d for d in pend_month if (d.new_used or "").lower() == "used"])
+    pv, _ = _tiered(proj_units, vol_tiers)
+    pu, _ = _tiered(proj_used, used_tiers)
+    proj_bonus = float(pv) + float(pu) + float(spot_total) + q_bonus
 
     bonus_breakdown = {
-        "volume": {"units": volume_units_mtd, "new_units": new_mtd, "used_units": used_mtd, "tier": volume_bonus_tier, "amount": float(volume_bonus_amt), "next": volume_next},
-        "used": {"units": used_mtd, "tier": used_bonus_tier, "amount": float(used_bonus_amt), "next": used_next},
-        "spot": {"spots": spot_count_mtd, "tier": spot_bonus_tier, "per": float(spot_bonus_per), "amount": float(spot_bonus_total), "next": spot_next},
-        "quarterly": {"units_qtd": units_qtd, "threshold": int(s.quarterly_bonus_threshold_units or 0), "hit": bool(quarterly_hit), "amount": float(quarterly_bonus), "q_label": f"Q{((selected_month - 1)//3)+1}", "next": quarterly_next},
-        "total": float(current_bonus_total),
+        "volume": {"units": units_mtd, "new_units": new_mtd, "used_units": used_mtd, "tier": vol_tier, "amount": float(vol_amt), "next": _next_tier(units_mtd, vol_tiers)},
+        "used": {"units": used_mtd, "tier": used_tier, "amount": float(used_amt), "next": _next_tier(used_mtd, used_tiers)},
+        "spot": {"spots": spots, "tier": spot_tier, "per": float(spot_per), "amount": float(spot_total), "next": _next_spot(spots, spot_tiers)},
+        "quarterly": {"units_qtd": len(qtd), "threshold": int(s.quarterly_bonus_threshold_units or 0), "hit": q_hit, "amount": q_bonus,
+                       "q_label": f"Q{((sel_m-1)//3)+1}", "next": {"tier": "Hit" if q_hit else f"{int(s.quarterly_bonus_threshold_units or 0)} units",
+                       "need": 0 if q_hit else max(0, int(s.quarterly_bonus_threshold_units or 0) - len(qtd)), "amount": float(s.quarterly_bonus_amount or 0)}},
+        "total": bonus_total,
     }
 
-    # --- Year trend ---
-    delivered_year = [d for d in deals if d.status == "Delivered" and d.delivered_date and d.delivered_date.year == selected_year]
-    units_by_month = [0] * 12
-    comm_by_month = [0.0] * 12
-    for d in delivered_year:
-        units_by_month[d.delivered_date.month - 1] += 1
-        comm_by_month[d.delivered_date.month - 1] += (d.total_deal_comm or 0)
-    month_labels = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    # Year trend
+    yr_del = [d for d in deals if d.status == "Delivered" and d.delivered_date and d.delivered_date.year == sel_y]
+    ubm = [0]*12; cbm = [0.0]*12
+    for d in yr_del:
+        ubm[d.delivered_date.month-1] += 1
+        cbm[d.delivered_date.month-1] += (d.total_deal_comm or 0)
 
-    units_ytd = len(delivered_year)
-    comm_ytd = sum((d.total_deal_comm or 0) for d in delivered_year)
+    # Pending
+    for d in pending_all:
+        d.days_pending = (today_date - d.sold_date).days if d.sold_date else 0
+    pending_all.sort(key=lambda x: x.sold_date or date.max)
 
-    # --- Pending deals ---
-    for d in pending_deals_list:
-        if d.sold_date:
-            d.days_pending = (today_date - d.sold_date).days
-        else:
-            d.days_pending = 0
-    pending_deals_list = sorted(pending_deals_list, key=lambda x: x.sold_date or date.max)
-    pending = len(pending_deals_list)
-
-    # --- Milestones (achievements unlocked this month) ---
+    # Milestones
     milestones = []
-    if volume_bonus_amt > 0:
-        milestones.append(f"Volume Bonus unlocked — ${volume_bonus_amt:,.0f}")
-    if used_bonus_amt > 0:
-        milestones.append(f"Used Bonus unlocked — ${used_bonus_amt:,.0f}")
-    if spot_bonus_total > 0:
-        milestones.append(f"Spot Bonus active — ${spot_bonus_total:,.0f}")
-    if quarterly_hit:
-        milestones.append(f"Quarterly target hit — ${quarterly_bonus:,.0f}")
+    if vol_amt > 0: milestones.append(f"Volume Bonus unlocked — ${vol_amt:,.0f}")
+    if used_amt > 0: milestones.append(f"Used Bonus unlocked — ${used_amt:,.0f}")
+    if spot_total > 0: milestones.append(f"Spot Bonus active — ${spot_total:,.0f}")
+    if q_hit: milestones.append(f"Quarterly target hit — ${q_bonus:,.0f}")
 
-    # --- Goals ---
-    goal_row = (await db.execute(
-        select(Goal).where(Goal.year == selected_year, Goal.month == selected_month).limit(1)
-    )).scalar_one_or_none()
-    goals = {
-        "unit_goal": goal_row.unit_goal if goal_row else 20,
-        "commission_goal": goal_row.commission_goal if goal_row else 8000.0,
-        "has_custom": goal_row is not None,
-    }
+    # Goals
+    goal = (await db.execute(select(Goal).where(Goal.user_id == user_id, Goal.year == sel_y, Goal.month == sel_m).limit(1))).scalar_one_or_none()
+    goals = {"unit_goal": goal.unit_goal if goal else 20, "commission_goal": goal.commission_goal if goal else 8000.0, "has_custom": goal is not None}
 
-    # --- Today's deliveries (scheduled for today or on delivery board) ---
-    todays_deliveries = [
-        d for d in deals
-        if d.status not in ("Delivered", "Dead")
-        and d.scheduled_date == today_date
-    ]
+    # Today's deliveries
+    todays = [d for d in deals if d.status not in ("Delivered","Dead") and d.scheduled_date == today_date]
 
-    # --- Year selector ---
-    years = set([today_date.year])
-    for d in deals:
-        if d.delivered_date:
-            years.add(d.delivered_date.year)
-        if d.sold_date:
-            years.add(d.sold_date.year)
-    year_options = sorted(years, reverse=True)
-    month_options = [{"num": i, "label": calendar.month_name[i]} for i in range(1, 13)]
+    years = sorted({today_date.year} | {d.delivered_date.year for d in deals if d.delivered_date} | {d.sold_date.year for d in deals if d.sold_date}, reverse=True)
 
     resp = templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "month": month_key,
-        "selected_year": selected_year,
-        "selected_month": selected_month,
-        "year_options": year_options,
-        "month_options": month_options,
-
-        "units_mtd": units_mtd,
-        "closing_rates": closing_rates,
-        "comm_mtd": comm_mtd,
-        "paid_comm_mtd": paid_comm_mtd,
-        "pending_comm_mtd": pending_comm_mtd,
-        "new_mtd": new_mtd,
-        "used_mtd": used_mtd,
-        "avg_per_deal": avg_per_deal,
-
-        "current_bonus_total": current_bonus_total,
-        "bonus_breakdown": bonus_breakdown,
-
-        "units_ytd": units_ytd,
-        "comm_ytd": comm_ytd,
-
-        "pending": pending,
-        "pending_deals": pending_deals_list[:15],
-        "pending_deals_all": pending_deals_list,
-
-        "year": selected_year,
-        "month_labels": month_labels,
-        "units_by_month": units_by_month,
-        "comm_by_month": comm_by_month,
-
-        # New: comparisons
-        "prev_units": prev_units,
-        "prev_comm": prev_comm,
-        "units_diff": units_mtd - prev_units,
-        "comm_diff": comm_mtd - prev_comm,
-
-        # New: projections
-        "proj_units": proj_units,
-        "proj_comm": proj_comm,
-        "proj_bonus_total": proj_bonus_total,
-        "bonus_uplift": bonus_uplift,
-        "pending_in_month_count": len(pending_in_month),
-
-        # New: goals
-        "goals": goals,
-
-        # New: milestones
-        "milestones": milestones,
-
-        # New: today's deliveries
-        "todays_deliveries": todays_deliveries,
+        "request": request, "user": user,
+        "month": month_key, "selected_year": sel_y, "selected_month": sel_m,
+        "year_options": years, "month_options": [{"num": i, "label": calendar.month_name[i]} for i in range(1,13)],
+        "units_mtd": units_mtd, "closing_rates": closing_rates,
+        "comm_mtd": comm_mtd, "paid_comm_mtd": paid_comm, "pending_comm_mtd": comm_mtd - paid_comm,
+        "new_mtd": new_mtd, "used_mtd": used_mtd, "avg_per_deal": avg_deal,
+        "current_bonus_total": bonus_total, "bonus_breakdown": bonus_breakdown,
+        "units_ytd": len(yr_del), "comm_ytd": sum((d.total_deal_comm or 0) for d in yr_del),
+        "pending": len(pending_all), "pending_deals": pending_all[:15], "pending_deals_all": pending_all,
+        "year": sel_y, "month_labels": ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],
+        "units_by_month": ubm, "comm_by_month": cbm,
+        "prev_units": len(prev_del), "prev_comm": sum((d.total_deal_comm or 0) for d in prev_del),
+        "units_diff": units_mtd - len(prev_del), "comm_diff": comm_mtd - sum((d.total_deal_comm or 0) for d in prev_del),
+        "proj_units": proj_units, "proj_comm": proj_comm,
+        "proj_bonus_total": proj_bonus, "bonus_uplift": proj_bonus - bonus_total,
+        "pending_in_month_count": len(pend_month),
+        "goals": goals, "milestones": milestones, "todays_deliveries": todays,
     })
-
-    resp.set_cookie("ct_year", str(selected_year), httponly=False, samesite="lax")
-    resp.set_cookie("ct_month", str(selected_month), httponly=False, samesite="lax")
+    resp.set_cookie("ct_year", str(sel_y), httponly=False, samesite="lax")
+    resp.set_cookie("ct_month", str(sel_m), httponly=False, samesite="lax")
     return resp
 
 
-# =============================================
-# Goals
-# =============================================
+# ════════════════════════════════════════════════
+# GOALS
+# ════════════════════════════════════════════════
 @app.post("/goals/save")
-async def goals_save(
-    request: Request,
-    unit_goal: int = Form(default=20),
-    commission_goal: float = Form(default=8000.0),
-    db: AsyncSession = Depends(get_db),
-):
-    selected_year, selected_month = get_selected_month_year(request)
-    goal = (await db.execute(
-        select(Goal).where(Goal.year == selected_year, Goal.month == selected_month).limit(1)
-    )).scalar_one_or_none()
-
+async def goals_save(request: Request, unit_goal: int = Form(20), commission_goal: float = Form(8000.0), db: AsyncSession = Depends(get_db)):
+    user_id = uid(request)
+    td = today()
+    try: y = int(request.cookies.get("ct_year") or td.year)
+    except: y = td.year
+    try: m = int(request.cookies.get("ct_month") or td.month)
+    except: m = td.month
+    goal = (await db.execute(select(Goal).where(Goal.user_id == user_id, Goal.year == y, Goal.month == m).limit(1))).scalar_one_or_none()
     if goal:
-        goal.unit_goal = unit_goal
-        goal.commission_goal = commission_goal
+        goal.unit_goal = unit_goal; goal.commission_goal = commission_goal
     else:
-        goal = Goal(year=selected_year, month=selected_month, unit_goal=unit_goal, commission_goal=commission_goal)
-        db.add(goal)
+        db.add(Goal(user_id=user_id, year=y, month=m, unit_goal=unit_goal, commission_goal=commission_goal))
     await db.commit()
-    return RedirectResponse(url=f"/?year={selected_year}&month={selected_month}", status_code=303)
+    return RedirectResponse(url=f"/?year={y}&month={m}", status_code=303)
 
 
-# =============================================
-# Deals list
-# =============================================
+# ════════════════════════════════════════════════
+# DEALS LIST
+# ════════════════════════════════════════════════
 @app.get("/deals", response_class=HTMLResponse)
-async def deals_list(
-    request: Request,
-    q: str | None = None,
-    status: str | None = None,
-    paid: str | None = None,
-    db: AsyncSession = Depends(get_db),
-):
-    selected_year, selected_month = get_selected_month_year(request)
-    start_sel, end_sel = month_bounds(date(selected_year, selected_month, 1))
+async def deals_list(request: Request, q: str | None = None, status: str | None = None, paid: str | None = None, db: AsyncSession = Depends(get_db)):
+    user_id = uid(request)
+    td = today()
+    try: y = int(request.cookies.get("ct_year") or td.year)
+    except: y = td.year
+    try: m = int(request.cookies.get("ct_month") or td.month)
+    except: m = td.month
+    start_sel, end_sel = month_bounds(date(y, max(1,min(12,m)), 1))
 
-    stmt = select(Deal).order_by(
-        Deal.delivered_date.desc().nullslast(),
-        Deal.sold_date.desc().nullslast(),
-    )
-
-    carry_tags = ["inbound", "fo"]
-    base_filter = or_(
-        and_(
-            Deal.sold_date.is_not(None),
-            Deal.sold_date >= start_sel,
-            Deal.sold_date < end_sel,
-        ),
-        and_(
-            func.lower(func.coalesce(Deal.tag, "")).in_(carry_tags),
-            Deal.status != "Delivered",
-        ),
-    )
-    stmt = stmt.where(base_filter)
-
-    if status and status != "All":
-        stmt = stmt.where(Deal.status == status)
-    if paid and paid != "All":
-        if paid == "Paid":
-            stmt = stmt.where(Deal.is_paid.is_(True))
-        elif paid == "Pending":
-            stmt = stmt.where(Deal.is_paid.is_(False))
+    stmt = select(Deal).where(Deal.user_id == user_id).order_by(Deal.delivered_date.desc().nullslast(), Deal.sold_date.desc().nullslast())
+    carry = ["inbound", "fo"]
+    stmt = stmt.where(or_(
+        and_(Deal.sold_date.is_not(None), Deal.sold_date >= start_sel, Deal.sold_date < end_sel),
+        and_(func.lower(func.coalesce(Deal.tag, "")).in_(carry), Deal.status != "Delivered"),
+    ))
+    if status and status != "All": stmt = stmt.where(Deal.status == status)
+    if paid == "Paid": stmt = stmt.where(Deal.is_paid.is_(True))
+    elif paid == "Pending": stmt = stmt.where(Deal.is_paid.is_(False))
     if q and q.strip():
         like = f"%{q.strip()}%"
-        stmt = stmt.where(
-            (Deal.customer.ilike(like)) |
-            (Deal.stock_num.ilike(like)) |
-            (Deal.model.ilike(like))
-        )
+        stmt = stmt.where((Deal.customer.ilike(like)) | (Deal.stock_num.ilike(like)) | (Deal.model.ilike(like)))
 
     deals = (await db.execute(stmt)).scalars().all()
-
+    user = await _user(request, db)
     return templates.TemplateResponse("deals.html", {
-        "request": request,
-        "deals": deals,
-        "q": q or "",
-        "status": status or "All",
-        "paid": paid or "All",
-        "selected_year": selected_year,
-        "selected_month": selected_month,
+        "request": request, "user": user, "deals": deals, "q": q or "", "status": status or "All", "paid": paid or "All",
+        "selected_year": y, "selected_month": m,
     })
 
 
-# =============================================
-# Deal form
-# =============================================
+# ════════════════════════════════════════════════
+# DEAL FORM
+# ════════════════════════════════════════════════
 @app.get("/deals/new", response_class=HTMLResponse)
 async def deal_new(request: Request, db: AsyncSession = Depends(get_db)):
-    settings = (await db.execute(select(Settings).limit(1))).scalar_one()
-
+    user_id = uid(request)
+    settings = await get_or_create_settings(db, user_id)
     start_m, end_m = month_bounds(today())
-    delivered_mtd = (
-        await db.execute(
-            select(Deal).where(
-                Deal.status == "Delivered",
-                Deal.delivered_date.is_not(None),
-                Deal.delivered_date >= start_m,
-                Deal.delivered_date < end_m,
-            )
-        )
-    ).scalars().all()
-
-    units_mtd = len(delivered_mtd)
-    comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd)
-    avg_per_copy = (comm_mtd / units_mtd) if units_mtd else 0.0
-
+    dels = (await db.execute(select(Deal).where(Deal.user_id == user_id, Deal.status == "Delivered", Deal.delivered_date >= start_m, Deal.delivered_date < end_m))).scalars().all()
+    u = len(dels); c = sum((d.total_deal_comm or 0) for d in dels)
+    user = await _user(request, db)
     return templates.TemplateResponse("deal_form.html", {
-        "request": request,
-        "deal": None,
-        "settings": settings,
+        "request": request, "user": user, "deal": None, "settings": settings,
         "next_url": request.query_params.get("next") or "",
-        "mtd": {
-            "units": units_mtd,
-            "comm": comm_mtd,
-            "avg": avg_per_copy,
-            "month_label": today().strftime("%B %Y"),
-        },
+        "mtd": {"units": u, "comm": c, "avg": c/u if u else 0, "month_label": today().strftime("%B %Y")},
     })
-
 
 @app.get("/deals/{deal_id}/edit", response_class=HTMLResponse)
 async def deal_edit(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    try:
-        deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one_or_none()
-        if deal is None:
-            return RedirectResponse(url="/deals", status_code=303)
-        settings = (await db.execute(select(Settings).limit(1))).scalar_one_or_none()
-        if settings is None:
-            return HTMLResponse("<h1>Missing settings</h1>", status_code=500)
-    except Exception as e:
-        return HTMLResponse(
-            f"<h1>Internal Server Error</h1><pre>{str(e)}</pre>", status_code=500,
-        )
-
-    embed = (request.query_params.get("embed") == "1")
-
+    user_id = uid(request)
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == user_id))).scalar_one_or_none()
+    if not deal: return RedirectResponse(url="/deals", status_code=303)
+    settings = await get_or_create_settings(db, user_id)
+    embed = request.query_params.get("embed") == "1"
     start_m, end_m = month_bounds(today())
-    delivered_mtd = (
-        await db.execute(
-            select(Deal).where(
-                Deal.status == "Delivered",
-                Deal.delivered_date.is_not(None),
-                Deal.delivered_date >= start_m,
-                Deal.delivered_date < end_m,
-            )
-        )
-    ).scalars().all()
-
-    units_mtd = len(delivered_mtd)
-    comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd)
-    avg_per_copy = (comm_mtd / units_mtd) if units_mtd else 0.0
-
-    try:
-        return templates.TemplateResponse("deal_form.html", {
-            "request": request,
-            "deal": deal,
-            "settings": settings,
-            "next_url": request.query_params.get("next") or "",
-            "embed": embed,
-            "mtd": {
-                "units": units_mtd,
-                "comm": comm_mtd,
-                "avg": avg_per_copy,
-                "month_label": today().strftime("%B %Y"),
-            },
-        })
-    except Exception:
-        return HTMLResponse(
-            f"<h1>Internal Server Error</h1><pre style='white-space:pre-wrap'>{traceback.format_exc()}</pre>",
-            status_code=500,
-        )
+    dels = (await db.execute(select(Deal).where(Deal.user_id == user_id, Deal.status == "Delivered", Deal.delivered_date >= start_m, Deal.delivered_date < end_m))).scalars().all()
+    u = len(dels); c = sum((d.total_deal_comm or 0) for d in dels)
+    user = await _user(request, db)
+    return templates.TemplateResponse("deal_form.html", {
+        "request": request, "user": user, "deal": deal, "settings": settings, "embed": embed,
+        "next_url": request.query_params.get("next") or "",
+        "mtd": {"units": u, "comm": c, "avg": c/u if u else 0, "month_label": today().strftime("%B %Y")},
+    })
 
 
 @app.post("/deals/save")
 async def deal_save(
-    deal_id: int | None = Form(default=None),
-    sold_date: str | None = Form(default=None),
-    delivered_date: str | None = Form(default=None),
-    scheduled_date: str | None = Form(default=None),
-    status: str = Form(default="Pending"),
-    tag: str = Form(default=""),
-    customer: str = Form(default=""),
-    stock_num: str | None = Form(default=None),
-    model: str | None = Form(default=None),
-    new_used: str | None = Form(default=None),
-    deal_type: str | None = Form(default=None),
-    business_manager: str | None = Form(default=None),
-    spot_sold: int = Form(default=0),
-    discount_gt_200: str = Form(default="No"),
-    aim_presentation: str = Form(default="X"),
-    permaplate: int = Form(default=0),
-    nitro_fill: int = Form(default=0),
-    pulse: int = Form(default=0),
-    finance_non_subvented: int = Form(default=0),
-    warranty: int = Form(default=0),
-    tire_wheel: int = Form(default=0),
-    hold_amount: float = Form(default=0.0),
-    aim_amount: float = Form(default=0.0),
-    fi_pvr: float = Form(default=0.0),
-    notes: str | None = Form(default=None),
-    pay_date: str | None = Form(default=None),
-    is_paid: int = Form(default=0),
-    next: str | None = Form(default=None),
-    db: AsyncSession = Depends(get_db),
+    request: Request,
+    deal_id: int | None = Form(None), sold_date: str | None = Form(None),
+    delivered_date: str | None = Form(None), scheduled_date: str | None = Form(None),
+    status: str = Form("Pending"), tag: str = Form(""), customer: str = Form(""),
+    stock_num: str | None = Form(None), model: str | None = Form(None),
+    new_used: str | None = Form(None), deal_type: str | None = Form(None),
+    business_manager: str | None = Form(None), spot_sold: int = Form(0),
+    discount_gt_200: str = Form("No"), aim_presentation: str = Form("X"),
+    permaplate: int = Form(0), nitro_fill: int = Form(0), pulse: int = Form(0),
+    finance_non_subvented: int = Form(0), warranty: int = Form(0), tire_wheel: int = Form(0),
+    hold_amount: float = Form(0.0), aim_amount: float = Form(0.0), fi_pvr: float = Form(0.0),
+    notes: str | None = Form(None), pay_date: str | None = Form(None), is_paid: int = Form(0),
+    next: str | None = Form(None), db: AsyncSession = Depends(get_db),
 ):
-    settings = (await db.execute(select(Settings).limit(1))).scalar_one()
+    user_id = uid(request)
+    settings = await get_or_create_settings(db, user_id)
 
     sold = parse_date(sold_date)
-    if sold is None and not deal_id:
-        sold = today()
-
-    delivered = None
-    if bool(spot_sold):
-        delivered = today()
-    else:
-        delivered = parse_date(delivered_date)
+    if sold is None and not deal_id: sold = today()
+    delivered = today() if bool(spot_sold) else parse_date(delivered_date)
     pay = parse_date(pay_date)
-
     sched = parse_date(scheduled_date)
-    if (status or "").strip() == "Scheduled" and sched is None:
-        sched = today()
-    if (status or "").strip() != "Scheduled":
-        sched = None
-
-    if bool(is_paid) and pay is None:
-        pay = today()
+    if status == "Scheduled" and sched is None: sched = today()
+    if status != "Scheduled": sched = None
+    if bool(is_paid) and pay is None: pay = today()
 
     dt = (deal_type or "").strip()
-    if dt in ("F", "f"):
-        dt = "Finance"
-    elif dt in ("C", "c"):
-        dt = "Cash/Sub-Vented"
-    elif dt in ("L", "l"):
-        dt = "Lease"
+    if dt.lower() in ("f",): dt = "Finance"
+    elif dt.lower() in ("c",): dt = "Cash/Sub-Vented"
+    elif dt.lower() in ("l",): dt = "Lease"
 
-    auto_fin_non_sub = (dt in ("Finance", "Lease"))
+    if bool(spot_sold): status = "Delivered"
 
-    if bool(spot_sold):
-        status = "Delivered"
-
-    existing_deal = None
+    existing = None
     if deal_id:
-        existing_deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
-        if delivered is None:
-            delivered = existing_deal.delivered_date
+        existing = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == user_id))).scalar_one()
+        if delivered is None: delivered = existing.delivered_date
 
     deal_in = DealIn(
-        sold_date=sold,
-        delivered_date=delivered,
-        scheduled_date=sched,
-        status=status,
-        tag=(tag or "").strip(),
-        customer=customer.strip(),
-        stock_num=(stock_num or "").strip(),
-        model=(model or "").strip(),
-        new_used=new_used or "",
-        deal_type=dt,
-        business_manager=(business_manager or ""),
-        spot_sold=bool(spot_sold),
-        discount_gt_200=(discount_gt_200 or "No"),
+        sold_date=sold, delivered_date=delivered, scheduled_date=sched, status=status,
+        tag=(tag or "").strip(), customer=customer.strip(),
+        stock_num=(stock_num or "").strip(), model=(model or "").strip(),
+        new_used=new_used or "", deal_type=dt, business_manager=(business_manager or ""),
+        spot_sold=bool(spot_sold), discount_gt_200=(discount_gt_200 or "No"),
         aim_presentation=(aim_presentation or "X"),
-        permaplate=bool(permaplate),
-        nitro_fill=bool(nitro_fill),
-        pulse=bool(pulse),
-        finance_non_subvented=bool(auto_fin_non_sub or finance_non_subvented),
-        warranty=bool(warranty),
-        tire_wheel=bool(tire_wheel),
-        hold_amount=float(hold_amount or 0),
-        aim_amount=float(aim_amount or 0),
-        fi_pvr=float(fi_pvr or 0),
-        notes=notes or "",
-        pay_date=pay,
-        is_paid=bool(is_paid),
+        permaplate=bool(permaplate), nitro_fill=bool(nitro_fill), pulse=bool(pulse),
+        finance_non_subvented=bool(dt in ("Finance","Lease") or finance_non_subvented),
+        warranty=bool(warranty), tire_wheel=bool(tire_wheel),
+        hold_amount=float(hold_amount or 0), aim_amount=float(aim_amount or 0), fi_pvr=float(fi_pvr or 0),
+        notes=notes or "", pay_date=pay, is_paid=bool(is_paid),
     )
-
-    unit_comm, addons, trade_hold, total = calc_commission(deal_in, settings)
+    uc, ao, th, tot = calc_commission(deal_in, settings)
 
     if deal_id:
-        deal = existing_deal
-        for k, v in deal_in.model_dump().items():
-            setattr(deal, k, v)
-        deal.unit_comm = unit_comm
-        deal.add_ons = addons
-        deal.trade_hold_comm = trade_hold
-        deal.total_deal_comm = total
+        for k, v in deal_in.model_dump().items(): setattr(existing, k, v)
+        existing.unit_comm = uc; existing.add_ons = ao; existing.trade_hold_comm = th; existing.total_deal_comm = tot
     else:
-        deal = Deal(
-            **deal_in.model_dump(),
-            unit_comm=unit_comm,
-            add_ons=addons,
-            trade_hold_comm=trade_hold,
-            total_deal_comm=total,
-        )
+        deal = Deal(**deal_in.model_dump(), user_id=user_id, unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot)
         db.add(deal)
-
     await db.commit()
     return RedirectResponse(url=(next or "/deals"), status_code=303)
 
 
 @app.post("/deals/{deal_id}/toggle_paid")
-async def toggle_paid(
-    deal_id: int,
-    next: str | None = Form(default=None),
-    db: AsyncSession = Depends(get_db),
-):
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
-    deal.is_paid = not bool(deal.is_paid)
-    if deal.is_paid and deal.pay_date is None:
-        deal.pay_date = today()
+async def toggle_paid(deal_id: int, request: Request, next: str | None = Form(None), db: AsyncSession = Depends(get_db)):
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    deal.is_paid = not deal.is_paid
+    if deal.is_paid and not deal.pay_date: deal.pay_date = today()
     await db.commit()
     return RedirectResponse(url=(next or "/deals"), status_code=303)
 
-
-# Fixed: routes now match template action paths
 @app.post("/deals/{deal_id}/mark_delivered")
-async def mark_delivered(
-    deal_id: int,
-    redirect: str | None = Form(default=None),
-    month: str | None = Form(default=None),
-    db: AsyncSession = Depends(get_db),
-):
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
-    deal.status = "Delivered"
-    deal.delivered_date = today()
+async def mark_delivered(deal_id: int, request: Request, redirect: str | None = Form(None), month: str | None = Form(None), db: AsyncSession = Depends(get_db)):
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    deal.status = "Delivered"; deal.delivered_date = today()
     await db.commit()
-    if redirect:
-        return RedirectResponse(url=redirect, status_code=303)
-    redirect_url = f"/?month={month}" if month else "/"
-    return RedirectResponse(url=redirect_url, status_code=303)
-
+    return RedirectResponse(url=(redirect or (f"/?month={month}" if month else "/")), status_code=303)
 
 @app.post("/deals/{deal_id}/mark_dead")
-async def mark_dead(
-    deal_id: int,
-    redirect: str | None = Form(default=None),
-    month: str | None = Form(default=None),
-    db: AsyncSession = Depends(get_db),
-):
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
+async def mark_dead(deal_id: int, request: Request, redirect: str | None = Form(None), month: str | None = Form(None), db: AsyncSession = Depends(get_db)):
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
     deal.status = "Dead"
     await db.commit()
-    if redirect:
-        return RedirectResponse(url=redirect, status_code=303)
-    redirect_url = f"/?month={month}" if month else "/"
-    return RedirectResponse(url=redirect_url, status_code=303)
+    return RedirectResponse(url=(redirect or (f"/?month={month}" if month else "/")), status_code=303)
 
-
-# Keep old routes as aliases for backwards compat
+# Backwards compat aliases
 @app.post("/deals/{deal_id}/deliver")
-async def mark_delivered_old(deal_id: int, month: str | None = Form(default=None), db: AsyncSession = Depends(get_db)):
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
-    deal.status = "Delivered"
-    deal.delivered_date = today()
-    await db.commit()
-    return RedirectResponse(url=f"/?month={month}" if month else "/", status_code=303)
-
+async def deliver_old(deal_id: int, request: Request, month: str | None = Form(None), db: AsyncSession = Depends(get_db)):
+    return await mark_delivered(deal_id, request, None, month, db)
 
 @app.post("/deals/{deal_id}/dead")
-async def mark_dead_old(deal_id: int, month: str | None = Form(default=None), db: AsyncSession = Depends(get_db)):
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
-    deal.status = "Dead"
-    await db.commit()
-    return RedirectResponse(url=f"/?month={month}" if month else "/", status_code=303)
-
+async def dead_old(deal_id: int, request: Request, month: str | None = Form(None), db: AsyncSession = Depends(get_db)):
+    return await mark_dead(deal_id, request, None, month, db)
 
 @app.post("/deals/{deal_id}/delete")
-async def deal_delete(deal_id: int, db: AsyncSession = Depends(get_db)):
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
-    await db.delete(deal)
-    await db.commit()
+async def deal_delete(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    await db.delete(deal); await db.commit()
     return RedirectResponse(url="/deals", status_code=303)
 
 
-# =============================================
-# Delivery Board
-# =============================================
+# ════════════════════════════════════════════════
+# DELIVERY BOARD
+# ════════════════════════════════════════════════
 @app.get("/delivery", response_class=HTMLResponse)
 async def delivery_board(request: Request, db: AsyncSession = Depends(get_db)):
-    stmt = (
-        select(Deal)
-        .where(Deal.on_delivery_board == True)
-        .where(Deal.status != "Delivered")
-        .where(Deal.status != "Dead")
+    user_id = uid(request)
+    board = (await db.execute(
+        select(Deal).where(Deal.user_id == user_id, Deal.on_delivery_board == True, Deal.status.notin_(["Delivered","Dead"]))
         .order_by(Deal.scheduled_date.asc().nullslast(), Deal.sold_date.asc().nullslast())
-    )
-    all_board_deals = (await db.execute(stmt)).scalars().all()
-
-    prep = []
-    ready = []
-    for d in all_board_deals:
-        if d.gas_ready and d.inspection_ready and d.insurance_ready:
-            ready.append(d)
-        else:
-            prep.append(d)
-
-    # Also fetch recently delivered from the board (last 7 days) for the "Delivered" column
+    )).scalars().all()
+    prep = [d for d in board if not (d.gas_ready and d.inspection_ready and d.insurance_ready)]
+    ready = [d for d in board if d.gas_ready and d.inspection_ready and d.insurance_ready]
     week_ago = today() - timedelta(days=7)
-    delivered_stmt = (
-        select(Deal)
-        .where(Deal.on_delivery_board == True)
-        .where(Deal.status == "Delivered")
-        .where(Deal.delivered_date >= week_ago)
+    delivered = (await db.execute(
+        select(Deal).where(Deal.user_id == user_id, Deal.on_delivery_board == True, Deal.status == "Delivered", Deal.delivered_date >= week_ago)
         .order_by(Deal.delivered_date.desc())
-    )
-    delivered = (await db.execute(delivered_stmt)).scalars().all()
-
-    return templates.TemplateResponse("delivery_board.html", {
-        "request": request,
-        "prep": prep,
-        "ready": ready,
-        "delivered": delivered,
-        "total": len(prep) + len(ready),
-    })
-
+    )).scalars().all()
+    user = await _user(request, db)
+    return templates.TemplateResponse("delivery_board.html", {"request": request, "user": user, "prep": prep, "ready": ready, "delivered": delivered, "total": len(prep)+len(ready)})
 
 @app.post("/delivery/{deal_id}/toggle")
-async def delivery_toggle_check(
-    deal_id: int,
-    field: str = Form(...),
-    db: AsyncSession = Depends(get_db),
-):
-    """Toggle a single prep checkbox (gas_ready, inspection_ready, insurance_ready)."""
-    allowed = {"gas_ready", "inspection_ready", "insurance_ready"}
-    if field not in allowed:
-        return RedirectResponse(url="/delivery", status_code=303)
-
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
-    setattr(deal, field, not getattr(deal, field))
-    await db.commit()
+async def delivery_toggle(deal_id: int, request: Request, field: str = Form(...), db: AsyncSession = Depends(get_db)):
+    if field not in {"gas_ready","inspection_ready","insurance_ready"}: return RedirectResponse(url="/delivery", status_code=303)
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    setattr(deal, field, not getattr(deal, field)); await db.commit()
     return RedirectResponse(url="/delivery", status_code=303)
-
 
 @app.post("/delivery/{deal_id}/deliver")
-async def delivery_board_deliver(
-    deal_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    """Mark a deal as Delivered from the delivery board."""
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
-    deal.status = "Delivered"
-    deal.delivered_date = today()
-    await db.commit()
+async def delivery_deliver(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    deal.status = "Delivered"; deal.delivered_date = today(); await db.commit()
     return RedirectResponse(url="/delivery", status_code=303)
-
 
 @app.post("/delivery/{deal_id}/remove")
-async def delivery_board_remove(
-    deal_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    """Remove a deal from the delivery board (doesn't delete it)."""
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
-    deal.on_delivery_board = False
-    deal.gas_ready = False
-    deal.inspection_ready = False
-    deal.insurance_ready = False
+async def delivery_remove(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    deal.on_delivery_board = False; deal.gas_ready = False; deal.inspection_ready = False; deal.insurance_ready = False
     await db.commit()
     return RedirectResponse(url="/delivery", status_code=303)
 
-
 @app.post("/delivery/{deal_id}/push")
-async def push_to_delivery_board(
-    deal_id: int,
-    next: str | None = Form(default=None),
-    db: AsyncSession = Depends(get_db),
-):
-    """Push a deal onto the delivery board from the deals list or form."""
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id))).scalar_one()
-    deal.on_delivery_board = True
-    await db.commit()
+async def delivery_push(deal_id: int, request: Request, next: str | None = Form(None), db: AsyncSession = Depends(get_db)):
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    deal.on_delivery_board = True; await db.commit()
     return RedirectResponse(url=(next or "/delivery"), status_code=303)
 
 
-# =============================================
-# CSV Export
-# =============================================
+# ════════════════════════════════════════════════
+# CSV EXPORT
+# ════════════════════════════════════════════════
 @app.get("/reports/export")
-async def export_csv(
-    request: Request,
-    month: str | None = None,
-    db: AsyncSession = Depends(get_db),
-):
-    stmt = select(Deal).order_by(Deal.sold_date.desc().nullslast())
+async def export_csv(request: Request, month: str | None = None, db: AsyncSession = Depends(get_db)):
+    user_id = uid(request)
+    stmt = select(Deal).where(Deal.user_id == user_id).order_by(Deal.sold_date.desc().nullslast())
     if month:
         try:
-            y, m = month.split("-")
-            d0 = date(int(y), int(m), 1)
-            start_m, end_m = month_bounds(d0)
-            stmt = stmt.where(
-                or_(
-                    and_(Deal.sold_date.is_not(None), Deal.sold_date >= start_m, Deal.sold_date < end_m),
-                    and_(Deal.delivered_date.is_not(None), Deal.delivered_date >= start_m, Deal.delivered_date < end_m),
-                )
-            )
-        except Exception:
-            pass
-
+            y, m = month.split("-"); d0 = date(int(y), int(m), 1); s, e = month_bounds(d0)
+            stmt = stmt.where(or_(and_(Deal.sold_date >= s, Deal.sold_date < e), and_(Deal.delivered_date >= s, Deal.delivered_date < e)))
+        except: pass
     deals = (await db.execute(stmt)).scalars().all()
-
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow([
-        "Sold Date", "Delivered Date", "Customer", "Stock #", "Model", "New/Used",
-        "F/C/L", "F&I", "Status", "Tag", "Spot", "Discount>200",
-        "PermaPlate", "Nitro Fill", "Pulse", "Finance", "Warranty", "Tire&Wheel",
-        "Aim", "Hold Amount", "Unit Comm", "Add-ons", "Trade Hold", "Total Comm",
-        "Paid", "Pay Date", "Notes",
-    ])
+    out = io.StringIO(); w = csv.writer(out)
+    w.writerow(["Sold Date","Delivered Date","Customer","Stock #","Model","New/Used","F/C/L","F&I","Status","Tag","Spot","Discount>200","PermaPlate","Nitro Fill","Pulse","Finance","Warranty","Tire&Wheel","Aim","Hold Amount","Unit Comm","Add-ons","Trade Hold","Total Comm","Paid","Pay Date","Notes"])
     for d in deals:
-        writer.writerow([
-            d.sold_date or "", d.delivered_date or "", d.customer, d.stock_num, d.model,
-            d.new_used, d.deal_type, d.business_manager, d.status, d.tag,
-            "Y" if d.spot_sold else "N", d.discount_gt_200,
-            "Y" if d.permaplate else "N", "Y" if d.nitro_fill else "N",
-            "Y" if d.pulse else "N", "Y" if d.finance_non_subvented else "N",
-            "Y" if d.warranty else "N", "Y" if d.tire_wheel else "N",
-            d.aim_presentation, d.hold_amount,
-            f"{d.unit_comm:.2f}", f"{d.add_ons:.2f}", f"{d.trade_hold_comm:.2f}", f"{d.total_deal_comm:.2f}",
-            "Y" if d.is_paid else "N", d.pay_date or "", d.notes or "",
-        ])
-
-    output.seek(0)
-    filename = f"commission-export-{month or 'all'}.csv"
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
+        w.writerow([d.sold_date or "",d.delivered_date or "",d.customer,d.stock_num,d.model,d.new_used,d.deal_type,d.business_manager,d.status,d.tag,
+                     "Y" if d.spot_sold else "N",d.discount_gt_200,"Y" if d.permaplate else "N","Y" if d.nitro_fill else "N",
+                     "Y" if d.pulse else "N","Y" if d.finance_non_subvented else "N","Y" if d.warranty else "N","Y" if d.tire_wheel else "N",
+                     d.aim_presentation,d.hold_amount,f"{d.unit_comm:.2f}",f"{d.add_ons:.2f}",f"{d.trade_hold_comm:.2f}",f"{d.total_deal_comm:.2f}",
+                     "Y" if d.is_paid else "N",d.pay_date or "",d.notes or ""])
+    out.seek(0)
+    return StreamingResponse(iter([out.getvalue()]), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=commission-export-{month or 'all'}.csv"})
 
 
-# =============================================
-# CSV Import (Bulk Upload)
-# =============================================
+# ════════════════════════════════════════════════
+# CSV IMPORT
+# ════════════════════════════════════════════════
 @app.get("/import", response_class=HTMLResponse)
-async def import_page(request: Request):
-    return templates.TemplateResponse("import.html", {
-        "request": request,
-        "result": None,
-    })
-
+async def import_page(request: Request, db: AsyncSession = Depends(get_db)):
+    user = await _user(request, db)
+    return templates.TemplateResponse("import.html", {"request": request, "user": user, "result": None})
 
 @app.post("/import", response_class=HTMLResponse)
-async def import_csv(
-    request: Request,
-    file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-):
-    settings = (await db.execute(select(Settings).limit(1))).scalar_one()
-
-    content = await file.read()
-    text = content.decode("utf-8-sig")  # handles BOM from Excel
+async def import_csv(request: Request, file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+    user_id = uid(request)
+    settings = await get_or_create_settings(db, user_id)
+    text = (await file.read()).decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text))
+    imported = skipped = 0; errors = []
 
-    imported = 0
-    skipped = 0
-    errors = []
+    def _yn(val): return (val or "").strip().lower() in ("y","yes","1","true")
 
-    for i, row in enumerate(reader, start=2):  # row 2 = first data row
+    for i, row in enumerate(reader, start=2):
         try:
-            customer = (row.get("Customer") or row.get("customer") or "").strip()
-            if not customer:
-                skipped += 1
-                continue
-
+            cust = (row.get("Customer") or row.get("customer") or "").strip()
+            if not cust: skipped += 1; continue
             sold = parse_date(row.get("Sold Date") or row.get("sold_date") or "")
             delivered = parse_date(row.get("Delivered Date") or row.get("delivered_date") or "")
             sched = parse_date(row.get("Scheduled Date") or row.get("scheduled_date") or "")
-
-            status_raw = (row.get("Status") or row.get("status") or "Pending").strip()
-            if status_raw.lower() in ("delivered", "d"):
-                status_val = "Delivered"
-            elif status_raw.lower() in ("dead", "x"):
-                status_val = "Dead"
-            elif status_raw.lower() in ("scheduled", "sched"):
-                status_val = "Scheduled"
-            else:
-                status_val = "Pending"
-
-            nu = (row.get("New/Used") or row.get("new_used") or "").strip()
-            if nu.lower() in ("n", "new"):
-                nu = "New"
-            elif nu.lower() in ("u", "used"):
-                nu = "Used"
-
-            dt = (row.get("F/C/L") or row.get("deal_type") or "").strip()
-            if dt.lower() in ("f", "finance"):
-                dt = "Finance"
-            elif dt.lower() in ("c", "cash", "cash/sub-vented"):
-                dt = "Cash/Sub-Vented"
-            elif dt.lower() in ("l", "lease"):
-                dt = "Lease"
-
-            def _yn(val):
-                return (val or "").strip().lower() in ("y", "yes", "1", "true")
-
-            spot = _yn(row.get("Spot") or row.get("spot_sold") or "")
-            disc = "Yes" if _yn(row.get("Discount>200") or row.get("discount_gt_200") or "") else "No"
-            aim = (row.get("Aim") or row.get("aim_presentation") or "X").strip()
-            if aim.lower() in ("y", "yes"):
-                aim = "Yes"
-            elif aim.lower() in ("n", "no"):
-                aim = "No"
-            else:
-                aim = "X"
-
-            permaplate = _yn(row.get("PermaPlate") or row.get("permaplate") or "")
-            nitro = _yn(row.get("Nitro Fill") or row.get("nitro_fill") or "")
-            pulse_v = _yn(row.get("Pulse") or row.get("pulse") or "")
-            finance_ns = _yn(row.get("Finance") or row.get("finance_non_subvented") or "")
-            warranty = _yn(row.get("Warranty") or row.get("warranty") or "")
-            tire = _yn(row.get("Tire&Wheel") or row.get("tire_wheel") or "")
-
-            # Auto-detect finance_non_subvented from deal_type if not explicitly set
-            if not finance_ns and dt in ("Finance", "Lease"):
-                finance_ns = True
-
-            hold = 0.0
-            try:
-                hold = float(row.get("Hold Amount") or row.get("hold_amount") or "0")
-            except ValueError:
-                pass
-
-            pay = parse_date(row.get("Pay Date") or row.get("pay_date") or "")
-            is_paid = _yn(row.get("Paid") or row.get("is_paid") or "")
+            st = (row.get("Status") or "Pending").strip()
+            if st.lower() in ("delivered","d"): st = "Delivered"
+            elif st.lower() in ("dead","x"): st = "Dead"
+            elif st.lower() in ("scheduled","sched"): st = "Scheduled"
+            else: st = "Pending"
+            nu = (row.get("New/Used") or "").strip()
+            if nu.lower() in ("n","new"): nu = "New"
+            elif nu.lower() in ("u","used"): nu = "Used"
+            dt = (row.get("F/C/L") or "").strip()
+            if dt.lower() in ("f","finance"): dt = "Finance"
+            elif dt.lower() in ("c","cash","cash/sub-vented"): dt = "Cash/Sub-Vented"
+            elif dt.lower() in ("l","lease"): dt = "Lease"
+            try: hold = float(row.get("Hold Amount") or "0")
+            except: hold = 0.0
+            aim = (row.get("Aim") or "X").strip()
+            if aim.lower() in ("y","yes"): aim = "Yes"
+            elif aim.lower() in ("n","no"): aim = "No"
+            else: aim = "X"
+            fin = _yn(row.get("Finance") or "")
+            if not fin and dt in ("Finance","Lease"): fin = True
 
             deal_in = DealIn(
-                sold_date=sold,
-                delivered_date=delivered,
-                scheduled_date=sched,
-                status=status_val,
-                tag=(row.get("Tag") or row.get("tag") or "").strip(),
-                customer=customer,
-                stock_num=(row.get("Stock #") or row.get("stock_num") or "").strip(),
-                model=(row.get("Model") or row.get("model") or "").strip(),
-                new_used=nu,
-                deal_type=dt,
-                business_manager=(row.get("F&I") or row.get("business_manager") or "").strip(),
-                spot_sold=spot,
-                discount_gt_200=disc,
+                sold_date=sold, delivered_date=delivered, scheduled_date=sched, status=st,
+                tag=(row.get("Tag") or "").strip(), customer=cust,
+                stock_num=(row.get("Stock #") or "").strip(), model=(row.get("Model") or "").strip(),
+                new_used=nu, deal_type=dt, business_manager=(row.get("F&I") or "").strip(),
+                spot_sold=_yn(row.get("Spot") or ""),
+                discount_gt_200="Yes" if _yn(row.get("Discount>200") or "") else "No",
                 aim_presentation=aim,
-                permaplate=permaplate,
-                nitro_fill=nitro,
-                pulse=pulse_v,
-                finance_non_subvented=finance_ns,
-                warranty=warranty,
-                tire_wheel=tire,
-                hold_amount=hold,
-                notes=(row.get("Notes") or row.get("notes") or "").strip(),
-                pay_date=pay,
-                is_paid=is_paid,
+                permaplate=_yn(row.get("PermaPlate") or ""), nitro_fill=_yn(row.get("Nitro Fill") or ""),
+                pulse=_yn(row.get("Pulse") or ""), finance_non_subvented=fin,
+                warranty=_yn(row.get("Warranty") or ""), tire_wheel=_yn(row.get("Tire&Wheel") or ""),
+                hold_amount=hold, notes=(row.get("Notes") or "").strip(),
+                pay_date=parse_date(row.get("Pay Date") or ""), is_paid=_yn(row.get("Paid") or ""),
             )
-
-            unit_comm, addons, trade_hold, total = calc_commission(deal_in, settings)
-
-            deal = Deal(
-                **deal_in.model_dump(),
-                unit_comm=unit_comm,
-                add_ons=addons,
-                trade_hold_comm=trade_hold,
-                total_deal_comm=total,
-            )
-            db.add(deal)
+            uc, ao, th, tot = calc_commission(deal_in, settings)
+            db.add(Deal(**deal_in.model_dump(), user_id=user_id, unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot))
             imported += 1
-
         except Exception as e:
-            errors.append(f"Row {i}: {str(e)}")
-
+            errors.append(f"Row {i}: {e}")
     await db.commit()
-
-    return templates.TemplateResponse("import.html", {
-        "request": request,
-        "result": {
-            "imported": imported,
-            "skipped": skipped,
-            "errors": errors,
-        },
-    })
+    user = await _user(request, db)
+    return templates.TemplateResponse("import.html", {"request": request, "user": user, "result": {"imported": imported, "skipped": skipped, "errors": errors}})
 
 
-# =============================================
-# Pay Plan
-# =============================================
+# ════════════════════════════════════════════════
+# PAY PLAN
+# ════════════════════════════════════════════════
 @app.get("/payplan", response_class=HTMLResponse)
 async def payplan_get(request: Request, db: AsyncSession = Depends(get_db)):
-    s = (await db.execute(select(Settings).limit(1))).scalar_one()
-    return templates.TemplateResponse("payplan.html", {"request": request, "s": s})
-
+    s = await get_or_create_settings(db, uid(request))
+    user = await _user(request, db)
+    return templates.TemplateResponse("payplan.html", {"request": request, "user": user, "s": s})
 
 @app.post("/payplan")
 async def payplan_post(
-    unit_comm_discount_le_200: float = Form(...),
-    unit_comm_discount_gt_200: float = Form(...),
-    permaplate: float = Form(...),
-    nitro_fill: float = Form(...),
-    pulse: float = Form(...),
-    finance_non_subvented: float = Form(...),
-    warranty: float = Form(...),
-    tire_wheel: float = Form(...),
+    request: Request,
+    unit_comm_discount_le_200: float = Form(...), unit_comm_discount_gt_200: float = Form(...),
+    permaplate: float = Form(...), nitro_fill: float = Form(...), pulse: float = Form(...),
+    finance_non_subvented: float = Form(...), warranty: float = Form(...), tire_wheel: float = Form(...),
     hourly_rate_ny_offset: float = Form(...),
-    new_volume_bonus_15_16: float = Form(...),
-    new_volume_bonus_17_18: float = Form(...),
-    new_volume_bonus_19_20: float = Form(...),
-    new_volume_bonus_21_24: float = Form(...),
+    new_volume_bonus_15_16: float = Form(...), new_volume_bonus_17_18: float = Form(...),
+    new_volume_bonus_19_20: float = Form(...), new_volume_bonus_21_24: float = Form(...),
     new_volume_bonus_25_plus: float = Form(...),
-    used_volume_bonus_8_10: float = Form(...),
-    used_volume_bonus_11_12: float = Form(...),
+    used_volume_bonus_8_10: float = Form(...), used_volume_bonus_11_12: float = Form(...),
     used_volume_bonus_13_plus: float = Form(...),
-    spot_bonus_5_9: float = Form(...),
-    spot_bonus_10_12: float = Form(...),
+    spot_bonus_5_9: float = Form(...), spot_bonus_10_12: float = Form(...),
     spot_bonus_13_plus: float = Form(...),
-    quarterly_bonus_threshold_units: int = Form(...),
-    quarterly_bonus_amount: float = Form(...),
+    quarterly_bonus_threshold_units: int = Form(...), quarterly_bonus_amount: float = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
-    s = (await db.execute(select(Settings).limit(1))).scalar_one()
-    for field in [
-        "unit_comm_discount_le_200", "unit_comm_discount_gt_200", "permaplate", "nitro_fill",
-        "pulse", "finance_non_subvented", "warranty", "tire_wheel", "hourly_rate_ny_offset",
-        "new_volume_bonus_15_16", "new_volume_bonus_17_18", "new_volume_bonus_19_20",
-        "new_volume_bonus_21_24", "new_volume_bonus_25_plus",
-        "used_volume_bonus_8_10", "used_volume_bonus_11_12", "used_volume_bonus_13_plus",
-        "spot_bonus_5_9", "spot_bonus_10_12", "spot_bonus_13_plus",
-        "quarterly_bonus_threshold_units", "quarterly_bonus_amount",
-    ]:
-        setattr(s, field, locals()[field])
+    s = await get_or_create_settings(db, uid(request))
+    for f in ["unit_comm_discount_le_200","unit_comm_discount_gt_200","permaplate","nitro_fill","pulse",
+              "finance_non_subvented","warranty","tire_wheel","hourly_rate_ny_offset",
+              "new_volume_bonus_15_16","new_volume_bonus_17_18","new_volume_bonus_19_20",
+              "new_volume_bonus_21_24","new_volume_bonus_25_plus",
+              "used_volume_bonus_8_10","used_volume_bonus_11_12","used_volume_bonus_13_plus",
+              "spot_bonus_5_9","spot_bonus_10_12","spot_bonus_13_plus",
+              "quarterly_bonus_threshold_units","quarterly_bonus_amount"]:
+        setattr(s, f, locals()[f])
     await db.commit()
     return RedirectResponse(url="/payplan", status_code=303)
 
-
-# Backwards compatibility
+# Backwards compat
 @app.get("/settings")
-async def settings_redirect_get():
-    return RedirectResponse(url="/payplan", status_code=307)
-
+async def _sr(): return RedirectResponse(url="/payplan", status_code=307)
 @app.post("/settings")
-async def settings_redirect_post(request: Request):
-    return RedirectResponse(url="/payplan", status_code=303)
+async def _sp(): return RedirectResponse(url="/payplan", status_code=303)

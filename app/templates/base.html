@@ -1,53 +1,39 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="theme-color" content="#ffffff" />
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="theme-color" content="#ffffff"/>
   <title>{{ title or "Commission Tracker" }}</title>
-  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    /* Mobile nav */
-    @media (max-width: 640px) {
-      .nav-links { display: none; }
-      .nav-links.open { display: flex; flex-direction: column; position: absolute; top: 100%; left: 0; right: 0; background: white; border-bottom: 1px solid #e2e8f0; padding: 8px 16px 12px; gap: 4px; z-index: 50; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
-      .nav-links.open a { padding: 10px 12px; }
-      .hamburger { display: flex !important; }
-    }
-    /* Smooth touch targets */
-    @media (pointer: coarse) {
-      button, a, input[type="checkbox"], select { min-height: 44px; }
-      .touch-row td { padding-top: 12px; padding-bottom: 12px; }
-    }
-    /* Shortcut cheat sheet */
-    .shortcut-overlay { backdrop-filter: blur(4px); }
-    kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; padding: 0 8px; border-radius: 6px; background: #f1f5f9; border: 1px solid #e2e8f0; font-family: ui-monospace, monospace; font-size: 13px; font-weight: 600; color: #334155; box-shadow: 0 1px 2px rgb(0 0 0 / 0.05); }
+    @media(max-width:640px){.nav-links{display:none}.nav-links.open{display:flex;flex-direction:column;position:absolute;top:100%;left:0;right:0;background:white;border-bottom:1px solid #e2e8f0;padding:8px 16px 12px;gap:4px;z-index:50;box-shadow:0 4px 6px -1px rgb(0 0 0/.1)}.nav-links.open a,.nav-links.open button{padding:10px 12px}.hamburger{display:flex!important}}
+    @media(pointer:coarse){button,a,input[type="checkbox"],select{min-height:44px}.touch-row td{padding-top:12px;padding-bottom:12px}}
+    kbd{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 6px;border-radius:5px;background:#f1f5f9;border:1px solid #e2e8f0;font-family:ui-monospace,monospace;font-size:12px;font-weight:600;color:#334155}
   </style>
 </head>
 <body class="{{ 'bg-white' if (embed|default(false)) else 'bg-slate-50' }} text-slate-900">
   {% if not (embed|default(false)) %}
   {% set path = request.url.path if request is defined else '' %}
   <nav class="sticky top-0 z-30 bg-white border-b border-slate-200 relative">
-    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
       <a class="font-bold text-lg flex items-center gap-2 shrink-0" href="/">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
         <span class="hidden sm:inline">Commission Tracker</span>
         <span class="sm:hidden">CT</span>
       </a>
 
-      <!-- Hamburger (mobile only) -->
       <button class="hamburger ml-auto hidden items-center justify-center w-10 h-10 rounded-lg hover:bg-slate-100 active:bg-slate-200 transition" onclick="document.getElementById('navLinks').classList.toggle('open')" aria-label="Menu">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
 
       <div id="navLinks" class="nav-links flex items-center gap-1 ml-auto">
-        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path == '/' else 'text-slate-600 hover:bg-slate-100' }}" href="/">Dashboard</a>
+        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path=='/' else 'text-slate-600 hover:bg-slate-100' }}" href="/">Dashboard</a>
         <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/deals') else 'text-slate-600 hover:bg-slate-100' }}" href="/deals">Sales Entry</a>
         <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/delivery') else 'text-slate-600 hover:bg-slate-100' }}" href="/delivery">Delivery Board</a>
-        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/payplan') or path.startswith('/settings') else 'text-slate-600 hover:bg-slate-100' }}" href="/payplan">Pay Plan</a>
+        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/payplan') else 'text-slate-600 hover:bg-slate-100' }}" href="/payplan">Pay Plan</a>
         <div class="w-px h-5 bg-slate-200 mx-1 hidden sm:block"></div>
         <a class="inline-flex items-center px-3 py-1.5 text-sm rounded border border-slate-200 text-slate-600 hover:bg-slate-50 transition gap-1" href="/import">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
@@ -57,12 +43,33 @@
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           New Deal
         </a>
+        <!-- User menu -->
+        <div class="relative" id="userMenuWrap">
+          <button onclick="document.getElementById('userDropdown').classList.toggle('hidden')"
+                  class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded text-slate-600 hover:bg-slate-100 transition ml-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+            <span class="hidden sm:inline max-w-[100px] truncate">{{ user.display_name if user is defined and user else '' }}</span>
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div id="userDropdown" class="hidden absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-50">
+            {% if user is defined and user %}
+            <div class="px-3 py-2 border-b border-slate-100">
+              <div class="text-sm font-medium text-slate-900 truncate">{{ user.display_name }}</div>
+              <div class="text-xs text-slate-500">@{{ user.username }}</div>
+            </div>
+            {% endif %}
+            <a href="/logout" class="flex items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 transition">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+              Sign Out
+            </a>
+          </div>
+        </div>
       </div>
     </div>
   </nav>
 
-  <!-- Keyboard Shortcut Cheat Sheet -->
-  <div id="shortcutSheet" class="fixed inset-0 z-50 hidden shortcut-overlay" style="background: rgba(0,0,0,0.5);">
+  <!-- Keyboard Shortcut Sheet -->
+  <div id="shortcutSheet" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5);backdrop-filter:blur(4px)">
     <div class="flex items-center justify-center min-h-screen p-4">
       <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
         <div class="flex items-center justify-between mb-4">
@@ -75,81 +82,38 @@
           <div class="flex items-center justify-between"><span class="text-slate-600">Sales Entry</span><kbd>S</kbd></div>
           <div class="flex items-center justify-between"><span class="text-slate-600">Delivery Board</span><kbd>B</kbd></div>
           <div class="flex items-center justify-between"><span class="text-slate-600">Pay Plan</span><kbd>P</kbd></div>
-          <div class="flex items-center justify-between"><span class="text-slate-600">Search (Sales Entry)</span><kbd>/</kbd></div>
-          <div class="flex items-center justify-between"><span class="text-slate-600">Close modal / menu</span><kbd>Esc</kbd></div>
-          <div class="flex items-center justify-between"><span class="text-slate-600">Show this help</span><kbd>?</kbd></div>
-        </div>
-        <div class="mt-4 pt-3 border-t text-xs text-slate-400 text-center">
-          Press <kbd class="text-[10px]">?</kbd> anytime to toggle this sheet
+          <div class="flex items-center justify-between"><span class="text-slate-600">Search</span><kbd>/</kbd></div>
+          <div class="flex items-center justify-between"><span class="text-slate-600">Close</span><kbd>Esc</kbd></div>
+          <div class="flex items-center justify-between"><span class="text-slate-600">This help</span><kbd>?</kbd></div>
         </div>
       </div>
     </div>
   </div>
 
   <script>
-    // Keyboard shortcuts — only fire when not typing in an input/textarea/select
-    document.addEventListener('keydown', function(e) {
-      const tag = (e.target.tagName || '').toLowerCase();
-      const isTyping = (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable);
-      const sheet = document.getElementById('shortcutSheet');
-
-      // Esc always works — close modals, menus, sheet
-      if (e.key === 'Escape') {
-        if (sheet && !sheet.classList.contains('hidden')) {
-          sheet.classList.add('hidden');
-          return;
-        }
-        // Close mobile nav
-        const nav = document.getElementById('navLinks');
-        if (nav) nav.classList.remove('open');
-        return;
-      }
-
-      // ? always toggles cheat sheet (even in inputs — shift+/ is rarely used)
-      if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
-        if (sheet) sheet.classList.toggle('hidden');
-        return;
-      }
-
-      // Skip the rest if typing in a field
-      if (isTyping) return;
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-      const routes = {
-        'n': '/deals/new',
-        'd': '/',
-        's': '/deals',
-        'b': '/delivery',
-        'p': '/payplan',
-      };
-
-      const key = e.key.toLowerCase();
-
-      if (routes[key]) {
-        e.preventDefault();
-        window.location.href = routes[key];
-        return;
-      }
-
-      // / focuses search on Sales Entry page
-      if (e.key === '/') {
-        const searchInput = document.querySelector('input[name="q"]');
-        if (searchInput) {
-          e.preventDefault();
-          searchInput.focus();
-          searchInput.select();
-        }
-      }
-    });
-
-    // Close mobile nav when clicking outside
-    document.addEventListener('click', function(e) {
-      const nav = document.getElementById('navLinks');
-      const hamburger = document.querySelector('.hamburger');
-      if (nav && nav.classList.contains('open') && !nav.contains(e.target) && !hamburger.contains(e.target)) {
-        nav.classList.remove('open');
-      }
-    });
+  document.addEventListener('keydown',function(e){
+    const t=(e.target.tagName||'').toLowerCase();
+    const typing=(t==='input'||t==='textarea'||t==='select'||e.target.isContentEditable);
+    const sh=document.getElementById('shortcutSheet');
+    if(e.key==='Escape'){
+      if(sh&&!sh.classList.contains('hidden')){sh.classList.add('hidden');return}
+      document.getElementById('navLinks')?.classList.remove('open');
+      document.getElementById('userDropdown')?.classList.add('hidden');
+      return;
+    }
+    if(e.key==='?'&&!e.ctrlKey&&!e.metaKey){sh?.classList.toggle('hidden');return}
+    if(typing||e.ctrlKey||e.metaKey||e.altKey)return;
+    const r={n:'/deals/new',d:'/',s:'/deals',b:'/delivery',p:'/payplan'};
+    const k=e.key.toLowerCase();
+    if(r[k]){e.preventDefault();window.location.href=r[k];return}
+    if(e.key==='/'){const s=document.querySelector('input[name="q"]');if(s){e.preventDefault();s.focus();s.select()}}
+  });
+  document.addEventListener('click',function(e){
+    const n=document.getElementById('navLinks'),h=document.querySelector('.hamburger');
+    if(n&&n.classList.contains('open')&&!n.contains(e.target)&&!h?.contains(e.target))n.classList.remove('open');
+    const d=document.getElementById('userDropdown'),w=document.getElementById('userMenuWrap');
+    if(d&&!d.classList.contains('hidden')&&!w?.contains(e.target))d.classList.add('hidden');
+  });
   </script>
   {% endif %}
 
