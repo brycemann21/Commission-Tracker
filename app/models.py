@@ -5,7 +5,7 @@ class Base(DeclarativeBase):
     pass
 
 class User(Base):
-    __tablename__ = "users"
+    __tablename__ = "profiles"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), default="")
