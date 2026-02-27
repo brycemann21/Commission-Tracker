@@ -6,25 +6,43 @@
   <title>{{ title or "Commission Tracker" }}</title>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @media (max-width: 640px) {
+      .nav-links { display: none; }
+      .nav-links.open { display: flex; flex-direction: column; position: absolute; top: 100%; left: 0; right: 0; background: white; border-bottom: 1px solid #e2e8f0; padding: 8px 16px 12px; gap: 4px; z-index: 50; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+      .hamburger { display: flex !important; }
+    }
+  </style>
 </head>
-<body class="bg-slate-50 text-slate-900">
+<body class="{{ 'bg-white' if (embed|default(false)) else 'bg-slate-50' }} text-slate-900">
+  {% if not (embed|default(false)) %}
   {% set path = request.url.path if request is defined else '' %}
-  <nav class="sticky top-0 z-10 bg-white border-b border-slate-200">
+  <nav class="sticky top-0 z-30 bg-white border-b border-slate-200 relative">
     <div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4">
-      <a class="font-bold" href="/">Commission Tracker</a>
-      <a class="text-sm px-2 py-1 rounded hover:underline {{ 'text-slate-900 font-semibold' if path.startswith('/deals') else 'text-slate-600' }}" href="/deals">Sales Entry</a>
-      <a class="text-sm px-2 py-1 rounded hover:underline {{ 'text-slate-900 font-semibold' if path.startswith('/pending') else 'text-slate-600' }}" href="/pending">Pending</a>
-      <a class="text-sm px-2 py-1 rounded hover:underline {{ 'text-slate-900 font-semibold' if path.startswith('/month') else 'text-slate-600' }}" href="/month">Current Month</a>
-      <a class="text-sm px-2 py-1 rounded hover:underline {{ 'text-slate-900 font-semibold' if path.startswith('/customers') else 'text-slate-600' }}" href="/customers">Customer Summary</a>
-      <a class="text-sm px-2 py-1 rounded hover:underline {{ 'text-slate-900 font-semibold' if path.startswith('/reports/eom') else 'text-slate-600' }}" href="/reports/eom?month=2026-02">End of Month</a>
-      <a class="text-sm px-2 py-1 rounded hover:underline {{ 'text-slate-900 font-semibold' if path.startswith('/reports/paycheck') else 'text-slate-600' }}" href="/reports/paycheck">Paycheck</a>
-      <a class="text-sm px-2 py-1 rounded hover:underline {{ 'text-slate-900 font-semibold' if path.startswith('/settings') else 'text-slate-600' }}" href="/settings">Settings</a>
-      <div class="ml-auto">
-        <a class="inline-flex items-center px-3 py-1.5 text-sm rounded bg-slate-900 text-white" href="/deals/new">+ New Deal</a>
+      <a class="font-bold text-lg flex items-center gap-2" href="/">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        Commission Tracker
+      </a>
+
+      <!-- Hamburger (mobile only) -->
+      <button class="hamburger ml-auto hidden items-center justify-center w-9 h-9 rounded hover:bg-slate-100" onclick="document.getElementById('navLinks').classList.toggle('open')" aria-label="Menu">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+
+      <div id="navLinks" class="nav-links flex items-center gap-1 ml-auto">
+        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path == '/' else 'text-slate-600 hover:bg-slate-100' }}" href="/">Dashboard</a>
+        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/deals') else 'text-slate-600 hover:bg-slate-100' }}" href="/deals">Sales Entry</a>
+        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/payplan') or path.startswith('/settings') else 'text-slate-600 hover:bg-slate-100' }}" href="/payplan">Pay Plan</a>
+        <div class="w-px h-5 bg-slate-200 mx-1 hidden sm:block"></div>
+        <a class="inline-flex items-center px-3 py-1.5 text-sm rounded bg-emerald-600 text-white hover:bg-emerald-700 transition gap-1" href="/deals/new">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          New Deal
+        </a>
       </div>
     </div>
   </nav>
-  <main class="max-w-6xl mx-auto px-4 py-6">
+  {% endif %}
+  <main class="{{ 'p-4' if (embed|default(false)) else 'max-w-6xl mx-auto px-4 py-6' }}">
     {% block content %}{% endblock %}
   </main>
 </body>

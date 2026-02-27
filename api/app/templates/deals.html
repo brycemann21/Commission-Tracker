@@ -76,9 +76,34 @@
 
         <div class="mt-5 flex justify-end gap-2">
           <button id="mPrintBtn" type="button" class="px-3 py-2 text-sm rounded border">Print</button>
-          <a id="mEditLink" class="px-3 py-2 text-sm rounded bg-slate-900 text-white" href="#">Edit Deal</a>
+          <button id="mEditBtn" type="button" class="px-3 py-2 text-sm rounded bg-slate-900 text-white">Edit Deal</button>
           <button type="button" class="px-3 py-2 text-sm rounded border" data-close="1">Close</button>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit modal (loads edit form in an iframe) -->
+<div id="editModal" class="fixed inset-0 z-50 hidden" aria-hidden="true">
+  <div class="absolute inset-0 bg-black/40" data-close-edit="1"></div>
+  <div class="relative mx-auto mt-10 w-[95%] max-w-5xl">
+    <div class="bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+        <div>
+          <div class="text-sm text-slate-500">Edit Deal</div>
+          <div id="editModalTitle" class="text-lg font-semibold">—</div>
+        </div>
+        <button type="button" class="px-2 py-1 rounded hover:bg-slate-100" data-close-edit="1">✕</button>
+      </div>
+      <div class="p-0">
+        <iframe
+          id="editFrame"
+          title="Edit Deal"
+          class="w-full"
+          style="height: 82vh; border: 0;"
+          src="about:blank"
+        ></iframe>
       </div>
     </div>
   </div>
@@ -100,7 +125,6 @@
       <th class="text-left p-2">Status</th>
       <th class="text-left p-2">Tag</th>
       <th class="text-right p-2">Commission</th>
-      <th class="text-left p-2">Paid?</th>
       <th class="p-2"></th>
     </tr>
   </thead>
@@ -119,6 +143,7 @@
             data-sold="{{ d.sold_date or '' }}"
             data-delivered="{{ d.delivered_date or '' }}"
             data-status="{{ d.status|e }}"
+            data-scheduled="{{ (d.scheduled_date|md) if d.scheduled_date else '' }}"
             data-tag="{{ (d.tag or '')|e }}"
             data-stock="{{ d.stock_num|e }}"
             data-model="{{ d.model|e }}"
@@ -145,22 +170,27 @@
         <td class="p-2">{{ d.deal_type or "" }}</td>
         <td class="p-2">{{ d.new_used }}</td>
         <td class="p-2">{{ d.notes or "" }}</td>
-        <td class="p-2">{{ d.status }}</td>
-        <td class="p-2">{{ d.tag or "" }}</td>
-        <td class="p-2 text-right">${{ "{:,.0f}".format(d.total_deal_comm or 0) }}</td>
         <td class="p-2">
-          <div class="flex items-center gap-2">
-            <span class="inline-flex items-center px-2 py-1 rounded text-xs border {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-800{% else %}bg-slate-50 border-slate-200 text-slate-700{% endif %}">
-              {% if d.is_paid %}Paid{% else %}Pending Pay{% endif %}
-            </span>
-            <form method="post" action="/deals/{{ d.id }}/toggle_paid">
-              <input type="hidden" name="next" value="{{ request.url }}">
-              <button class="text-xs underline" type="submit">{% if d.is_paid %}Mark Pending Pay{% else %}Mark Paid{% endif %}</button>
-            </form>
-          </div>
+          {{ d.status }}{% if d.status == 'Scheduled' and d.scheduled_date %} {{ d.scheduled_date|md }}{% endif %}
+        </td>
+        <td class="p-2">{{ d.tag or "" }}</td>
+        <td class="p-2 text-right">
+          <form method="post" action="/deals/{{ d.id }}/toggle_paid" class="inline">
+            <input type="hidden" name="next" value="{{ request.url }}">
+            <button
+              type="submit"
+              class="inline-flex items-center justify-end gap-2 px-2 py-1 rounded border text-sm font-semibold transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-slate-300 {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-800{% else %}bg-white border-slate-200 text-slate-900{% endif %}"
+              title="Click to toggle Paid / Pending Pay"
+            >
+              <span>${{ "{:,.0f}".format(d.total_deal_comm or 0) }}</span>
+              <span class="text-[11px] font-medium {% if d.is_paid %}text-emerald-700{% else %}text-slate-500{% endif %}">
+                {% if d.is_paid %}Paid{% else %}Pending Pay{% endif %}
+              </span>
+            </button>
+          </form>
         </td>
         <td class="p-2 text-right">
-          <a class="underline" href="/deals/{{ d.id }}/edit">Edit</a>
+          <button type="button" class="underline" data-edit-id="{{ d.id }}" data-edit-title="{{ d.customer|e }}">Edit</button>
         </td>
       </tr>
     {% endfor %}
@@ -172,6 +202,10 @@
   (function () {
     const modal = document.getElementById('dealModal');
     if (!modal) return;
+
+    const editModal = document.getElementById('editModal');
+    const editFrame = document.getElementById('editFrame');
+    const editTitle = document.getElementById('editModalTitle');
 
     const els = {
       title: document.getElementById('modalTitle'),
@@ -190,7 +224,7 @@
       notes: document.getElementById('mNotes'),
       addons: document.getElementById('mAddons'),
       noAddons: document.getElementById('mNoAddons'),
-      editLink: document.getElementById('mEditLink'),
+      editBtn: document.getElementById('mEditBtn'),
       printBtn: document.getElementById('mPrintBtn'),
     };
 
@@ -206,10 +240,15 @@
 
     function openModal(btn) {
       const d = btn.dataset;
+      const dealId = d.id;
       els.title.textContent = d.customer || 'Deal';
       els.sold.textContent = d.sold || '—';
       els.del.textContent = d.delivered || '—';
-      els.status.textContent = d.status || '—';
+      if ((d.status || '') === 'Scheduled' && d.scheduled) {
+        els.status.textContent = `Scheduled ${d.scheduled}`;
+      } else {
+        els.status.textContent = d.status || '—';
+      }
       els.tag.textContent = d.tag || '—';
       els.stock.textContent = d.stock || '—';
       els.model.textContent = d.model || '—';
@@ -220,7 +259,10 @@
       els.hold.textContent = `$${Number(d.hold || 0).toLocaleString()}`;
       els.comm.textContent = d.comm || '—';
       els.notes.textContent = d.notes || '—';
-      els.editLink.href = `/deals/${d.id}/edit`;
+      if (els.editBtn) {
+        els.editBtn.dataset.id = dealId;
+        els.editBtn.dataset.title = d.customer || `Deal #${dealId}`;
+      }
 
       const items = [];
       if (d.permaplate === '1') items.push('PermaPlate');
@@ -253,11 +295,57 @@
       document.body.style.overflow = '';
     }
 
+    function openEditModal(id, title) {
+      if (!editModal || !editFrame) return;
+      if (!id) return;
+      const next = encodeURIComponent('/deals?embedded=1');
+      editFrame.src = `/deals/${id}/edit?embed=1&next=${next}`;
+      if (editTitle) editTitle.textContent = title || `Deal #${id}`;
+      editModal.classList.remove('hidden');
+      editModal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeEditModal(refresh) {
+      if (!editModal || !editFrame) return;
+      editModal.classList.add('hidden');
+      editModal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+      editFrame.src = 'about:blank';
+      if (refresh) window.location.reload();
+    }
+
     document.addEventListener('click', (e) => {
       const openBtn = e.target.closest('[data-open-deal="1"]');
       if (openBtn) {
         e.preventDefault();
         openModal(openBtn);
+        return;
+      }
+
+      // Edit buttons (table + modal)
+      const editBtn = e.target.closest('[data-edit-id]');
+      if (editBtn) {
+        e.preventDefault();
+        const id = editBtn.getAttribute('data-edit-id');
+        const title = editBtn.getAttribute('data-edit-title') || '';
+        if (id) openEditModal(id, title);
+        return;
+      }
+
+      const modalEdit = e.target.closest('#mEditBtn');
+      if (modalEdit) {
+        e.preventDefault();
+        const id = modalEdit.dataset.id;
+        const title = modalEdit.dataset.title;
+        if (id) openEditModal(id, title);
+        return;
+      }
+
+      const closeEditBtn = e.target.closest('[data-close-edit="1"]');
+      if (closeEditBtn && editModal && !editModal.classList.contains('hidden')) {
+        e.preventDefault();
+        closeEditModal(false);
         return;
       }
       const closeBtn = e.target.closest('[data-close="1"]');
@@ -269,7 +357,26 @@
 
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+      if (e.key === 'Escape' && editModal && !editModal.classList.contains('hidden')) closeEditModal(false);
+    });
+
+    // When the edit iframe navigates to /deals?embedded=1 after saving,
+    // it will postMessage so we can close the modal and refresh this page.
+    window.addEventListener('message', (ev) => {
+      try {
+        if (ev && ev.data && ev.data.type === 'ct_deal_saved') {
+          closeEditModal(true);
+        }
+      } catch (_) {}
     });
   })();
 </script>
+
+{% if request.query_params.get('embedded') == '1' %}
+<script>
+  try {
+    window.parent.postMessage({ type: 'ct_deal_saved' }, '*');
+  } catch (e) {}
+</script>
+{% endif %}
 {% endblock %}
