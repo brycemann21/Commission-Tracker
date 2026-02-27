@@ -109,17 +109,29 @@ async def _user(request: Request, db: AsyncSession) -> User:
 @app.on_event("startup")
 async def startup():
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        # Add user_id columns to existing tables (backward compat migration)
+        # If a previous deploy created "profiles" instead of "users", rename it
+        try:
+            await conn.exec_driver_sql("ALTER TABLE IF EXISTS profiles RENAME TO users")
+        except Exception:
+            pass
+        # Drop any existing FK constraints on user_id that reference non-existent tables
         for tbl in ("deals", "settings", "goals"):
             try:
-                await conn.exec_driver_sql(f"ALTER TABLE {tbl} ADD COLUMN user_id INTEGER REFERENCES users(id)")
+                # PostgreSQL: drop FK constraint if it exists (constraint name pattern)
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE {tbl} DROP CONSTRAINT IF EXISTS {tbl}_user_id_fkey"
+                )
             except Exception:
-                try:
-                    await conn.exec_driver_sql(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id)")
-                except Exception:
-                    pass
-        # Legacy column migrations
+                pass
+        # Now create all tables (users first since it has no dependencies)
+        await conn.run_sync(Base.metadata.create_all)
+        # Add user_id columns to existing tables (plain integer, no FK constraint)
+        for tbl in ("deals", "settings", "goals"):
+            try:
+                await conn.exec_driver_sql(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS user_id INTEGER")
+            except Exception:
+                pass
+        # Legacy column migrations for deals
         for col, typ, dflt in [
             ("scheduled_date", "DATE", "NULL"),
             ("on_delivery_board", "BOOLEAN", "false"),
@@ -131,6 +143,7 @@ async def startup():
                 await conn.exec_driver_sql(f"ALTER TABLE deals ADD COLUMN IF NOT EXISTS {col} {typ} DEFAULT {dflt}")
             except Exception:
                 pass
+        # Legacy column migrations for settings
         for col, typ, dflt in [
             ("hourly_rate_ny_offset", "FLOAT", "15.0"),
             ("new_volume_bonus_15_16", "FLOAT", "1000.0"), ("new_volume_bonus_17_18", "FLOAT", "1200.0"),

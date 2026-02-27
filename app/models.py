@@ -1,11 +1,11 @@
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import String, Integer, Float, Date, Boolean, Text, ForeignKey
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import String, Integer, Float, Date, Boolean, Text
 
 class Base(DeclarativeBase):
     pass
 
 class User(Base):
-    __tablename__ = "profiles"
+    __tablename__ = "users"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), default="")
@@ -16,7 +16,7 @@ class User(Base):
 class Settings(Base):
     __tablename__ = "settings"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     unit_comm_discount_le_200: Mapped[float] = mapped_column(Float, default=190.0)
     unit_comm_discount_gt_200: Mapped[float] = mapped_column(Float, default=140.0)
@@ -44,7 +44,7 @@ class Settings(Base):
 class Goal(Base):
     __tablename__ = "goals"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     month: Mapped[int] = mapped_column(Integer, nullable=False)
     unit_goal: Mapped[int] = mapped_column(Integer, default=20)
@@ -53,7 +53,7 @@ class Goal(Base):
 class Deal(Base):
     __tablename__ = "deals"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     sold_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     delivered_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
