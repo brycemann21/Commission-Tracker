@@ -3,6 +3,7 @@ import io
 import csv
 import ssl
 import re
+import urllib.parse
 import calendar
 import traceback
 from datetime import date, datetime, timedelta
@@ -26,11 +27,22 @@ from .utils import parse_date, today
 # -----------------------------
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:////tmp/commission.db")
 
+def sanitize_db_url(url: str) -> str:
+    """Remove libpq-only query params (e.g. sslmode) that asyncpg doesn't accept."""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        qs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        qs = [(k, v) for (k, v) in qs if k.lower() not in {"sslmode", "sslrootcert", "sslcert", "sslkey"}]
+        new_query = urllib.parse.urlencode(qs)
+        return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
+    except Exception:
+        return url
+
 SSL_CONTEXT = ssl.create_default_context()
 SSL_CONTEXT.check_hostname = False
 SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 
-db_url = DATABASE_URL
+db_url = sanitize_db_url(DATABASE_URL)
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
 elif db_url.startswith("postgresql://"):
@@ -38,14 +50,7 @@ elif db_url.startswith("postgresql://"):
 
 connect_args = {}
 if db_url.startswith("postgresql+asyncpg://"):
-    # Supabase's pooler uses PgBouncer in transaction/statement mode,
-    # which does NOT support asyncpg prepared statement caching.
-    # Disabling the statement cache prevents:
-    #   asyncpg.exceptions.DuplicatePreparedStatementError
-    connect_args = {
-        "ssl": SSL_CONTEXT,
-        "statement_cache_size": 0,
-    }
+    connect_args = {"ssl": SSL_CONTEXT, "statement_cache_size": 0, "prepared_statement_cache_size": 0}
 
 engine = create_async_engine(db_url, echo=False, future=True, connect_args=connect_args)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
