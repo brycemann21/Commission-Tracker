@@ -52,8 +52,15 @@ connect_args = {}
 if db_url.startswith("postgresql+asyncpg://"):
     connect_args = {"ssl": SSL_CONTEXT, "statement_cache_size": 0, "prepared_statement_cache_size": 0}
 
-engine = create_async_engine(db_url, echo=False, future=True, connect_args=connect_args)
-SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+from sqlalchemy.pool import NullPool
+
+engine = create_async_engine(
+    db_url,
+    echo=False,
+    future=True,
+    connect_args=connect_args,
+    poolclass=NullPool,
+)
 
 
 # -----------------------------
