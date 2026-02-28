@@ -75,6 +75,7 @@ if _is_pg:
         "ssl": _ssl_ctx,
         "statement_cache_size": 0,
         "prepared_statement_cache_size": 0,
+        "prepared_statement_name_func": lambda: f"__asyncpg_{secrets.token_hex(8)}__",
     }
 
 engine = create_async_engine(
