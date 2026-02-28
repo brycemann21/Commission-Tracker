@@ -1,6 +1,7 @@
 import logging
 import os
 import io
+import secrets
 import csv
 import ssl
 import re
@@ -1220,31 +1221,31 @@ async def export_csv(request: Request, month: str | None = None, db: AsyncSessio
 
 # Known field targets for AI mapping
 _IMPORT_FIELDS = {
-    "customer": ["customer","customer name","name","buyer","client","purchaser"],
-    "sold_date": ["sold date","sold","sale date","date sold","contract date"],
-    "delivered_date": ["delivered date","delivery date","del date","date delivered","deliver"],
-    "scheduled_date": ["scheduled date","schedule date","appt date","appointment"],
+    "customer": ["customer","customer name","name","buyer","client","purchaser","last name","cust name","cust"],
+    "sold_date": ["sold date","sold","sale date","date sold","contract date","date","sell date","s date"],
+    "delivered_date": ["delivered date","delivery date","del date","date delivered","deliver","del"],
+    "scheduled_date": ["scheduled date","schedule date","appt date","appointment","sched"],
     "status": ["status","deal status","state"],
-    "stock_num": ["stock #","stock number","stock","vin","unit #","unit number","stk"],
-    "model": ["model","vehicle","car","description","year make model","ymm"],
-    "new_used": ["new/used","new used","type","n/u","condition"],
-    "deal_type": ["f/c/l","deal type","finance type","type","fcl","fin type"],
-    "business_manager": ["f&i","fi","business manager","finance manager","fi mgr","bm"],
+    "stock_num": ["stock #","stock number","stock","vin","unit #","unit number","stk","stk#","stk #","stock#"],
+    "model": ["model","vehicle","car","description","year make model","ymm","vehicle model","make model"],
+    "new_used": ["new/used","new used","type","n/u","condition","n","nu"],
+    "deal_type": ["f/c/l","deal type","finance type","fcl","fin type","f","deal"],
+    "business_manager": ["f&i","fi","business manager","finance manager","fi mgr","bm","fin mgr","f&i mgr"],
     "spot_sold": ["spot","spot sold","spot delivery","spotted"],
-    "discount_gt_200": ["discount>200","discount over 200","discount","disc>200","over 200"],
+    "discount_gt_200": ["discount>200","discount over 200","discount","disc>200","over 200","disc"],
     "aim_presentation": ["aim","aim presentation","demo"],
     "permaplate": ["permaplate","perma plate","perm"],
     "nitro_fill": ["nitro fill","nitro","nitrogen","nitrofill"],
     "pulse": ["pulse","pulse protection"],
-    "finance_non_subvented": ["finance","finance product","non subvented","non-subvented","fin"],
+    "finance_non_subvented": ["finance","finance product","non subvented","non-subvented"],
     "warranty": ["warranty","extended warranty","ext warranty","ew"],
     "tire_wheel": ["tire&wheel","tire wheel","tire & wheel","t&w","tires"],
     "hold_amount": ["hold amount","hold","holdback","hold $","gross hold"],
     "aim_amount": ["aim amount","aim $","aim gross"],
     "fi_pvr": ["fi pvr","pvr","per vehicle retail","f&i pvr"],
-    "is_paid": ["paid","payment","pay status"],
+    "is_paid": ["paid","payment","pay status","bb"],
     "pay_date": ["pay date","paid date","payment date","check date"],
-    "notes": ["notes","note","comments","comment","remarks"],
+    "notes": ["notes","note","comments","comment","remarks","memo"],
     "tag": ["tag","deal tag","category"],
 }
 
@@ -1364,6 +1365,32 @@ async def import_page(request: Request, db: AsyncSession = Depends(get_db)):
     })
 
 
+def _find_header_row(text: str) -> tuple[list[str], list[dict]]:
+    """
+    Find the real header row in a CSV by skipping blank/empty leading rows.
+    Returns (headers, data_rows).
+    """
+    raw_rows = list(csv.reader(io.StringIO(text)))
+    header_idx = 0
+    for i, row in enumerate(raw_rows):
+        # A real header row has at least 2 non-empty cells
+        non_empty = [c.strip() for c in row if c.strip()]
+        if len(non_empty) >= 2:
+            header_idx = i
+            break
+
+    headers = [h.strip() for h in raw_rows[header_idx]]
+    data_rows = []
+    for row in raw_rows[header_idx + 1:]:
+        if not any(c.strip() for c in row):
+            continue  # skip blank rows
+        # Pad or truncate row to match header length
+        padded = list(row) + [""] * max(0, len(headers) - len(row))
+        data_rows.append(dict(zip(headers, padded[:len(headers)])))
+
+    return headers, data_rows
+
+
 @app.post("/import/preview", response_class=HTMLResponse)
 async def import_preview(request: Request, file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
     """Step 1: Upload CSV, detect columns, show mapping preview before committing."""
@@ -1371,11 +1398,10 @@ async def import_preview(request: Request, file: UploadFile = File(...), db: Asy
     user = await _user(request, db)
     raw = await file.read()
     text = raw.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text))
-    headers = reader.fieldnames or []
-    rows = list(reader)
 
-    mapping = _smart_map_columns(list(headers))
+    headers, rows = _find_header_row(text)
+
+    mapping = _smart_map_columns(headers)
 
     # Build preview of first 5 rows
     preview_rows = []
@@ -1391,9 +1417,22 @@ async def import_preview(request: Request, file: UploadFile = File(...), db: Asy
                 "deal_type": deal.deal_type,
             })
 
+    # Build sample values per column (first 3 non-empty values)
+    sample_values: dict[str, list[str]] = {}
+    for h in headers:
+        vals = []
+        for row in rows:
+            v = (row.get(h) or "").strip()
+            if v and v not in vals:
+                vals.append(v)
+            if len(vals) >= 3:
+                break
+        sample_values[h] = vals
+
     # Store raw CSV in session via hidden field (base64 for safety)
     import base64
     csv_b64 = base64.b64encode(raw).decode()
+    fname = file.filename or "upload.csv"
 
     return templates.TemplateResponse("import.html", {
         "request": request, "user": user, "result": None,
@@ -1403,7 +1442,8 @@ async def import_preview(request: Request, file: UploadFile = File(...), db: Asy
         "all_fields": list(_IMPORT_FIELDS.keys()),
         "total_rows": len(rows),
         "csv_b64": csv_b64,
-        "filename": file.filename or "upload.csv",
+        "filename": fname,
+        "sample_values": sample_values,
     })
 
 
@@ -1425,9 +1465,7 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
 
     raw = base64.b64decode(csv_b64)
     text = raw.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text))
-    headers = list(reader.fieldnames or [])
-    rows = list(reader)
+    headers, rows = _find_header_row(text)
 
     # Rebuild mapping from form (user may have adjusted dropdowns)
     mapping = {}
@@ -1440,6 +1478,8 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
     if not mapping:
         mapping = _smart_map_columns(headers)
 
+    # Generate a unique batch ID for this import so it can be undone
+    import_batch_id = f"imp_{secrets.token_hex(8)}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
     imported = skipped = 0
     errors = []
 
@@ -1454,6 +1494,7 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
                 **deal_in.model_dump(),
                 user_id=user_id,
                 unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot,
+                import_batch_id=import_batch_id,
             ))
             imported += 1
         except Exception as e:
@@ -1464,12 +1505,110 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
     except Exception as e:
         errors.append(f"Database error: {e}")
         imported = 0
+        import_batch_id = None
 
     return templates.TemplateResponse("import.html", {
         "request": request, "user": user,
-        "result": {"imported": imported, "skipped": skipped, "errors": errors},
-        "preview": None, "mapping": None,
+        "result": {
+            "imported": imported, "skipped": skipped, "errors": errors,
+            "batch_id": import_batch_id if imported > 0 else None,
+            "filename": form.get("filename", "upload.csv"),
+        },
+        "preview": None, "mapping": None, "sample_values": {},
     })
+
+
+# ════════════════════════════════════════════════
+# BULK DEAL MANAGEMENT
+# ════════════════════════════════════════════════
+
+@app.post("/import/undo/{batch_id}")
+async def undo_import(batch_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Delete all deals from a specific import batch."""
+    user_id = uid(request)
+    result = await db.execute(
+        select(Deal).where(Deal.user_id == user_id, Deal.import_batch_id == batch_id)
+    )
+    deals = result.scalars().all()
+    count = len(deals)
+    for deal in deals:
+        await db.delete(deal)
+    await db.commit()
+    return RedirectResponse(
+        url=f"/import?undone={count}&batch={batch_id}",
+        status_code=303
+    )
+
+
+@app.get("/import/history", response_class=HTMLResponse)
+async def import_history(request: Request, db: AsyncSession = Depends(get_db)):
+    """Show all past import batches with undo option."""
+    user_id = uid(request)
+    # Get distinct batch IDs with counts
+    from sqlalchemy import func as sqlfunc
+    rows = (await db.execute(
+        select(
+            Deal.import_batch_id,
+            sqlfunc.count(Deal.id).label("count"),
+            sqlfunc.min(Deal.sold_date).label("earliest"),
+            sqlfunc.max(Deal.sold_date).label("latest"),
+        )
+        .where(Deal.user_id == user_id, Deal.import_batch_id.isnot(None))
+        .group_by(Deal.import_batch_id)
+        .order_by(Deal.import_batch_id.desc())
+    )).all()
+
+    batches = []
+    for row in rows:
+        batch_id = row[0]
+        # Extract timestamp from batch ID format: imp_XXXXXXXX_YYYYMMDDHHMMSS
+        try:
+            ts_str = batch_id.split("_")[-1]
+            ts = datetime.strptime(ts_str, "%Y%m%d%H%M%S")
+            imported_at = ts.strftime("%b %d, %Y at %I:%M %p")
+        except Exception:
+            imported_at = "Unknown"
+        batches.append({
+            "batch_id": batch_id,
+            "count": row[1],
+            "earliest": row[2],
+            "latest": row[3],
+            "imported_at": imported_at,
+        })
+
+    user = await _user(request, db)
+    return templates.TemplateResponse("import.html", {
+        "request": request, "user": user,
+        "result": None, "preview": None, "mapping": None,
+        "sample_values": {}, "batches": batches,
+        "show_history": True,
+    })
+
+
+@app.post("/deals/bulk-delete")
+async def bulk_delete_deals(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete multiple selected deals by ID."""
+    user_id = uid(request)
+    form = await request.form()
+    deal_ids = form.getlist("deal_ids")
+    if not deal_ids:
+        return RedirectResponse(url="/deals", status_code=303)
+    count = 0
+    for did in deal_ids:
+        try:
+            deal = (await db.execute(
+                select(Deal).where(Deal.id == int(did), Deal.user_id == user_id)
+            )).scalar_one_or_none()
+            if deal:
+                await db.delete(deal)
+                count += 1
+        except Exception:
+            pass
+    await db.commit()
+    return RedirectResponse(url=f"/deals?deleted={count}", status_code=303)
 
 
 # ════════════════════════════════════════════════

@@ -109,10 +109,28 @@
   </div>
 </div>
 
+<!-- Bulk action toolbar (hidden until checkboxes selected) -->
+<form method="post" action="/deals/bulk-delete" id="bulkForm">
+<div id="bulkToolbar" class="hidden mt-4 mb-2 flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+  <span id="bulkCount" class="text-sm font-medium text-red-700">0 deals selected</span>
+  <button type="submit"
+          onclick="return confirm('Permanently delete selected deals?')"
+          class="px-4 py-1.5 rounded bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition">
+    Delete Selected
+  </button>
+  <button type="button" onclick="clearSelection()"
+          class="px-3 py-1.5 rounded border border-red-300 text-red-600 text-sm hover:bg-red-100 transition">
+    Cancel
+  </button>
+</div>
+
 <div class="mt-4 overflow-x-auto bg-white rounded border border-slate-200">
 <table class="min-w-full text-sm">
   <thead class="bg-slate-900 text-white">
     <tr>
+      <th class="p-2 w-8">
+        <input type="checkbox" id="selectAll" class="rounded" title="Select all">
+      </th>
       <th class="text-left p-2">Sold Date</th>
       <th class="text-left p-2">Delivered Date</th>
       <th class="text-left p-2">Customer</th>
@@ -130,7 +148,11 @@
   </thead>
   <tbody>
     {% for d in deals %}
-      <tr class="border-t">
+      <tr class="border-t deal-row">
+        <td class="p-2">
+          <input type="checkbox" name="deal_ids" value="{{ d.id }}"
+                 class="deal-checkbox rounded" onchange="updateBulkToolbar()">
+        </td>
         <td class="p-2">{{ d.sold_date or "" }}</td>
         <td class="p-2">{{ d.delivered_date or "" }}</td>
         <td class="p-2">
@@ -380,6 +402,50 @@
       } catch (_) {}
     });
   })();
+</script>
+
+<script>
+  // Bulk select logic
+  const selectAll = document.getElementById('selectAll');
+  const bulkToolbar = document.getElementById('bulkToolbar');
+  const bulkCount = document.getElementById('bulkCount');
+
+  function updateBulkToolbar() {
+    const checked = document.querySelectorAll('.deal-checkbox:checked');
+    if (checked.length > 0) {
+      bulkToolbar.classList.remove('hidden');
+      bulkCount.textContent = `${checked.length} deal${checked.length !== 1 ? 's' : ''} selected`;
+    } else {
+      bulkToolbar.classList.add('hidden');
+    }
+    if (selectAll) {
+      const all = document.querySelectorAll('.deal-checkbox');
+      selectAll.checked = all.length > 0 && checked.length === all.length;
+      selectAll.indeterminate = checked.length > 0 && checked.length < all.length;
+    }
+  }
+
+  function clearSelection() {
+    document.querySelectorAll('.deal-checkbox').forEach(cb => cb.checked = false);
+    if (selectAll) selectAll.checked = false;
+    bulkToolbar.classList.add('hidden');
+  }
+
+  if (selectAll) {
+    selectAll.addEventListener('change', () => {
+      document.querySelectorAll('.deal-checkbox').forEach(cb => cb.checked = selectAll.checked);
+      updateBulkToolbar();
+    });
+  }
+
+  // Show deleted notice if redirected back
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('deleted')) {
+    const notice = document.createElement('div');
+    notice.className = 'mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium';
+    notice.textContent = `✓ Deleted ${params.get('deleted')} deal(s).`;
+    document.querySelector('.mt-4') && document.querySelector('.mt-4').before(notice);
+  }
 </script>
 
 {% if request.query_params.get('embedded') == '1' %}

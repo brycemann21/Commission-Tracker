@@ -2,18 +2,55 @@
 {% block content %}
 
 <div class="max-w-4xl">
+
+  {% if show_history %}
+  <!-- ── Import History ── -->
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-xl font-bold">Import History</h1>
+      <p class="text-sm text-slate-500 mt-0.5">Undo any past import — this permanently deletes those deals.</p>
+    </div>
+    <a href="/import" class="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50 transition">
+      ← New Import
+    </a>
+  </div>
+
+  {% if batches %}
+  <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+    {% for b in batches %}
+    <div class="flex items-center justify-between px-5 py-4 {{ 'border-b border-slate-100' if not loop.last }}">
+      <div>
+        <div class="font-medium text-slate-900">{{ b.count }} deal{{ 's' if b.count != 1 else '' }} imported</div>
+        <div class="text-sm text-slate-500 mt-0.5">{{ b.imported_at }}
+          {% if b.earliest %} · deals from {{ b.earliest }} {% if b.latest and b.latest != b.earliest %}to {{ b.latest }}{% endif %}{% endif %}
+        </div>
+      </div>
+      <form method="post" action="/import/undo/{{ b.batch_id }}"
+            onsubmit="return confirm('Delete all {{ b.count }} deals from this import? This cannot be undone.')">
+        <button type="submit"
+                class="px-4 py-2 rounded-lg bg-red-50 text-red-600 border border-red-200 text-sm font-medium hover:bg-red-100 transition">
+          Undo — Delete {{ b.count }} Deals
+        </button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="bg-white rounded-xl border border-slate-200 p-10 text-center text-slate-400">
+    No imports found. Deals imported before this update don't have batch tracking.
+  </div>
+  {% endif %}
+
+  {% else %}
   <h1 class="text-xl font-bold mb-1">Import Deals from CSV</h1>
-  <p class="text-sm text-slate-500 mb-6">Upload any CSV — the importer will automatically detect your columns and map them to deal fields. No specific format required.</p>
+  <p class="text-sm text-slate-500 mb-5">Upload any CSV — the importer will automatically detect your columns and map them to deal fields.</p>
 
   <!-- ── Result banner ── -->
   {% if result %}
-  <div class="mb-6 rounded-lg border p-4 {{ 'bg-emerald-50 border-emerald-200' if result.imported > 0 else 'bg-amber-50 border-amber-200' }}">
+  <div class="mb-5 rounded-lg border p-4 {{ 'bg-emerald-50 border-emerald-200' if result.imported > 0 else 'bg-amber-50 border-amber-200' }}">
     <div class="font-semibold {{ 'text-emerald-800' if result.imported > 0 else 'text-amber-800' }}">
-      {% if result.imported > 0 %}
-        ✓ Imported {{ result.imported }} deal{{ 's' if result.imported != 1 else '' }} successfully
-      {% else %}
-        No deals imported
-      {% endif %}
+      {% if result.imported > 0 %}✓ Imported {{ result.imported }} deal{{ 's' if result.imported != 1 else '' }} successfully
+      {% else %}No deals imported{% endif %}
     </div>
     {% if result.skipped > 0 %}
       <div class="text-sm text-slate-600 mt-1">{{ result.skipped }} row{{ 's' if result.skipped != 1 else '' }} skipped (no customer name found)</div>
@@ -26,15 +63,42 @@
       </div>
     {% endif %}
     {% if result.imported > 0 %}
-      <a href="/deals" class="inline-flex items-center gap-1 mt-3 px-4 py-2 rounded bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition">
+    <div class="flex items-center gap-3 mt-3">
+      <a href="/deals" class="px-4 py-2 rounded bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition">
         View Deals →
       </a>
+      {% if result.batch_id %}
+      <form method="post" action="/import/undo/{{ result.batch_id }}"
+            onsubmit="return confirm('Delete all {{ result.imported }} deals from this import?')">
+        <button type="submit"
+                class="px-4 py-2 rounded bg-red-50 text-red-600 border border-red-200 text-sm font-medium hover:bg-red-100 transition">
+          ↩ Undo This Import
+        </button>
+      </form>
+      {% endif %}
+    </div>
     {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- undone notice -->
+  {% set undone = request.query_params.get('undone') %}
+  {% if undone %}
+  <div class="mb-5 p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium">
+    ✓ Deleted {{ undone }} deal{{ 's' if undone != '1' else '' }} from that import.
   </div>
   {% endif %}
 
   <!-- ── Step 1: Upload ── -->
   {% if not preview %}
+  <div class="flex items-center gap-3 mb-5">
+    <a href="/import/history"
+       class="ml-auto text-sm text-slate-500 hover:text-slate-900 flex items-center gap-1.5 transition">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      Import History & Undo
+    </a>
+  </div>
+
   <form method="post" action="/import/preview" enctype="multipart/form-data" id="uploadForm">
     <div id="dropZone"
          class="border-2 border-dashed border-slate-300 rounded-xl p-10 text-center hover:border-slate-400 transition cursor-pointer"
@@ -46,51 +110,45 @@
       <div class="text-xs text-slate-400 mt-1">Any CSV — we'll figure out the columns automatically</div>
       <input type="file" name="file" id="fileInput" accept=".csv,.txt" class="hidden" required>
     </div>
-
     <div class="mt-3 flex items-center gap-3">
       <button type="submit" id="uploadBtn"
               class="px-6 py-2.5 rounded-lg bg-slate-900 text-white font-medium hover:bg-slate-800 transition disabled:opacity-40 disabled:cursor-not-allowed"
               disabled>
         Detect Columns →
       </button>
-      <span id="fileNameLabel" class="text-sm text-slate-500"></span>
     </div>
   </form>
 
-  <!-- Tips -->
-  <div class="mt-8 bg-white rounded-lg border border-slate-200 p-5">
+  <div class="mt-6 bg-white rounded-lg border border-slate-200 p-5">
     <div class="font-semibold text-sm mb-2 flex items-center gap-2">
       <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
       How smart import works
     </div>
     <ul class="text-sm text-slate-600 space-y-1 list-disc list-inside">
-      <li>Upload <em>any</em> CSV — dealer DMS export, Google Sheet, Excel file, etc.</li>
+      <li>Upload <em>any</em> CSV — DMS export, Google Sheet, Excel file, etc.</li>
       <li>The importer reads your column headers and figures out what each one is</li>
       <li>You'll see a preview before anything is saved so you can correct mistakes</li>
-      <li>Only <strong>Customer</strong> (or similar name column) is required — everything else is optional</li>
+      <li>After importing, you can undo the entire batch instantly from Import History</li>
     </ul>
-    <div class="mt-3 text-xs text-slate-400">
-      Recognized fields: Customer, Sold Date, Delivered Date, Stock #, Model, New/Used, Deal Type (F/C/L), F&I, Status, Spot, Discount, PermaPlate, Nitro Fill, Pulse, Warranty, Tire&Wheel, Aim, Hold Amount, Paid, Pay Date, Notes
-    </div>
   </div>
 
-  <!-- ── Step 2: Preview & confirm mapping ── -->
+  <!-- ── Step 2: Preview & confirm ── -->
   {% else %}
   <form method="post" action="/import" id="confirmForm">
     <input type="hidden" name="csv_b64" value="{{ csv_b64 }}">
+    <input type="hidden" name="filename" value="{{ filename }}">
 
-    <!-- Mapping table -->
     <div class="bg-white rounded-xl border border-slate-200 p-5 mb-5">
       <div class="flex items-center justify-between mb-3">
         <div>
           <div class="font-semibold">Column Mapping — <span class="text-slate-500 font-normal text-sm">{{ filename }}</span></div>
-          <div class="text-xs text-slate-400 mt-0.5">{{ total_rows }} rows detected. Review how each column was mapped and adjust if needed.</div>
+          <div class="text-xs text-slate-400 mt-0.5">{{ total_rows }} rows detected. Review mappings and adjust if needed.</div>
         </div>
-        <span class="text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-3 py-1 font-medium">
+        <span class="text-xs rounded-full px-3 py-1 font-medium
+          {{ 'bg-emerald-50 text-emerald-700 border border-emerald-200' if mapping|length > 0 else 'bg-amber-50 text-amber-700 border border-amber-200' }}">
           {{ mapping|length }} of {{ csv_headers|length }} columns mapped
         </span>
       </div>
-
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
@@ -104,12 +162,12 @@
             {% for header in csv_headers %}
             {% set mapped_to = mapping.get(header, "") %}
             <tr class="border-b border-slate-100 hover:bg-slate-50">
-              <td class="py-2 pr-4 font-medium text-slate-800">{{ header }}</td>
+              <td class="py-2 pr-4 font-medium text-slate-800">{{ header if header else '(blank)' }}</td>
               <td class="py-2 pr-4">
                 <select name="map_{{ header }}"
-                        class="text-sm border border-slate-200 rounded px-2 py-1 bg-white focus:ring-2 focus:ring-slate-900 outline-none
+                        class="text-sm border rounded px-2 py-1 bg-white focus:ring-2 focus:ring-slate-900 outline-none
                                {{ 'border-emerald-300 bg-emerald-50' if mapped_to else 'border-slate-200 text-slate-400' }}">
-                  <option value="">— skip this column —</option>
+                  <option value="">— skip —</option>
                   {% for field in all_fields %}
                   <option value="{{ field }}" {% if mapped_to == field %}selected{% endif %}>
                     {{ field.replace("_", " ").title() }}
@@ -118,11 +176,13 @@
                 </select>
               </td>
               <td class="py-2 text-xs text-slate-500 font-mono">
-                {% for row in preview[:3] if loop.index <= 3 %}
-                  {%- set val = "" -%}
-                  {# We can't easily get raw preview by header here, so show mapped value #}
-                {% endfor %}
-                <span class="text-slate-400 italic">see preview below</span>
+                {% if sample_values and sample_values.get(header) %}
+                  {% for v in sample_values.get(header, [])[:3] %}
+                    <span class="inline-block bg-slate-100 rounded px-1 mr-1 mb-0.5">{{ v }}</span>
+                  {% endfor %}
+                {% else %}
+                  <span class="text-slate-300 italic">empty</span>
+                {% endif %}
               </td>
             </tr>
             {% endfor %}
@@ -131,7 +191,6 @@
       </div>
     </div>
 
-    <!-- Data preview -->
     {% if preview %}
     <div class="bg-white rounded-xl border border-slate-200 p-5 mb-5">
       <div class="font-semibold mb-3">Data Preview <span class="text-slate-400 font-normal text-sm">(first {{ preview|length }} rows)</span></div>
@@ -168,16 +227,12 @@
           </tbody>
         </table>
       </div>
-      {% if total_rows > 5 %}
-      <div class="text-xs text-slate-400 mt-2">...and {{ total_rows - 5 }} more rows</div>
-      {% endif %}
+      {% if total_rows > 5 %}<div class="text-xs text-slate-400 mt-2">...and {{ total_rows - 5 }} more rows</div>{% endif %}
     </div>
     {% endif %}
 
-    <!-- Actions -->
     <div class="flex items-center gap-3">
-      <button type="submit"
-              class="px-6 py-2.5 rounded-lg bg-slate-900 text-white font-medium hover:bg-slate-800 transition">
+      <button type="submit" class="px-6 py-2.5 rounded-lg bg-slate-900 text-white font-medium hover:bg-slate-800 transition">
         Import {{ total_rows }} Deal{{ 's' if total_rows != 1 else '' }} →
       </button>
       <a href="/import" class="px-4 py-2.5 rounded-lg border border-slate-300 text-slate-600 text-sm hover:bg-slate-50 transition">
@@ -186,7 +241,7 @@
     </div>
   </form>
   {% endif %}
-
+  {% endif %}
 </div>
 
 <script>
@@ -194,30 +249,21 @@
   const dropZone = document.getElementById('dropZone');
   const dropLabel = document.getElementById('dropLabel');
   const uploadBtn = document.getElementById('uploadBtn');
-  const fileNameLabel = document.getElementById('fileNameLabel');
 
   if (fileInput) {
     fileInput.addEventListener('change', () => {
       if (fileInput.files.length > 0) {
-        const name = fileInput.files[0].name;
-        dropLabel.textContent = name;
-        fileNameLabel.textContent = '';
-        dropZone.classList.add('border-emerald-400', 'bg-emerald-50');
+        dropLabel.textContent = fileInput.files[0].name;
+        dropZone.classList.add('border-emerald-400','bg-emerald-50');
         dropZone.classList.remove('border-slate-300');
         uploadBtn.disabled = false;
       }
     });
-
-    dropZone.addEventListener('dragover', (e) => {
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-blue-400','bg-blue-50'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-blue-400','bg-blue-50'));
+    dropZone.addEventListener('drop', e => {
       e.preventDefault();
-      dropZone.classList.add('border-blue-400', 'bg-blue-50');
-    });
-    dropZone.addEventListener('dragleave', () => {
-      dropZone.classList.remove('border-blue-400', 'bg-blue-50');
-    });
-    dropZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropZone.classList.remove('border-blue-400', 'bg-blue-50');
+      dropZone.classList.remove('border-blue-400','bg-blue-50');
       if (e.dataTransfer.files.length > 0) {
         const dt = new DataTransfer();
         dt.items.add(e.dataTransfer.files[0]);
@@ -225,22 +271,19 @@
         fileInput.dispatchEvent(new Event('change'));
       }
     });
-
-    // Show loading state on submit
     document.getElementById('uploadForm')?.addEventListener('submit', () => {
       uploadBtn.textContent = 'Detecting columns…';
       uploadBtn.disabled = true;
     });
   }
 
-  // Color mapping selects based on value
   document.querySelectorAll('select[name^="map_"]').forEach(sel => {
     sel.addEventListener('change', () => {
       if (sel.value) {
-        sel.classList.add('border-emerald-300', 'bg-emerald-50');
+        sel.classList.add('border-emerald-300','bg-emerald-50');
         sel.classList.remove('text-slate-400');
       } else {
-        sel.classList.remove('border-emerald-300', 'bg-emerald-50');
+        sel.classList.remove('border-emerald-300','bg-emerald-50');
         sel.classList.add('text-slate-400');
       }
     });
