@@ -988,11 +988,14 @@ async def goals_save(request: Request, unit_goal: int = Form(20), commission_goa
     except: y = td.year
     try: m = int(request.cookies.get("ct_month") or td.month)
     except: m = td.month
-    goal = (await db.execute(select(Goal).where(Goal.user_id == user_id, Goal.year == y, Goal.month == m).limit(1))).scalar_one_or_none()
-    if goal:
-        goal.unit_goal = unit_goal; goal.commission_goal = commission_goal
-    else:
-        db.add(Goal(user_id=user_id, year=y, month=m, unit_goal=unit_goal, commission_goal=commission_goal))
+    # Use upsert to handle the unique constraint on (year, month) safely
+    from sqlalchemy import text
+    await db.execute(text("""
+        INSERT INTO goals (user_id, year, month, unit_goal, commission_goal)
+        VALUES (:uid, :y, :m, :u, :c)
+        ON CONFLICT (year, month)
+        DO UPDATE SET user_id=:uid, unit_goal=:u, commission_goal=:c
+    """), {"uid": user_id, "y": y, "m": m, "u": unit_goal, "c": commission_goal})
     await db.commit()
     return RedirectResponse(url=f"/?year={y}&month={m}", status_code=303)
 
