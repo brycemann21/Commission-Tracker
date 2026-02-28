@@ -1010,10 +1010,15 @@ async def deals_list(request: Request, q: str | None = None, status: str | None 
     except: m = td.month
     start_sel, end_sel = month_bounds(date(y, max(1,min(12,m)), 1))
 
-    stmt = select(Deal).where(Deal.user_id == user_id).order_by(Deal.delivered_date.desc().nullslast(), Deal.sold_date.desc().nullslast())
+    stmt = select(Deal).where(Deal.user_id == user_id).order_by(Deal.sold_date.asc().nullslast(), Deal.id.asc())
     carry = ["inbound", "fo"]
     stmt = stmt.where(or_(
+        # Sold in the selected month
         and_(Deal.sold_date.is_not(None), Deal.sold_date >= start_sel, Deal.sold_date < end_sel),
+        # Delivered in the selected month but sold in a different month (cross-month carryover)
+        and_(Deal.delivered_date.is_not(None), Deal.delivered_date >= start_sel, Deal.delivered_date < end_sel,
+             or_(Deal.sold_date.is_(None), Deal.sold_date < start_sel, Deal.sold_date >= end_sel)),
+        # Inbound/FO tags not yet delivered (legacy carryover)
         and_(func.lower(func.coalesce(Deal.tag, "")).in_(carry), Deal.status != "Delivered"),
     ))
     if status and status != "All": stmt = stmt.where(Deal.status == status)
