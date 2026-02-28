@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .review-table td, .review-table th { white-space: nowrap; }
+  .row-skipped td { opacity: 0.35; text-decoration: line-through; }
+  .row-skipped td input, .row-skipped td select { pointer-events: none; }
+  .status-badge { display: inline-block; padding: 1px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; }
+</style>
+
+<form method="post" action="/import" id="importFinalForm">
+  <input type="hidden" name="csv_b64" value="{{ csv_b64 }}">
+  <input type="hidden" name="filename" value="{{ filename }}">
+  <input type="hidden" name="overrides_json" id="overridesJson" value="{}">
+
+  <!-- Header -->
+  <div class="flex items-start justify-between mb-4">
+    <div>
+      <h1 class="text-xl font-bold">Review Deals — <span class="text-slate-500 font-normal text-base">{{ filename }}</span></h1>
+      <p class="text-sm text-slate-500 mt-0.5">
+        <span id="totalCount">{{ total }}</span> deals ready to import.
+        Edit status, dates, or notes per row. Check rows to apply bulk changes. Uncheck "Import" to skip a deal.
+      </p>
+    </div>
+    <div class="flex items-center gap-2 shrink-0 mt-1">
+      <a href="/import" class="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50 transition">← Start Over</a>
+      <button type="submit" id="importBtn"
+              class="px-6 py-2 rounded-lg bg-slate-900 text-white font-semibold hover:bg-slate-800 transition">
+        Import <span id="importCount">{{ total }}</span> Deals →
+      </button>
+    </div>
+  </div>
+
+  <!-- Bulk action toolbar -->
+  <div id="bulkBar" class="hidden mb-3 flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg">
+    <span class="text-sm font-medium text-blue-800" id="bulkLabel">0 selected</span>
+    <span class="text-blue-300">|</span>
+    <span class="text-sm text-blue-700 font-medium">Set status:</span>
+    {% for s in ["Pending","Delivered","Scheduled","Dead"] %}
+    <button type="button" onclick="bulkSetStatus('{{ s }}')"
+            class="px-3 py-1 rounded text-xs font-semibold border transition
+              {% if s == 'Delivered' %}bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-emerald-200
+              {% elif s == 'Pending' %}bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200
+              {% elif s == 'Dead' %}bg-red-100 text-red-700 border-red-300 hover:bg-red-200
+              {% else %}bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-200{% endif %}">
+      {{ s }}
+    </button>
+    {% endfor %}
+    <span class="text-blue-300">|</span>
+    <button type="button" onclick="bulkSkip(true)"
+            class="px-3 py-1 rounded text-xs font-medium border border-slate-300 text-slate-600 hover:bg-slate-100">
+      Skip Selected
+    </button>
+    <button type="button" onclick="bulkSkip(false)"
+            class="px-3 py-1 rounded text-xs font-medium border border-slate-300 text-slate-600 hover:bg-slate-100">
+      Un-skip Selected
+    </button>
+    <button type="button" onclick="clearSelection()"
+            class="ml-auto text-xs text-blue-600 hover:underline">Clear selection</button>
+  </div>
+
+  <!-- Table -->
+  <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+    <table class="min-w-full text-sm review-table">
+      <thead class="bg-slate-900 text-white text-xs uppercase tracking-wide">
+        <tr>
+          <th class="p-2 w-8">
+            <input type="checkbox" id="selectAll" class="rounded" title="Select all">
+          </th>
+          <th class="p-2 text-center w-16">Import</th>
+          <th class="p-2 text-left">#</th>
+          <th class="p-2 text-left">Customer</th>
+          <th class="p-2 text-left">Status</th>
+          <th class="p-2 text-left">Sold Date</th>
+          <th class="p-2 text-left">Delivered Date</th>
+          <th class="p-2 text-left">Scheduled Date</th>
+          <th class="p-2 text-left">Model</th>
+          <th class="p-2 text-left">Stock #</th>
+          <th class="p-2 text-left">N/U</th>
+          <th class="p-2 text-left">Type</th>
+          <th class="p-2 text-left w-48">Notes</th>
+        </tr>
+      </thead>
+      <tbody id="dealTableBody">
+        {% for d in deal_rows %}
+        <tr class="border-t border-slate-100 hover:bg-slate-50 deal-row" data-idx="{{ d.idx }}">
+          <!-- Select checkbox -->
+          <td class="p-2">
+            <input type="checkbox" class="row-select rounded" onchange="onSelectChange()">
+          </td>
+          <!-- Import toggle -->
+          <td class="p-2 text-center">
+            <input type="checkbox" class="import-toggle rounded" checked
+                   title="Include in import" onchange="onToggleImport(this, {{ d.idx }})">
+          </td>
+          <!-- Row number -->
+          <td class="p-2 text-slate-400 text-xs">{{ loop.index }}</td>
+          <!-- Customer (read-only) -->
+          <td class="p-2 font-medium text-slate-900">{{ d.customer }}</td>
+          <!-- Status dropdown -->
+          <td class="p-2">
+            <select class="status-select border border-slate-200 rounded px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-slate-900 outline-none"
+                    data-idx="{{ d.idx }}" onchange="onFieldChange({{ d.idx }}, 'status', this.value); styleStatusSelect(this)">
+              {% for s in ["Pending","Delivered","Scheduled","Dead"] %}
+              <option value="{{ s }}" {% if d.status == s %}selected{% endif %}>{{ s }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <!-- Sold Date -->
+          <td class="p-2">
+            <input type="date" class="border border-slate-200 rounded px-2 py-1 text-xs w-32 focus:ring-1 focus:ring-slate-900 outline-none"
+                   value="{{ d.sold_date }}" onchange="onFieldChange({{ d.idx }}, 'sold_date', this.value)">
+          </td>
+          <!-- Delivered Date -->
+          <td class="p-2">
+            <input type="date" class="border border-slate-200 rounded px-2 py-1 text-xs w-32 focus:ring-1 focus:ring-slate-900 outline-none delivered-input"
+                   value="{{ d.delivered_date }}" onchange="onFieldChange({{ d.idx }}, 'delivered_date', this.value)">
+          </td>
+          <!-- Scheduled Date -->
+          <td class="p-2">
+            <input type="date" class="border border-slate-200 rounded px-2 py-1 text-xs w-32 focus:ring-1 focus:ring-slate-900 outline-none scheduled-input"
+                   value="{{ d.scheduled_date }}" onchange="onFieldChange({{ d.idx }}, 'scheduled_date', this.value)">
+          </td>
+          <!-- Model -->
+          <td class="p-2 text-slate-600">{{ d.model or "—" }}</td>
+          <!-- Stock -->
+          <td class="p-2 text-slate-500 font-mono text-xs">{{ d.stock_num or "—" }}</td>
+          <!-- New/Used -->
+          <td class="p-2 text-slate-500">{{ d.new_used or "—" }}</td>
+          <!-- Deal Type -->
+          <td class="p-2 text-slate-500">{{ d.deal_type or "—" }}</td>
+          <!-- Notes -->
+          <td class="p-2">
+            <input type="text" class="border border-slate-200 rounded px-2 py-1 text-xs w-44 focus:ring-1 focus:ring-slate-900 outline-none"
+                   value="{{ d.notes }}" placeholder="notes…" onchange="onFieldChange({{ d.idx }}, 'notes', this.value)">
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Bottom action bar -->
+  <div class="mt-4 flex items-center justify-between">
+    <div class="text-sm text-slate-500">
+      <span id="skipSummary"></span>
+    </div>
+    <div class="flex gap-3">
+      <a href="/import" class="px-4 py-2.5 rounded-lg border border-slate-300 text-slate-600 text-sm hover:bg-slate-50 transition">← Start Over</a>
+      <button type="submit" class="px-6 py-2.5 rounded-lg bg-slate-900 text-white font-semibold hover:bg-slate-800 transition">
+        Import <span id="importCount2">{{ total }}</span> Deals →
+      </button>
+    </div>
+  </div>
+</form>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const overrides = {};     // { rowIdx: { field: value } }
+const skipped = new Set();// row indices to skip
+
+function onFieldChange(idx, field, value) {
+  if (!overrides[idx]) overrides[idx] = {};
+  overrides[idx][field] = value;
+  saveOverrides();
+
+  // Auto-set delivered_date when status becomes Delivered
+  if (field === 'status' && value === 'Delivered') {
+    const row = document.querySelector(`tr[data-idx="${idx}"]`);
+    const delInput = row?.querySelector('.delivered-input');
+    if (delInput && !delInput.value) {
+      const soldInput = row?.querySelector('input[type="date"]');
+      delInput.value = soldInput?.value || new Date().toISOString().split('T')[0];
+      overrides[idx]['delivered_date'] = delInput.value;
+      saveOverrides();
+    }
+  }
+  // Clear scheduled_date if status is not Scheduled
+  if (field === 'status' && value !== 'Scheduled') {
+    const row = document.querySelector(`tr[data-idx="${idx}"]`);
+    const schedInput = row?.querySelector('.scheduled-input');
+    if (schedInput) schedInput.value = '';
+    if (overrides[idx]) overrides[idx]['scheduled_date'] = '';
+    saveOverrides();
+  }
+}
+
+function onToggleImport(checkbox, idx) {
+  const row = checkbox.closest('tr');
+  if (checkbox.checked) {
+    skipped.delete(idx);
+    row.classList.remove('row-skipped');
+  } else {
+    skipped.add(idx);
+    row.classList.add('row-skipped');
+  }
+  updateSkipInputs();
+  updateCounts();
+}
+
+function saveOverrides() {
+  document.getElementById('overridesJson').value = JSON.stringify(overrides);
+}
+
+function updateSkipInputs() {
+  // Remove existing skip inputs
+  document.querySelectorAll('input[name="skip_idx"]').forEach(e => e.remove());
+  const form = document.getElementById('importFinalForm');
+  skipped.forEach(idx => {
+    const inp = document.createElement('input');
+    inp.type = 'hidden';
+    inp.name = 'skip_idx';
+    inp.value = idx;
+    form.appendChild(inp);
+  });
+}
+
+function updateCounts() {
+  const total = document.querySelectorAll('.import-toggle').length;
+  const importing = total - skipped.size;
+  document.getElementById('importCount').textContent = importing;
+  document.getElementById('importCount2').textContent = importing;
+  const skipCount = skipped.size;
+  document.getElementById('skipSummary').textContent = skipCount > 0
+    ? `${skipCount} deal${skipCount !== 1 ? 's' : ''} will be skipped`
+    : '';
+}
+
+// ── Bulk actions ───────────────────────────────────────────────────────────
+function getSelectedRows() {
+  return [...document.querySelectorAll('.row-select:checked')].map(cb => cb.closest('tr'));
+}
+
+function bulkSetStatus(status) {
+  getSelectedRows().forEach(row => {
+    const idx = parseInt(row.dataset.idx);
+    const sel = row.querySelector('.status-select');
+    if (sel) {
+      sel.value = status;
+      styleStatusSelect(sel);
+      onFieldChange(idx, 'status', status);
+
+      // Auto-fill delivered date
+      if (status === 'Delivered') {
+        const delInput = row.querySelector('.delivered-input');
+        if (delInput && !delInput.value) {
+          delInput.value = new Date().toISOString().split('T')[0];
+          onFieldChange(idx, 'delivered_date', delInput.value);
+        }
+      }
+      // Clear scheduled date if not scheduled
+      if (status !== 'Scheduled') {
+        const sched = row.querySelector('.scheduled-input');
+        if (sched) { sched.value = ''; onFieldChange(idx, 'scheduled_date', ''); }
+      }
+    }
+  });
+}
+
+function bulkSkip(shouldSkip) {
+  getSelectedRows().forEach(row => {
+    const idx = parseInt(row.dataset.idx);
+    const toggle = row.querySelector('.import-toggle');
+    if (toggle) {
+      toggle.checked = !shouldSkip;
+      onToggleImport(toggle, idx);
+    }
+  });
+}
+
+function clearSelection() {
+  document.querySelectorAll('.row-select').forEach(cb => cb.checked = false);
+  document.getElementById('selectAll').checked = false;
+  document.getElementById('bulkBar').classList.add('hidden');
+  document.getElementById('bulkLabel').textContent = '0 selected';
+}
+
+function onSelectChange() {
+  const checked = document.querySelectorAll('.row-select:checked');
+  const bar = document.getElementById('bulkBar');
+  const label = document.getElementById('bulkLabel');
+  if (checked.length > 0) {
+    bar.classList.remove('hidden');
+    label.textContent = `${checked.length} selected`;
+  } else {
+    bar.classList.add('hidden');
+  }
+  const all = document.querySelectorAll('.row-select');
+  const sa = document.getElementById('selectAll');
+  sa.checked = all.length > 0 && checked.length === all.length;
+  sa.indeterminate = checked.length > 0 && checked.length < all.length;
+}
+
+document.getElementById('selectAll').addEventListener('change', function() {
+  document.querySelectorAll('.row-select').forEach(cb => cb.checked = this.checked);
+  onSelectChange();
+});
+
+// ── Status badge colors ────────────────────────────────────────────────────
+function styleStatusSelect(sel) {
+  sel.className = sel.className.replace(/bg-\S+|text-\S+|border-\S+/g, '');
+  const base = 'status-select border rounded px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-slate-900 outline-none ';
+  const colors = {
+    'Delivered': 'border-emerald-300 text-emerald-700',
+    'Pending':   'border-amber-300 text-amber-700',
+    'Dead':      'border-red-300 text-red-600',
+    'Scheduled': 'border-blue-300 text-blue-700',
+  };
+  sel.className = base + (colors[sel.value] || 'border-slate-200');
+}
+
+// Initialize colors on load
+document.querySelectorAll('.status-select').forEach(styleStatusSelect);
+updateCounts();
+</script>
+
+{% endblock %}

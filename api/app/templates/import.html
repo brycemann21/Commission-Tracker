@@ -134,7 +134,7 @@
 
   <!-- ── Step 2: Preview & confirm ── -->
   {% else %}
-  <form method="post" action="/import" id="confirmForm">
+  <form method="post" action="/import/review" id="confirmForm">
     <input type="hidden" name="csv_b64" value="{{ csv_b64 }}">
     <input type="hidden" name="filename" value="{{ filename }}">
 
@@ -233,7 +233,7 @@
 
     <div class="flex items-center gap-3">
       <button type="submit" class="px-6 py-2.5 rounded-lg bg-slate-900 text-white font-medium hover:bg-slate-800 transition">
-        Import {{ total_rows }} Deal{{ 's' if total_rows != 1 else '' }} →
+        Review & Edit Deals →
       </button>
       <a href="/import" class="px-4 py-2.5 rounded-lg border border-slate-300 text-slate-600 text-sm hover:bg-slate-50 transition">
         ← Start Over

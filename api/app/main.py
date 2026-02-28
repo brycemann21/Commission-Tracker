@@ -1447,48 +1447,122 @@ async def import_preview(request: Request, file: UploadFile = File(...), db: Asy
     })
 
 
+@app.post("/import/review", response_class=HTMLResponse)
+async def import_review(request: Request, db: AsyncSession = Depends(get_db)):
+    """Step 2: Show all parsed rows as an editable table before final import."""
+    import base64, json as _json
+    form = await request.form()
+    user = await _user(request, db)
+
+    csv_b64 = form.get("csv_b64", "")
+    fname = form.get("filename", "upload.csv")
+    if not csv_b64:
+        return RedirectResponse(url="/import", status_code=303)
+
+    raw = base64.b64decode(csv_b64)
+    text = raw.decode("utf-8-sig")
+    headers, rows = _find_header_row(text)
+
+    # Rebuild mapping from form
+    mapping = {}
+    for h in headers:
+        fv = form.get(f"map_{h}", "")
+        if fv:
+            mapping[h] = fv
+    if not mapping:
+        mapping = _smart_map_columns(headers)
+
+    # Parse all rows into editable deals
+    deal_rows = []
+    for i, row in enumerate(rows):
+        deal = _parse_row(row, mapping, None)
+        if deal:
+            deal_rows.append({
+                "idx": i,
+                "customer": deal.customer,
+                "sold_date": str(deal.sold_date or ""),
+                "delivered_date": str(deal.delivered_date or ""),
+                "scheduled_date": str(deal.scheduled_date or ""),
+                "status": deal.status,
+                "model": deal.model,
+                "stock_num": deal.stock_num,
+                "new_used": deal.new_used,
+                "deal_type": deal.deal_type,
+                "notes": deal.notes or "",
+            })
+
+    deals_json = _json.dumps(deal_rows)
+
+    return templates.TemplateResponse("import_review.html", {
+        "request": request, "user": user,
+        "deal_rows": deal_rows,
+        "deals_json": deals_json,
+        "csv_b64": csv_b64,
+        "filename": fname,
+        "total": len(deal_rows),
+    })
+
+
 @app.post("/import", response_class=HTMLResponse)
 async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
-    """Step 2: Confirm import with mapping (possibly user-adjusted)."""
-    import base64, json
+    """Step 3: Final import using per-row overrides from the review step."""
+    import base64, json as _json
     form = await request.form()
     user_id = uid(request)
     user = await _user(request, db)
     settings = await get_or_create_settings(db, user_id)
 
     csv_b64 = form.get("csv_b64", "")
+    overrides_json = form.get("overrides_json", "[]")
+    skip_indices_raw = form.getlist("skip_idx")
+    skip_indices = set(int(x) for x in skip_indices_raw if x.isdigit())
+
     if not csv_b64:
         return templates.TemplateResponse("import.html", {
-            "request": request, "user": user, "result": {"imported": 0, "skipped": 0, "errors": ["No CSV data found. Please re-upload."]},
-            "preview": None, "mapping": None,
+            "request": request, "user": user,
+            "result": {"imported": 0, "skipped": 0, "errors": ["No CSV data found. Please re-upload."]},
+            "preview": None, "mapping": None, "sample_values": {},
         })
+
+    try:
+        overrides = {int(k): v for k, v in _json.loads(overrides_json).items()}
+    except Exception:
+        overrides = {}
 
     raw = base64.b64decode(csv_b64)
     text = raw.decode("utf-8-sig")
     headers, rows = _find_header_row(text)
+    mapping = _smart_map_columns(headers)
 
-    # Rebuild mapping from form (user may have adjusted dropdowns)
-    mapping = {}
-    for h in headers:
-        field_val = form.get(f"map_{h}", "")
-        if field_val:
-            mapping[h] = field_val
-
-    # If no form mapping (direct POST), auto-detect
-    if not mapping:
-        mapping = _smart_map_columns(headers)
-
-    # Generate a unique batch ID for this import so it can be undone
     import_batch_id = f"imp_{secrets.token_hex(8)}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
     imported = skipped = 0
     errors = []
 
-    for i, row in enumerate(rows, start=2):
+    for i, row in enumerate(rows):
+        if i in skip_indices:
+            skipped += 1
+            continue
         try:
             deal_in = _parse_row(row, mapping, settings)
             if deal_in is None:
                 skipped += 1
                 continue
+            # Apply per-row overrides from the review editor
+            ov = overrides.get(i, {})
+            if "status" in ov and ov["status"]:
+                deal_in.status = ov["status"]
+            if "sold_date" in ov and ov["sold_date"]:
+                deal_in.sold_date = parse_date(ov["sold_date"])
+            if "delivered_date" in ov and ov["delivered_date"]:
+                deal_in.delivered_date = parse_date(ov["delivered_date"])
+            if "scheduled_date" in ov and ov["scheduled_date"]:
+                deal_in.scheduled_date = parse_date(ov["scheduled_date"])
+            if "notes" in ov:
+                deal_in.notes = ov["notes"]
+            # Auto-fill delivered_date if status=Delivered and missing
+            if deal_in.status == "Delivered" and not deal_in.delivered_date:
+                deal_in.delivered_date = deal_in.sold_date or today()
+
             uc, ao, th, tot = calc_commission(deal_in, settings)
             db.add(Deal(
                 **deal_in.model_dump(),
@@ -1498,7 +1572,7 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
             ))
             imported += 1
         except Exception as e:
-            errors.append(f"Row {i}: {e}")
+            errors.append(f"Row {i+2}: {e}")
 
     try:
         await db.commit()
