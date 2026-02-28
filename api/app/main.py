@@ -1055,7 +1055,8 @@ async def deal_save(
     stock_num: str | None = Form(None), model: str | None = Form(None),
     new_used: str | None = Form(None), deal_type: str | None = Form(None),
     business_manager: str | None = Form(None), spot_sold: int = Form(0),
-    discount_gt_200: str = Form("No"),  # kept as str from form, converted below aim_presentation: str = Form("X"),
+    discount_gt_200: str = Form("No"),  # kept as str from form, converted below
+    aim_presentation: str = Form("X"),
     permaplate: int = Form(0), nitro_fill: int = Form(0), pulse: int = Form(0),
     finance_non_subvented: int = Form(0), warranty: int = Form(0), tire_wheel: int = Form(0),
     hold_amount: float = Form(0.0), aim_amount: float = Form(0.0), fi_pvr: float = Form(0.0),
