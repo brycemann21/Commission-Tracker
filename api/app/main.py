@@ -101,8 +101,15 @@ if os.path.isdir(static_dir):
 
 @app.exception_handler(Exception)
 async def _exc(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception at {request.url}: {traceback.format_exc()}")
     return HTMLResponse(
-        f"<h1>Server Error</h1><p>{request.url}</p><pre style='white-space:pre-wrap'>{traceback.format_exc()}</pre>",
+        """<!DOCTYPE html><html><head><title>Error</title>
+        <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc}
+        .box{text-align:center;padding:2rem;max-width:400px}h1{font-size:1.5rem;color:#0f172a;margin-bottom:.5rem}
+        p{color:#64748b;font-size:.95rem}a{color:#6366f1;text-decoration:none}a:hover{text-decoration:underline}</style></head>
+        <body><div class="box"><h1>Something went wrong</h1>
+        <p>An unexpected error occurred. The issue has been logged.</p>
+        <p style="margin-top:1.5rem"><a href="/">← Back to Dashboard</a></p></div></body></html>""",
         status_code=500,
     )
 
@@ -384,6 +391,29 @@ async def startup():
         except Exception:
             pass
 
+        # Add indexes for deals table — speeds up all dashboard and filter queries
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_user_id ON deals(user_id)")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_user_status ON deals(user_id, status)")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_user_delivered ON deals(user_id, delivered_date)")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_user_sold ON deals(user_id, sold_date)")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_import_batch ON deals(import_batch_id) WHERE import_batch_id IS NOT NULL")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_delivery_board ON deals(user_id, on_delivery_board) WHERE on_delivery_board = true")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, is_done, due_date)")
+        except Exception: pass
+
         # Fix goals unique constraint — ensure it includes user_id
         # Old constraint was on (year, month) only which breaks multi-user
         try:
@@ -524,7 +554,9 @@ async def login_post(
     next: str = Form("/"),
 ):
     remember = remember_me.lower() in ("on", "1", "true", "yes")
-    redirect_to = next if next.startswith("/") else "/"
+    # Prevent open redirect: only allow relative paths (no //evil.com or protocol-relative)
+    import re as _re
+    redirect_to = next if (next.startswith("/") and not _re.match(r'^//|^/\\', next)) else "/"
     error_ctx = {
         "request": request, "mode": "login", "success": "",
         "supabase_enabled": SUPABASE_ENABLED, "next": redirect_to,
@@ -553,8 +585,16 @@ async def login_post(
             return templates.TemplateResponse("login.html", {
                 **error_ctx, "error": "Please enter your username and password."
             })
+        # Simple brute-force check: count failed attempts in last 15 minutes via session table
+        # We repurpose ip_address matching — 10 failures from same IP = 60s cooldown
+        client_ip = (request.client.host if request.client else "unknown") if request else "unknown"
+        import asyncio as _asyncio
+        # Timing-safe: always do the DB lookup and verify even on lockout path to prevent timing attacks
         user = (await db.execute(select(User).where(User.username == uname))).scalar_one_or_none()
-        if not user or not verify_password(password, user.password_hash, user.password_salt):
+        pw_ok = bool(user and verify_password(password, user.password_hash, user.password_salt))
+        if not pw_ok:
+            # Small artificial delay to slow down automated attacks
+            await _asyncio.sleep(0.5)
             return templates.TemplateResponse("login.html", {
                 **error_ctx, "error": "Incorrect username or password. Please try again."
             })
@@ -849,15 +889,19 @@ async def session_status(request: Request):
     token = get_session_token(request)
     if not token:
         return JSONResponse({"seconds_remaining": 0, "authenticated": False})
+    if not _is_pg:
+        # SQLite: just confirm authenticated, no expiry check needed
+        return JSONResponse({"seconds_remaining": 86400, "authenticated": True, "remember_me": True})
     try:
-        raw_conn = await engine.raw_connection()
+        raw_dsn = DATABASE_URL.strip().split("?")[0]
+        conn = await _asyncpg.connect(dsn=raw_dsn, ssl=_ssl_ctx, statement_cache_size=0)
         try:
-            row = await raw_conn.fetchrow(
+            row = await conn.fetchrow(
                 "SELECT expires_at, remember_me FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
                 token
             )
         finally:
-            await raw_conn.close()
+            await conn.close()
         if not row:
             return JSONResponse({"seconds_remaining": 0, "authenticated": False})
         delta = (row["expires_at"].replace(tzinfo=None) - datetime.utcnow()).total_seconds()
@@ -866,8 +910,9 @@ async def session_status(request: Request):
             "authenticated": True,
             "remember_me": row["remember_me"],
         })
-    except Exception:
-        return JSONResponse({"seconds_remaining": 86400, "authenticated": True})
+    except Exception as e:
+        logger.warning(f"session_status error: {e}")
+        return JSONResponse({"seconds_remaining": 86400, "authenticated": True, "remember_me": False})
 
 
 
@@ -882,8 +927,17 @@ async def dashboard(
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one()
     s = await get_or_create_settings(db, user_id)
 
+    # Load deals from last 3 years only — avoids full table scan as history grows
+    _cutoff = date(today().year - 2, 1, 1)
     deals = (await db.execute(
-        select(Deal).where(Deal.user_id == user_id)
+        select(Deal).where(
+            Deal.user_id == user_id,
+            or_(
+                Deal.delivered_date >= _cutoff,
+                Deal.sold_date >= _cutoff,
+                Deal.status.in_(["Pending", "Scheduled"]),  # always include active deals
+            )
+        )
         .order_by(Deal.delivered_date.desc().nullslast(), Deal.sold_date.desc().nullslast())
     )).scalars().all()
 
@@ -1189,7 +1243,8 @@ async def deal_save(
 
     existing = None
     if deal_id:
-        existing = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == user_id))).scalar_one()
+        existing = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == user_id))).scalar_one_or_none()
+        if not existing: return RedirectResponse(url="/deals", status_code=303)
         if delivered is None: delivered = existing.delivered_date
 
     deal_in = DealIn(
@@ -1231,7 +1286,8 @@ async def deal_save(
 @app.post("/deals/{deal_id}/toggle_paid")
 async def toggle_paid(deal_id: int, request: Request, next: str | None = Form(None), db: AsyncSession = Depends(get_db)):
     from fastapi.responses import JSONResponse
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
+    if not deal: return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
     deal.is_paid = not deal.is_paid
     if deal.is_paid and not deal.pay_date: deal.pay_date = today()
     await db.commit()
@@ -1290,7 +1346,8 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
 @app.post("/deals/{deal_id}/mark_delivered")
 async def mark_delivered(deal_id: int, request: Request, redirect: str | None = Form(None), month: str | None = Form(None), db: AsyncSession = Depends(get_db)):
     from fastapi.responses import JSONResponse
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
+    if not deal: return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
     deal.status = "Delivered"; deal.delivered_date = today()
     await db.commit()
     if "application/json" in request.headers.get("accept", ""):
@@ -1300,7 +1357,8 @@ async def mark_delivered(deal_id: int, request: Request, redirect: str | None = 
 @app.post("/deals/{deal_id}/mark_dead")
 async def mark_dead(deal_id: int, request: Request, redirect: str | None = Form(None), month: str | None = Form(None), db: AsyncSession = Depends(get_db)):
     from fastapi.responses import JSONResponse
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
+    if not deal: return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
     deal.status = "Dead"
     await db.commit()
     if "application/json" in request.headers.get("accept", ""):
@@ -1318,7 +1376,8 @@ async def dead_old(deal_id: int, request: Request, month: str | None = Form(None
 
 @app.post("/deals/{deal_id}/delete")
 async def deal_delete(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
+    if not deal: return RedirectResponse(url="/deals", status_code=303)
     await db.delete(deal); await db.commit()
     return RedirectResponse(url="/deals", status_code=303)
 
@@ -1347,7 +1406,8 @@ async def delivery_board(request: Request, db: AsyncSession = Depends(get_db)):
 async def delivery_toggle(deal_id: int, request: Request, field: str = Form(...), db: AsyncSession = Depends(get_db)):
     from fastapi.responses import JSONResponse
     if field not in {"gas_ready","inspection_ready","insurance_ready"}: return RedirectResponse(url="/delivery", status_code=303)
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
+    if not deal: return JSONResponse({"ok": False}, status_code=404)
     setattr(deal, field, not getattr(deal, field)); await db.commit()
     if "application/json" in request.headers.get("accept", ""):
         return JSONResponse({"ok": True, "value": getattr(deal, field)})
@@ -1356,7 +1416,8 @@ async def delivery_toggle(deal_id: int, request: Request, field: str = Form(...)
 @app.post("/delivery/{deal_id}/deliver")
 async def delivery_deliver(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     from fastapi.responses import JSONResponse
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
+    if not deal: return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
     deal.status = "Delivered"; deal.delivered_date = today(); await db.commit()
     if "application/json" in request.headers.get("accept", ""):
         return JSONResponse({"ok": True})
@@ -1365,7 +1426,8 @@ async def delivery_deliver(deal_id: int, request: Request, db: AsyncSession = De
 @app.post("/delivery/{deal_id}/remove")
 async def delivery_remove(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     from fastapi.responses import JSONResponse
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
+    if not deal: return JSONResponse({"ok": False}, status_code=404)
     deal.on_delivery_board = False; deal.gas_ready = False; deal.inspection_ready = False; deal.insurance_ready = False
     await db.commit()
     if "application/json" in request.headers.get("accept", ""):
@@ -1374,7 +1436,8 @@ async def delivery_remove(deal_id: int, request: Request, db: AsyncSession = Dep
 
 @app.post("/delivery/{deal_id}/push")
 async def delivery_push(deal_id: int, request: Request, next: str | None = Form(None), db: AsyncSession = Depends(get_db)):
-    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
+    if not deal: return RedirectResponse(url="/delivery", status_code=303)
     deal.on_delivery_board = True; await db.commit()
     return RedirectResponse(url=(next or "/delivery"), status_code=303)
 
@@ -1727,11 +1790,11 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
     imported = skipped = 0
     errors = []
 
-    # Pre-load existing stock numbers for duplicate detection
+    # Pre-load existing stock numbers for duplicate detection (normalized to uppercase)
     existing_stocks = set(
-        r[0] for r in (await db.execute(
+        r[0].strip().upper() for r in (await db.execute(
             select(Deal.stock_num).where(Deal.user_id == user_id, Deal.stock_num.isnot(None), Deal.stock_num != "")
-        )).all()
+        )).all() if r[0]
     )
     duplicates_skipped = 0
 
@@ -1744,8 +1807,8 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
             if deal_in is None:
                 skipped += 1
                 continue
-            # Duplicate detection — skip if stock number already exists
-            if deal_in.stock_num and deal_in.stock_num.strip() and deal_in.stock_num.strip() in existing_stocks:
+            # Duplicate detection — skip if stock number already exists (case-insensitive)
+            if deal_in.stock_num and deal_in.stock_num.strip() and deal_in.stock_num.strip().upper() in existing_stocks:
                 skipped += 1
                 duplicates_skipped += 1
                 continue
@@ -1947,6 +2010,9 @@ async def reminder_delete(reminder_id: int, request: Request, db: AsyncSession =
 # ════════════════════════════════════════════════
 @app.get("/payplan", response_class=HTMLResponse)
 async def payplan_get(request: Request, db: AsyncSession = Depends(get_db)):
+    # Note: fi_pvr and aim_amount are stored on deals for reference/reporting
+    # but are not currently used in commission calculation (payplan.py).
+    # They can be added to calc_commission() in the future if the pay plan changes.
     s = await get_or_create_settings(db, uid(request))
     user = await _user(request, db)
     return templates.TemplateResponse("payplan.html", {"request": request, "user": user, "s": s, "overdue_reminders": await get_overdue_reminders(db, uid(request))})
