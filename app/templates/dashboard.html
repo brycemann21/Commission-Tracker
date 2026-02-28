@@ -251,6 +251,16 @@
   </div>
 </div>
 
+<style>
+  .editable-p { cursor:pointer; border-radius:3px; padding:1px 3px; display:inline-block; transition:background .1s; }
+  .editable-p:hover { background:#f1f5f9; }
+  .editable-p.editing { background:transparent; padding:0; }
+  .editable-p input, .editable-p select { border:1.5px solid #6366f1; border-radius:4px; padding:2px 5px; font-size:.8rem; background:#fff; outline:none; min-width:70px; max-width:140px; }
+  .editable-p.save-ok { animation:fok .5s ease; } .editable-p.save-err { animation:ferr .5s ease; }
+  @keyframes fok  { 0%,100%{background:transparent} 50%{background:#dcfce7} }
+  @keyframes ferr { 0%,100%{background:transparent} 50%{background:#fee2e2} }
+</style>
+
 {# ── Pending Deals ── #}
 <div class="flex items-center justify-between mb-2">
   <h2 class="text-lg font-bold">Pending Deals <span class="text-sm font-normal text-slate-500">({{ pending }})</span></h2>
@@ -270,10 +280,8 @@
     <table class="min-w-full text-sm">
       <thead class="bg-slate-900 text-white">
         <tr>
-          <th class="p-2 w-8">
-            <input type="checkbox" id="pendingSelectAll" class="rounded cursor-pointer accent-white" title="Select all">
-          </th>
-          <th class="text-left p-2">Sold Date</th>
+          <th class="p-2 w-8"><input type="checkbox" id="pendingSelectAll" class="rounded cursor-pointer accent-white" title="Select all"></th>
+          <th class="text-left p-2">Sold</th>
           <th class="text-left p-2">Customer</th>
           <th class="text-left p-2">Tag</th>
           <th class="text-left p-2">Stock #</th>
@@ -284,29 +292,42 @@
       </thead>
       <tbody>
         {% for d in pending_deals %}
-          <tr class="border-t pending-row
-            {% if d.days_pending >= 7 %}bg-rose-50{% elif d.days_pending >= 3 %}bg-amber-50{% endif %}
-          ">
+          <tr class="border-t pending-row {% if d.days_pending >= 7 %}bg-rose-50{% elif d.days_pending >= 3 %}bg-amber-50{% endif %}">
             <td class="p-2">
               <input type="checkbox" name="deal_ids" value="{{ d.id }}" class="pending-checkbox rounded cursor-pointer" onchange="updatePendingSelection()">
             </td>
-            <td class="p-2">
-              {{ d.sold_date or "" }}
+            <td class="p-2 whitespace-nowrap">
+              <span class="editable-p" data-field="sold_date" data-id="{{ d.id }}" data-type="date"
+                    data-value="{{ d.sold_date.isoformat() if d.sold_date else '' }}">
+                {{ d.sold_date.strftime('%-m/%-d') if d.sold_date else '—' }}
+              </span>
               {% if d.days_pending >= 3 %}
                 <span class="ml-1 text-[10px] font-medium {{ 'text-rose-600' if d.days_pending >= 7 else 'text-amber-600' }}">{{ d.days_pending }}d</span>
               {% endif %}
             </td>
-            <td class="p-2 font-medium">{{ d.customer }}</td>
-            <td class="p-2">
-              {% if d.tag %}
-                <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">{{ d.tag }}</span>
-              {% endif %}
+            <td class="p-2 font-medium">
+              <span class="editable-p" data-field="customer" data-id="{{ d.id }}" data-type="text"
+                    data-value="{{ d.customer|e }}">{{ d.customer }}</span>
             </td>
-            <td class="p-2">{{ d.stock_num }}</td>
-            <td class="p-2">{{ d.model }}</td>
-            <td class="p-2 text-slate-500 max-w-[160px] truncate">{{ d.notes or "" }}</td>
+            <td class="p-2">
+              <span class="editable-p" data-field="tag" data-id="{{ d.id }}" data-type="select"
+                    data-value="{{ d.tag or '' }}" data-options="|Shop|Title|Inbound|FO|SPOT|LOCATE">
+                {% if d.tag %}<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">{{ d.tag }}</span>{% else %}—{% endif %}
+              </span>
+            </td>
+            <td class="p-2">
+              <span class="editable-p" data-field="stock_num" data-id="{{ d.id }}" data-type="text"
+                    data-value="{{ d.stock_num|e }}">{{ d.stock_num or '—' }}</span>
+            </td>
+            <td class="p-2">
+              <span class="editable-p" data-field="model" data-id="{{ d.id }}" data-type="text"
+                    data-value="{{ d.model|e }}">{{ d.model or '—' }}</span>
+            </td>
+            <td class="p-2 text-slate-500 max-w-[160px]">
+              <span class="editable-p truncate block" data-field="notes" data-id="{{ d.id }}" data-type="text"
+                    data-value="{{ (d.notes or '')|e }}" title="{{ d.notes or '' }}">{{ d.notes or '—' }}</span>
+            </td>
             <td class="p-2 text-right whitespace-nowrap">
-              <a class="text-blue-600 hover:underline mr-2 text-xs" href="/deals/{{ d.id }}/edit">Edit</a>
               <form method="post" action="/deals/{{ d.id }}/mark_delivered" class="inline">
                 <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
                 <button class="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded text-xs font-medium transition" type="submit">Delivered</button>
@@ -547,6 +568,65 @@
 
 {# ═══════ SCRIPTS ═══════ #}
 <script>
+  // ── Inline edit for pending deals ──
+  (function() {
+    let active = null;
+    function fmtDate(iso) { if(!iso) return '—'; const p=iso.split('-'); return p.length===3?`${+p[1]}/${+p[2]}`:iso; }
+    function render(field, val) {
+      if (field==='sold_date') return fmtDate(val);
+      if (field==='tag') return val ? `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">${val}</span>` : '—';
+      return val || '—';
+    }
+    async function save(span, field, id, val) {
+      try {
+        const r = await fetch(`/deals/${id}/quick_update`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({field,value:val})});
+        const d = await r.json();
+        if (!d.ok) throw 0;
+        span.dataset.value = val;
+        span.innerHTML = render(field, val);
+        span.classList.remove('editing');
+        span.classList.add('save-ok');
+        setTimeout(()=>span.classList.remove('save-ok'),600);
+        active = null;
+      } catch {
+        span.classList.add('save-err');
+        setTimeout(()=>span.classList.remove('save-err'),600);
+      }
+    }
+    function cancel(span) {
+      if (!span?._orig) return;
+      span.innerHTML = span._orig;
+      span.classList.remove('editing');
+      if (active===span) active=null;
+    }
+    function startEdit(span) {
+      if (active && active!==span) cancel(active);
+      active = span;
+      span.classList.add('editing');
+      span._orig = span.innerHTML;
+      const {field, type='text', value:cur='', id} = span.dataset;
+      let inp;
+      if (type==='select') {
+        inp = document.createElement('select');
+        (span.dataset.options||'').split('|').forEach(o=>{const opt=document.createElement('option');opt.value=o;opt.textContent=o||'—';if(o===cur)opt.selected=true;inp.appendChild(opt);});
+      } else {
+        inp=document.createElement('input');
+        inp.type=type==='date'?'date':'text';
+        inp.value=cur;
+      }
+      span.innerHTML=''; span.appendChild(inp); inp.focus();
+      const commit=()=>{const v=inp.value;if(v===cur){cancel(span);return;}save(span,field,id,v);};
+      inp.addEventListener('blur',commit);
+      inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();inp.blur();}if(e.key==='Escape'){e.preventDefault();cancel(span);}});
+      if(type==='select') inp.addEventListener('change',()=>inp.blur());
+    }
+    document.addEventListener('click',e=>{
+      const s=e.target.closest('.editable-p');
+      if(s&&!s.classList.contains('editing')){startEdit(s);return;}
+      if(!s&&active) cancel(active);
+    });
+  })();
+
   // ── Multi-select pending deals ──
   function updatePendingSelection() {
     const checkboxes = document.querySelectorAll('.pending-checkbox');

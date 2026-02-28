@@ -2,25 +2,57 @@
 {% block content %}
 
 <style>
-  /* Print only the modal contents */
   @media print {
     body * { visibility: hidden !important; }
-    #dealModal, #dealModal * { visibility: visible !important; }
-    #dealModal { position: absolute !important; inset: 0 !important; }
-    #dealModal [data-close="1"],
-    #dealModal .bg-black\/40 { display: none !important; }
-    #dealModal .mt-20 { margin-top: 0 !important; }
-    #dealModal .shadow-lg { box-shadow: none !important; }
+  }
+
+  .editable {
+    cursor: pointer;
+    border-radius: 4px;
+    padding: 2px 4px;
+    min-width: 28px;
+    display: inline-block;
+    transition: background 0.12s;
+  }
+  .editable:hover { background: #f1f5f9; }
+  .editable.editing { background: transparent; padding: 0; }
+  .editable input, .editable select {
+    border: 1.5px solid #6366f1;
+    border-radius: 4px;
+    padding: 2px 5px;
+    font-size: 0.82rem;
+    background: #fff;
+    outline: none;
+    min-width: 70px;
+    max-width: 160px;
+  }
+  .editable.save-ok { animation: flash-green 0.6s ease; }
+  .editable.save-err { animation: flash-red 0.6s ease; }
+  @keyframes flash-green { 0%,100% { background: transparent; } 50% { background: #dcfce7; } }
+  @keyframes flash-red   { 0%,100% { background: transparent; } 50% { background: #fee2e2; } }
+
+  @media (max-width: 767px) {
+    .deals-table thead { display: none; }
+    .deals-table, .deals-table tbody, .deals-table tr, .deals-table td { display: block; width: 100%; box-sizing: border-box; }
+    .deals-table tr { border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 10px; padding: 8px 10px; background: #fff; position: relative; }
+    .deals-table td { padding: 2px 4px; border: none; font-size: 0.82rem; }
+    .deals-table td[data-label]::before {
+      content: attr(data-label) ": ";
+      font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+      color: #94a3b8; margin-right: 4px;
+    }
+    .deals-table td.no-label::before { display: none; }
+    .deals-table .checkbox-cell { position: absolute; top: 10px; right: 10px; width: auto; }
   }
 </style>
 
-<div class="flex flex-col md:flex-row md:items-end gap-3">
+<div class="flex flex-col md:flex-row md:items-end gap-3 mb-4">
   <div>
     <h1 class="text-xl font-bold">Deals</h1>
-    <div class="text-sm text-slate-500">Showing {{ selected_month }}/{{ selected_year }} (plus Inbound/FO carryovers until Delivered).</div>
+    <div class="text-xs text-slate-500">{{ selected_month }}/{{ selected_year }} · Click any cell to edit inline</div>
   </div>
-  <form class="md:ml-auto flex gap-2" method="get" action="/deals">
-    <input class="border rounded px-3 py-2 text-sm w-56" name="q" value="{{ q }}" placeholder="Search customer / stock / model" />
+  <form class="md:ml-auto flex flex-wrap gap-2" method="get" action="/deals">
+    <input class="border rounded px-3 py-2 text-sm flex-1 min-w-[150px]" name="q" value="{{ q }}" placeholder="Search customer / stock / model" />
     <select class="border rounded px-3 py-2 text-sm" name="status">
       {% for s in ["All","Pending","Scheduled","Delivered","Dead"] %}
         <option value="{{ s }}" {% if status==s %}selected{% endif %}>{{ s }}</option>
@@ -35,424 +67,310 @@
   </form>
 </div>
 
-<!-- Deal details modal -->
-<div id="dealModal" class="fixed inset-0 z-50 hidden" aria-hidden="true">
-  <div class="absolute inset-0 bg-black/40" data-close="1"></div>
-  <div class="relative mx-auto mt-20 w-[95%] max-w-2xl">
-    <div class="bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden">
-      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200">
-        <div>
-          <div class="text-sm text-slate-500">Deal Details</div>
-          <div id="modalTitle" class="text-lg font-semibold">—</div>
-        </div>
-        <button type="button" class="px-2 py-1 rounded hover:bg-slate-100" data-close="1">✕</button>
-      </div>
-      <div class="p-4">
-        <div class="grid grid-cols-2 gap-3 text-sm">
-          <div><div class="text-slate-500">Sold Date</div><div id="mSold">—</div></div>
-          <div><div class="text-slate-500">Delivered Date</div><div id="mDel">—</div></div>
-          <div><div class="text-slate-500">Status</div><div id="mStatus">—</div></div>
-          <div><div class="text-slate-500">Tag</div><div id="mTag">—</div></div>
-          <div><div class="text-slate-500">Stock #</div><div id="mStock">—</div></div>
-          <div><div class="text-slate-500">Model</div><div id="mModel">—</div></div>
-          <div><div class="text-slate-500">F/C/L</div><div id="mType">—</div></div>
-          <div><div class="text-slate-500">New/Used</div><div id="mNU">—</div></div>
-          <div><div class="text-slate-500">F&amp;I</div><div id="mFI">—</div></div>
-          <div><div class="text-slate-500">Discount</div><div id="mDiscount">—</div></div>
-          <div><div class="text-slate-500">Money Held</div><div id="mHold">—</div></div>
-          <div><div class="text-slate-500">Commission</div><div id="mComm" class="font-semibold">—</div></div>
-        </div>
-
-        <div class="mt-4">
-          <div class="text-sm font-semibold">Add-ons Purchased</div>
-          <ul id="mAddons" class="mt-2 text-sm list-disc pl-5 text-slate-700"></ul>
-          <div id="mNoAddons" class="mt-2 text-sm text-slate-500 hidden">No add-ons selected.</div>
-        </div>
-
-        <div class="mt-4">
-          <div class="text-sm font-semibold">Comments</div>
-          <div id="mNotes" class="mt-1 text-sm text-slate-700 whitespace-pre-wrap">—</div>
-        </div>
-
-        <div class="mt-5 flex justify-end gap-2">
-          <button id="mPrintBtn" type="button" class="px-3 py-2 text-sm rounded border">Print</button>
-          <button id="mEditBtn" type="button" class="px-3 py-2 text-sm rounded bg-slate-900 text-white">Edit Deal</button>
-          <button type="button" class="px-3 py-2 text-sm rounded border" data-close="1">Close</button>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Edit modal (loads edit form in an iframe) -->
-<div id="editModal" class="fixed inset-0 z-50 hidden" aria-hidden="true">
-  <div class="absolute inset-0 bg-black/40" data-close-edit="1"></div>
-  <div class="relative mx-auto mt-10 w-[95%] max-w-5xl">
-    <div class="bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden">
-      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200">
-        <div>
-          <div class="text-sm text-slate-500">Edit Deal</div>
-          <div id="editModalTitle" class="text-lg font-semibold">—</div>
-        </div>
-        <button type="button" class="px-2 py-1 rounded hover:bg-slate-100" data-close-edit="1">✕</button>
-      </div>
-      <div class="p-0">
-        <iframe
-          id="editFrame"
-          title="Edit Deal"
-          class="w-full"
-          style="height: 82vh; border: 0;"
-          src="about:blank"
-        ></iframe>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Bulk action toolbar (hidden until checkboxes selected) -->
 <form method="post" action="/deals/bulk-delete" id="bulkForm">
-<div id="bulkToolbar" class="hidden mt-4 mb-2 flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+<div id="bulkToolbar" class="hidden mb-3 flex flex-wrap items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
   <span id="bulkCount" class="text-sm font-medium text-red-700">0 deals selected</span>
-  <button type="submit"
-          onclick="return confirm('Permanently delete selected deals?')"
-          class="px-4 py-1.5 rounded bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition">
-    Delete Selected
-  </button>
+  <button type="submit" onclick="return confirm('Permanently delete selected deals?')"
+          class="px-4 py-1.5 rounded bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition">Delete Selected</button>
   <button type="button" onclick="clearSelection()"
-          class="px-3 py-1.5 rounded border border-red-300 text-red-600 text-sm hover:bg-red-100 transition">
-    Cancel
-  </button>
+          class="px-3 py-1.5 rounded border border-red-300 text-red-600 text-sm hover:bg-red-100 transition">Cancel</button>
 </div>
 
-<div class="mt-4 overflow-x-auto bg-white rounded border border-slate-200">
-<table class="min-w-full text-sm">
+<div class="overflow-x-auto bg-white rounded-lg border border-slate-200">
+<table class="min-w-full text-sm deals-table">
   <thead class="bg-slate-900 text-white">
     <tr>
-      <th class="p-2 w-8">
-        <input type="checkbox" id="selectAll" class="rounded" title="Select all">
-      </th>
-      <th class="text-left p-2">Sold Date</th>
-      <th class="text-left p-2">Delivered Date</th>
+      <th class="p-2 w-8"><input type="checkbox" id="selectAll" class="rounded" title="Select all"></th>
+      <th class="text-left p-2">Sold</th>
+      <th class="text-left p-2">Del'd</th>
       <th class="text-left p-2">Customer</th>
       <th class="text-left p-2">F&amp;I</th>
       <th class="text-left p-2">Stock #</th>
       <th class="text-left p-2">Model</th>
       <th class="text-left p-2">F/C/L</th>
-      <th class="text-left p-2">New/Used</th>
+      <th class="text-left p-2">N/U</th>
       <th class="text-left p-2">Comments</th>
       <th class="text-left p-2">Status</th>
       <th class="text-left p-2">Tag</th>
       <th class="text-right p-2">Commission</th>
-      <th class="p-2"></th>
+      <th class="p-2 w-14"></th>
     </tr>
   </thead>
   <tbody>
     {% for d in deals %}
-      <tr class="border-t deal-row">
-        <td class="p-2">
-          <input type="checkbox" name="deal_ids" value="{{ d.id }}"
-                 class="deal-checkbox rounded" onchange="updateBulkToolbar()">
-        </td>
-        <td class="p-2 text-slate-600 whitespace-nowrap">{{ d.sold_date.strftime('%-m/%-d') if d.sold_date else "" }}</td>
-        <td class="p-2 text-slate-600 whitespace-nowrap">{{ d.delivered_date.strftime('%-m/%-d') if d.delivered_date else "" }}</td>
-        <td class="p-2">
-          <button
-            type="button"
-            class="underline text-left"
-            data-open-deal="1"
-            data-id="{{ d.id }}"
-            data-customer="{{ d.customer|e }}"
-            data-sold="{{ d.sold_date or '' }}"
-            data-delivered="{{ d.delivered_date or '' }}"
-            data-status="{{ d.status|e }}"
-            data-scheduled="{{ (d.scheduled_date|md) if d.scheduled_date else '' }}"
-            data-tag="{{ (d.tag or '')|e }}"
-            data-stock="{{ d.stock_num|e }}"
-            data-model="{{ d.model|e }}"
-            data-type="{{ (d.deal_type or '')|e }}"
-            data-nu="{{ (d.new_used or '')|e }}"
-            data-fi="{{ (d.business_manager or '')|e }}"
-            data-discount="{{ (d.discount_gt_200 or '')|e }}"
-            data-hold="{{ d.hold_amount or 0 }}"
-            data-comm="${{ '{:,.0f}'.format(d.total_deal_comm or 0) }}"
-            data-notes="{{ (d.notes or '')|e }}"
-            data-permaplate="{{ 1 if d.permaplate else 0 }}"
-            data-nitro="{{ 1 if d.nitro_fill else 0 }}"
-            data-pulse="{{ 1 if d.pulse else 0 }}"
-            data-finance="{{ 1 if d.finance_non_subvented else 0 }}"
-            data-warranty="{{ 1 if d.warranty else 0 }}"
-            data-tire="{{ 1 if d.tire_wheel else 0 }}"
-          >
-            {{ d.customer }}
+    <tr class="border-t deal-row hover:bg-slate-50/70 {% if d.status == 'Dead' %}opacity-60{% endif %}" data-id="{{ d.id }}">
+
+      <td class="p-2 checkbox-cell no-label">
+        <input type="checkbox" name="deal_ids" value="{{ d.id }}" class="deal-checkbox rounded" onchange="updateBulkToolbar()">
+      </td>
+
+      <td class="p-2 whitespace-nowrap" data-label="Sold">
+        <span class="editable" data-field="sold_date" data-id="{{ d.id }}" data-type="date"
+              data-value="{{ d.sold_date.isoformat() if d.sold_date else '' }}">
+          {{ d.sold_date.strftime('%-m/%-d') if d.sold_date else '—' }}
+        </span>
+      </td>
+
+      <td class="p-2 whitespace-nowrap" data-label="Delivered">
+        <span class="editable" data-field="delivered_date" data-id="{{ d.id }}" data-type="date"
+              data-value="{{ d.delivered_date.isoformat() if d.delivered_date else '' }}">
+          {{ d.delivered_date.strftime('%-m/%-d') if d.delivered_date else '—' }}
+        </span>
+      </td>
+
+      <td class="p-2" data-label="Customer">
+        <span class="editable font-medium" data-field="customer" data-id="{{ d.id }}" data-type="text"
+              data-value="{{ d.customer|e }}">{{ d.customer }}</span>
+      </td>
+
+      <td class="p-2" data-label="F&I">
+        <span class="editable" data-field="business_manager" data-id="{{ d.id }}" data-type="select"
+              data-value="{{ d.business_manager or '' }}" data-options="|RGO|KMC|DAB|JGA">
+          {{ d.business_manager or '—' }}
+        </span>
+      </td>
+
+      <td class="p-2" data-label="Stock #">
+        <span class="editable" data-field="stock_num" data-id="{{ d.id }}" data-type="text"
+              data-value="{{ d.stock_num|e }}">{{ d.stock_num or '—' }}</span>
+      </td>
+
+      <td class="p-2" data-label="Model">
+        <span class="editable" data-field="model" data-id="{{ d.id }}" data-type="text"
+              data-value="{{ d.model|e }}">{{ d.model or '—' }}</span>
+      </td>
+
+      <td class="p-2" data-label="F/C/L">
+        <span class="editable" data-field="deal_type" data-id="{{ d.id }}" data-type="select"
+              data-value="{{ d.deal_type or '' }}" data-options="|Finance|Cash/Sub-Vented|Lease">
+          {{ d.deal_type or '—' }}
+        </span>
+      </td>
+
+      <td class="p-2" data-label="N/U">
+        <span class="editable" data-field="new_used" data-id="{{ d.id }}" data-type="select"
+              data-value="{{ d.new_used or '' }}" data-options="|New|Used">
+          {{ d.new_used or '—' }}
+        </span>
+      </td>
+
+      <td class="p-2 max-w-[180px]" data-label="Comments">
+        <span class="editable truncate block" data-field="notes" data-id="{{ d.id }}" data-type="text"
+              data-value="{{ (d.notes or '')|e }}" title="{{ d.notes or '' }}">
+          {{ d.notes or '—' }}
+        </span>
+      </td>
+
+      <td class="p-2" data-label="Status">
+        <span class="editable" data-field="status" data-id="{{ d.id }}" data-type="select"
+              data-value="{{ d.status }}" data-options="Pending|Scheduled|Delivered|Dead">
+          <span class="inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold
+            {% if d.status == 'Delivered' %}bg-emerald-100 text-emerald-800
+            {% elif d.status == 'Dead' %}bg-slate-100 text-slate-500
+            {% elif d.status == 'Scheduled' %}bg-blue-100 text-blue-800
+            {% else %}bg-amber-100 text-amber-800{% endif %}">
+            {{ d.status }}
+          </span>
+        </span>
+      </td>
+
+      <td class="p-2" data-label="Tag">
+        <span class="editable" data-field="tag" data-id="{{ d.id }}" data-type="select"
+              data-value="{{ d.tag or '' }}" data-options="|Shop|Title|Inbound|FO|SPOT|LOCATE">
+          {{ d.tag or '—' }}
+        </span>
+      </td>
+
+      <td class="p-2 text-right whitespace-nowrap" data-label="Commission">
+        <span class="editable" data-field="commission_override" data-id="{{ d.id }}" data-type="number"
+              data-value="{{ d.commission_override if d.commission_override is not none else '' }}">
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-sm font-semibold
+            {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-800{% else %}bg-white border-slate-200 text-slate-900{% endif %}">
+            ${{ "{:,.0f}".format(d.total_deal_comm or 0) }}
+            {% if d.commission_override is not none %}<span class="text-[9px] text-amber-500">✎</span>{% endif %}
+          </span>
+        </span>
+      </td>
+
+      <td class="p-2 text-right no-label">
+        <form method="post" action="/deals/{{ d.id }}/toggle_paid" class="inline">
+          <input type="hidden" name="next" value="{{ request.url }}">
+          <button type="submit" title="{{ 'Mark Unpaid' if d.is_paid else 'Mark Paid' }}"
+                  class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap
+                  {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100
+                  {% else %}bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100{% endif %}">
+            {{ "✓ Paid" if d.is_paid else "Pay?" }}
           </button>
-        </td>
-        <td class="p-2">{{ d.business_manager or "" }}</td>
-        <td class="p-2">{{ d.stock_num }}</td>
-        <td class="p-2">{{ d.model }}</td>
-        <td class="p-2">{{ d.deal_type or "" }}</td>
-        <td class="p-2">{{ d.new_used }}</td>
-        <td class="p-2">{{ d.notes or "" }}</td>
-        <td class="p-2">
-          {{ d.status }}{% if d.status == 'Scheduled' and d.scheduled_date %} {{ d.scheduled_date|md }}{% endif %}
-        </td>
-        <td class="p-2">{{ d.tag or "" }}</td>
-        <td class="p-2 text-right">
-          <form method="post" action="/deals/{{ d.id }}/toggle_paid" class="inline">
-            <input type="hidden" name="next" value="{{ request.url }}">
-            <button
-              type="submit"
-              class="inline-flex items-center justify-end gap-2 px-2 py-1 rounded border text-sm font-semibold transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-slate-300 {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-800{% else %}bg-white border-slate-200 text-slate-900{% endif %}"
-              title="Click to toggle Paid / Pending Pay"
-            >
-              <span>${{ "{:,.0f}".format(d.total_deal_comm or 0) }}</span>
-              <span class="text-[11px] font-medium {% if d.is_paid %}text-emerald-700{% else %}text-slate-500{% endif %}">
-                {% if d.is_paid %}Paid{% else %}Pending Pay{% endif %}
-              </span>
-            </button>
-          </form>
-        </td>
-        <td class="p-2 text-right whitespace-nowrap">
-          <button type="button" class="underline text-sm text-blue-600 hover:text-blue-800" data-edit-id="{{ d.id }}" data-edit-title="{{ d.customer|e }}">Edit</button>
-          {% if not d.on_delivery_board and d.status != 'Delivered' and d.status != 'Dead' %}
-            <form method="post" action="/delivery/{{ d.id }}/push" class="inline ml-1">
-              <input type="hidden" name="next" value="/deals">
-              <button type="submit" class="px-2 py-1 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 text-[11px] font-medium transition" title="Push to Delivery Board">
-                🚗 Prep
-              </button>
-            </form>
-          {% elif d.on_delivery_board and d.status != 'Delivered' %}
-            <span class="ml-1 px-2 py-1 rounded bg-emerald-50 text-emerald-700 text-[11px] font-medium">On Board</span>
-          {% endif %}
-        </td>
-      </tr>
+        </form>
+      </td>
+    </tr>
     {% endfor %}
+    {% if not deals %}
+    <tr><td colspan="14" class="p-8 text-center text-slate-400">No deals found.</td></tr>
+    {% endif %}
   </tbody>
 </table>
 </div>
+</form>
+
+<!-- Toast notifications -->
+<div id="saveToast" class="fixed bottom-5 right-5 z-50 hidden px-4 py-2 rounded-lg shadow-lg text-sm font-medium text-white bg-emerald-600">Saved ✓</div>
+<div id="errToast"  class="fixed bottom-5 right-5 z-50 hidden px-4 py-2 rounded-lg shadow-lg text-sm font-medium text-white bg-red-600">Failed to save</div>
 
 <script>
-  (function () {
-    const modal = document.getElementById('dealModal');
-    if (!modal) return;
+(function () {
+  let activeEl = null;
 
-    const editModal = document.getElementById('editModal');
-    const editFrame = document.getElementById('editFrame');
-    const editTitle = document.getElementById('editModalTitle');
+  function toast(id, ms = 1400) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('hidden');
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.classList.add('hidden'), ms);
+  }
 
-    const els = {
-      title: document.getElementById('modalTitle'),
-      sold: document.getElementById('mSold'),
-      del: document.getElementById('mDel'),
-      status: document.getElementById('mStatus'),
-      tag: document.getElementById('mTag'),
-      stock: document.getElementById('mStock'),
-      model: document.getElementById('mModel'),
-      type: document.getElementById('mType'),
-      nu: document.getElementById('mNU'),
-      fi: document.getElementById('mFI'),
-      discount: document.getElementById('mDiscount'),
-      hold: document.getElementById('mHold'),
-      comm: document.getElementById('mComm'),
-      notes: document.getElementById('mNotes'),
-      addons: document.getElementById('mAddons'),
-      noAddons: document.getElementById('mNoAddons'),
-      editBtn: document.getElementById('mEditBtn'),
-      printBtn: document.getElementById('mPrintBtn'),
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    const p = iso.split('-');
+    return p.length === 3 ? `${parseInt(p[1])}/${parseInt(p[2])}` : iso;
+  }
+
+  function fmtStatus(val) {
+    const map = {
+      Delivered: 'bg-emerald-100 text-emerald-800',
+      Dead: 'bg-slate-100 text-slate-500',
+      Scheduled: 'bg-blue-100 text-blue-800',
+      Pending: 'bg-amber-100 text-amber-800',
+    };
+    return `<span class="inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold ${map[val] || 'bg-slate-100 text-slate-600'}">${val}</span>`;
+  }
+
+  function renderValue(field, value) {
+    if (field === 'sold_date' || field === 'delivered_date') return fmtDate(value);
+    if (field === 'status') return fmtStatus(value);
+    if (field === 'commission_override') {
+      if (!value && value !== 0) return '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-sm font-semibold bg-white border-slate-200 text-slate-900">—</span>';
+      return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-sm font-semibold bg-white border-slate-200 text-slate-900">$${Number(value).toLocaleString()} <span class="text-[9px] text-amber-500">✎</span></span>`;
+    }
+    return value || '—';
+  }
+
+  async function save(span, field, dealId, value) {
+    try {
+      const res = await fetch(`/deals/${dealId}/quick_update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field, value }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'err');
+      span.dataset.value = value;
+      span.innerHTML = renderValue(field, value);
+      span.classList.add('save-ok');
+      setTimeout(() => span.classList.remove('save-ok'), 700);
+      toast('saveToast');
+      activeEl = null;
+    } catch {
+      span.classList.add('save-err');
+      setTimeout(() => span.classList.remove('save-err'), 700);
+      toast('errToast', 2500);
+    }
+  }
+
+  function cancelEdit(span) {
+    if (!span?._orig) return;
+    span.innerHTML = span._orig;
+    span.classList.remove('editing');
+    if (activeEl === span) activeEl = null;
+  }
+
+  function startEdit(span) {
+    if (activeEl && activeEl !== span) cancelEdit(activeEl);
+    activeEl = span;
+    span.classList.add('editing');
+    span._orig = span.innerHTML;
+
+    const field = span.dataset.field;
+    const type  = span.dataset.type;
+    const cur   = span.dataset.value ?? '';
+    const id    = span.dataset.id;
+    let input;
+
+    if (type === 'select') {
+      input = document.createElement('select');
+      (span.dataset.options || '').split('|').forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = o; opt.textContent = o || '—';
+        if (o === cur) opt.selected = true;
+        input.appendChild(opt);
+      });
+    } else {
+      input = document.createElement('input');
+      input.type = type === 'date' ? 'date' : type === 'number' ? 'number' : 'text';
+      input.value = cur;
+      if (type === 'number') { input.min = 0; input.step = 1; input.placeholder = 'Override $'; }
+    }
+
+    span.innerHTML = '';
+    span.appendChild(input);
+    input.focus();
+    if (type === 'text') try { input.select(); } catch(_) {}
+
+    const commit = () => {
+      const val = input.value;
+      if (val === cur) { cancelEdit(span); return; }
+      save(span, field, id, val);
     };
 
-    // Print button prints the modal only (see @media print styles above)
-    if (els.printBtn) {
-      els.printBtn.addEventListener('click', () => {
-        // ensure modal is visible for print
-        modal.classList.remove('hidden');
-        modal.setAttribute('aria-hidden', 'false');
-        window.print();
-      });
-    }
-
-    function openModal(btn) {
-      const d = btn.dataset;
-      const dealId = d.id;
-      els.title.textContent = d.customer || 'Deal';
-      els.sold.textContent = d.sold || '—';
-      els.del.textContent = d.delivered || '—';
-      if ((d.status || '') === 'Scheduled' && d.scheduled) {
-        els.status.textContent = `Scheduled ${d.scheduled}`;
-      } else {
-        els.status.textContent = d.status || '—';
-      }
-      els.tag.textContent = d.tag || '—';
-      els.stock.textContent = d.stock || '—';
-      els.model.textContent = d.model || '—';
-      els.type.textContent = d.type || '—';
-      els.nu.textContent = d.nu || '—';
-      els.fi.textContent = d.fi || '—';
-      els.discount.textContent = (d.discount === 'Yes') ? 'Yes' : 'No';
-      els.hold.textContent = `$${Number(d.hold || 0).toLocaleString()}`;
-      els.comm.textContent = d.comm || '—';
-      els.notes.textContent = d.notes || '—';
-      if (els.editBtn) {
-        els.editBtn.dataset.id = dealId;
-        els.editBtn.dataset.title = d.customer || `Deal #${dealId}`;
-      }
-
-      const items = [];
-      if (d.permaplate === '1') items.push('PermaPlate');
-      if (d.nitro === '1') items.push('Nitro Fill');
-      if (d.pulse === '1') items.push('Pulse');
-      if (d.finance === '1') items.push('Finance (Non-Subvented)');
-      if (d.warranty === '1') items.push('Warranty');
-      if (d.tire === '1') items.push('Tire & Wheel');
-
-      els.addons.innerHTML = '';
-      if (items.length) {
-        els.noAddons.classList.add('hidden');
-        for (const name of items) {
-          const li = document.createElement('li');
-          li.textContent = name;
-          els.addons.appendChild(li);
-        }
-      } else {
-        els.noAddons.classList.remove('hidden');
-      }
-
-      modal.classList.remove('hidden');
-      modal.setAttribute('aria-hidden', 'false');
-      document.body.style.overflow = 'hidden';
-    }
-
-    function closeModal() {
-      modal.classList.add('hidden');
-      modal.setAttribute('aria-hidden', 'true');
-      document.body.style.overflow = '';
-    }
-
-    function openEditModal(id, title) {
-      if (!editModal || !editFrame) return;
-      if (!id) return;
-      const next = encodeURIComponent('/deals?embedded=1');
-      editFrame.src = `/deals/${id}/edit?embed=1&next=${next}`;
-      if (editTitle) editTitle.textContent = title || `Deal #${id}`;
-      editModal.classList.remove('hidden');
-      editModal.setAttribute('aria-hidden', 'false');
-      document.body.style.overflow = 'hidden';
-    }
-
-    function closeEditModal(refresh) {
-      if (!editModal || !editFrame) return;
-      editModal.classList.add('hidden');
-      editModal.setAttribute('aria-hidden', 'true');
-      document.body.style.overflow = '';
-      editFrame.src = 'about:blank';
-      if (refresh) window.location.reload();
-    }
-
-    document.addEventListener('click', (e) => {
-      const openBtn = e.target.closest('[data-open-deal="1"]');
-      if (openBtn) {
-        e.preventDefault();
-        openModal(openBtn);
-        return;
-      }
-
-      // Edit buttons (table + modal)
-      const editBtn = e.target.closest('[data-edit-id]');
-      if (editBtn) {
-        e.preventDefault();
-        const id = editBtn.getAttribute('data-edit-id');
-        const title = editBtn.getAttribute('data-edit-title') || '';
-        if (id) openEditModal(id, title);
-        return;
-      }
-
-      const modalEdit = e.target.closest('#mEditBtn');
-      if (modalEdit) {
-        e.preventDefault();
-        const id = modalEdit.dataset.id;
-        const title = modalEdit.dataset.title;
-        if (id) openEditModal(id, title);
-        return;
-      }
-
-      const closeEditBtn = e.target.closest('[data-close-edit="1"]');
-      if (closeEditBtn && editModal && !editModal.classList.contains('hidden')) {
-        e.preventDefault();
-        closeEditModal(false);
-        return;
-      }
-      const closeBtn = e.target.closest('[data-close="1"]');
-      if (closeBtn && !modal.classList.contains('hidden')) {
-        e.preventDefault();
-        closeModal();
-      }
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancelEdit(span); }
     });
-
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
-      if (e.key === 'Escape' && editModal && !editModal.classList.contains('hidden')) closeEditModal(false);
-    });
-
-    // When the edit iframe navigates to /deals?embedded=1 after saving,
-    // it will postMessage so we can close the modal and refresh this page.
-    window.addEventListener('message', (ev) => {
-      try {
-        if (ev && ev.data && ev.data.type === 'ct_deal_saved') {
-          closeEditModal(true);
-        }
-      } catch (_) {}
-    });
-  })();
-</script>
-
-<script>
-  // Bulk select logic
-  const selectAll = document.getElementById('selectAll');
-  const bulkToolbar = document.getElementById('bulkToolbar');
-  const bulkCount = document.getElementById('bulkCount');
-
-  function updateBulkToolbar() {
-    const checked = document.querySelectorAll('.deal-checkbox:checked');
-    if (checked.length > 0) {
-      bulkToolbar.classList.remove('hidden');
-      bulkCount.textContent = `${checked.length} deal${checked.length !== 1 ? 's' : ''} selected`;
-    } else {
-      bulkToolbar.classList.add('hidden');
-    }
-    if (selectAll) {
-      const all = document.querySelectorAll('.deal-checkbox');
-      selectAll.checked = all.length > 0 && checked.length === all.length;
-      selectAll.indeterminate = checked.length > 0 && checked.length < all.length;
-    }
+    if (type === 'select') input.addEventListener('change', () => input.blur());
   }
 
-  function clearSelection() {
-    document.querySelectorAll('.deal-checkbox').forEach(cb => cb.checked = false);
-    if (selectAll) selectAll.checked = false;
-    bulkToolbar.classList.add('hidden');
-  }
+  document.addEventListener('click', e => {
+    const span = e.target.closest('.editable');
+    if (span && !span.classList.contains('editing')) { startEdit(span); return; }
+    if (!span && activeEl) cancelEdit(activeEl);
+  });
+})();
 
+// Bulk select
+const selectAll = document.getElementById('selectAll');
+const bulkToolbar = document.getElementById('bulkToolbar');
+const bulkCount = document.getElementById('bulkCount');
+function updateBulkToolbar() {
+  const checked = document.querySelectorAll('.deal-checkbox:checked');
+  bulkToolbar?.classList.toggle('hidden', !checked.length);
+  if (bulkCount) bulkCount.textContent = `${checked.length} deal${checked.length !== 1 ? 's' : ''} selected`;
   if (selectAll) {
-    selectAll.addEventListener('change', () => {
-      document.querySelectorAll('.deal-checkbox').forEach(cb => cb.checked = selectAll.checked);
-      updateBulkToolbar();
-    });
+    const all = document.querySelectorAll('.deal-checkbox');
+    selectAll.checked = all.length > 0 && checked.length === all.length;
+    selectAll.indeterminate = checked.length > 0 && checked.length < all.length;
   }
+}
+function clearSelection() {
+  document.querySelectorAll('.deal-checkbox').forEach(cb => cb.checked = false);
+  if (selectAll) selectAll.checked = false;
+  bulkToolbar?.classList.add('hidden');
+}
+if (selectAll) selectAll.addEventListener('change', () => {
+  document.querySelectorAll('.deal-checkbox').forEach(cb => cb.checked = selectAll.checked);
+  updateBulkToolbar();
+});
 
-  // Show deleted notice if redirected back
-  const params = new URLSearchParams(window.location.search);
-  if (params.get('deleted')) {
-    const notice = document.createElement('div');
-    notice.className = 'mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium';
-    notice.textContent = `✓ Deleted ${params.get('deleted')} deal(s).`;
-    document.querySelector('.mt-4') && document.querySelector('.mt-4').before(notice);
-  }
+const params = new URLSearchParams(window.location.search);
+if (params.get('deleted')) {
+  const n = document.createElement('div');
+  n.className = 'mb-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium';
+  n.textContent = `✓ Deleted ${params.get('deleted')} deal(s).`;
+  document.querySelector('h1')?.closest('div')?.parentNode?.prepend(n);
+}
 </script>
 
 {% if request.query_params.get('embedded') == '1' %}
-<script>
-  try {
-    window.parent.postMessage({ type: 'ct_deal_saved' }, '*');
-  } catch (e) {}
-</script>
+<script>try { window.parent.postMessage({ type: 'ct_deal_saved' }, '*'); } catch(e) {}</script>
 {% endif %}
 {% endblock %}

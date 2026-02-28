@@ -1133,6 +1133,54 @@ async def toggle_paid(deal_id: int, request: Request, next: str | None = Form(No
     await db.commit()
     return RedirectResponse(url=(next or "/deals"), status_code=303)
 
+
+@app.post("/deals/{deal_id}/quick_update")
+async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Inline field update — accepts JSON {field, value}, returns {ok, new_value}."""
+    from fastapi.responses import JSONResponse
+    user_id = uid(request)
+    deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == user_id))).scalar_one_or_none()
+    if not deal:
+        return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
+    body = await request.json()
+    field = body.get("field", "")
+    value = body.get("value", "")
+    settings = await get_or_create_settings(db, user_id)
+
+    ALLOWED = {"notes", "status", "tag", "sold_date", "delivered_date",
+               "customer", "stock_num", "model", "new_used", "deal_type",
+               "business_manager", "commission_override"}
+    if field not in ALLOWED:
+        return JSONResponse({"ok": False, "error": "Field not allowed"}, status_code=400)
+
+    if field in ("sold_date", "delivered_date"):
+        setattr(deal, field, parse_date(value) if value else None)
+    elif field == "status":
+        if value not in ("Pending", "Delivered", "Dead", "Scheduled"):
+            return JSONResponse({"ok": False, "error": "Invalid status"}, status_code=400)
+        setattr(deal, field, value)
+        if value == "Delivered" and not deal.delivered_date:
+            deal.delivered_date = deal.sold_date or today()
+    elif field == "commission_override":
+        if value == "" or value is None:
+            deal.commission_override = None
+        else:
+            try:
+                deal.commission_override = float(str(value).replace("$","").replace(",",""))
+            except ValueError:
+                return JSONResponse({"ok": False, "error": "Invalid number"}, status_code=400)
+        # Recalc total
+        from .schemas import DealIn
+        deal_in = DealIn(**{c.key: getattr(deal, c.key) for c in deal.__table__.columns if c.key in DealIn.model_fields})
+        uc, ao, th, tot = calc_commission(deal_in, settings)
+        deal.total_deal_comm = deal.commission_override if deal.commission_override is not None else tot
+    else:
+        setattr(deal, field, value)
+
+    await db.commit()
+    return JSONResponse({"ok": True})
+
+
 @app.post("/deals/{deal_id}/mark_delivered")
 async def mark_delivered(deal_id: int, request: Request, redirect: str | None = Form(None), month: str | None = Form(None), db: AsyncSession = Depends(get_db)):
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
