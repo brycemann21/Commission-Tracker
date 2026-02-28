@@ -360,24 +360,31 @@ async def startup():
             except Exception:
                 pass
     finally:
+        # Clean up expired sessions via raw asyncpg (avoids pgBouncer prepared stmt issue)
+        try:
+            await conn.execute("DELETE FROM user_sessions WHERE expires_at <= NOW()")
+            await conn.execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
+        except Exception as e:
+            pass
         await conn.close()
-
-    # Clean up any expired sessions from previous runs
-    async with SessionLocal() as db:
-        await cleanup_expired_sessions(db)
 
 
 import asyncio
 
 @app.on_event("startup")
 async def start_session_cleanup_task():
-    """Run session cleanup every 6 hours in the background."""
+    """Run session cleanup every 6 hours via raw asyncpg."""
     async def _loop():
         while True:
             await asyncio.sleep(6 * 3600)
             try:
-                async with SessionLocal() as db:
-                    await cleanup_expired_sessions(db)
+                raw_dsn = DATABASE_URL.strip().split("?")[0]
+                c = await _asyncpg.connect(dsn=raw_dsn, ssl=_ssl_ctx, statement_cache_size=0)
+                try:
+                    await c.execute("DELETE FROM user_sessions WHERE expires_at <= NOW()")
+                    await c.execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
+                finally:
+                    await c.close()
             except Exception as e:
                 logger.warning(f"Session cleanup error: {e}")
     asyncio.create_task(_loop())
