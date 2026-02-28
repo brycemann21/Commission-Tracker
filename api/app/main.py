@@ -1668,8 +1668,9 @@ async def bulk_delete_deals(
     user_id = uid(request)
     form = await request.form()
     deal_ids = form.getlist("deal_ids")
+    redirect_url = form.get("redirect", "/deals")
     if not deal_ids:
-        return RedirectResponse(url="/deals", status_code=303)
+        return RedirectResponse(url=redirect_url, status_code=303)
     count = 0
     for did in deal_ids:
         try:
@@ -1682,7 +1683,7 @@ async def bulk_delete_deals(
         except Exception:
             pass
     await db.commit()
-    return RedirectResponse(url=f"/deals?deleted={count}", status_code=303)
+    return RedirectResponse(url=redirect_url, status_code=303)
 
 
 # ════════════════════════════════════════════════
