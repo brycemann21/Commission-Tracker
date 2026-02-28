@@ -5,18 +5,13 @@
       "src": "api/index.py",
       "use": "@vercel/python",
       "config": {
-        "maxLambdaSize": "15mb"
+        "maxLambdaSize": "15mb",
+        "maxDuration": 30
       }
     }
   ],
   "routes": [
     { "src": "/(.*)", "dest": "api/index.py" }
   ],
-  "functions": {
-    "api/index.py": {
-      "maxDuration": 30,
-      "memory": 512
-    }
-  },
   "regions": ["iad1"]
 }
