@@ -46,14 +46,27 @@ if db_url.startswith("postgres://"):
 elif db_url.startswith("postgresql://") and "+asyncpg" not in db_url:
     db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-connect_args = {}
-if "asyncpg" in db_url:
-    _ssl = ssl.create_default_context()
-    _ssl.check_hostname = False
-    _ssl.verify_mode = ssl.CERT_NONE
-    connect_args = {"ssl": _ssl, "statement_cache_size": 0, "prepared_statement_cache_size": 0}
+import asyncpg as _asyncpg
 
-engine = create_async_engine(db_url, echo=False, future=True, connect_args=connect_args, poolclass=NullPool)
+connect_args = {}
+_is_pg = "asyncpg" in db_url
+_ssl_ctx = None
+
+if _is_pg:
+    _ssl_ctx = ssl.create_default_context()
+    _ssl_ctx.check_hostname = False
+    _ssl_ctx.verify_mode = ssl.CERT_NONE
+    connect_args = {
+        "ssl": _ssl_ctx,
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
+    }
+
+engine = create_async_engine(
+    db_url, echo=False, future=True,
+    connect_args=connect_args,
+    poolclass=NullPool,
+)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
@@ -106,32 +119,145 @@ async def _user(request: Request, db: AsyncSession) -> User:
 
 
 # ─── Startup / Migrations ───
+# We use raw asyncpg for DDL because SQLAlchemy's asyncpg dialect
+# calls prepare() during initialization, which pgBouncer rejects.
 @app.on_event("startup")
 async def startup():
-    async with engine.begin() as conn:
-        # If a previous deploy created "profiles" instead of "users", rename it
+    if not _is_pg:
+        # SQLite: use SQLAlchemy create_all (no pgBouncer issues)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        return
+
+    # PostgreSQL (Supabase): use raw asyncpg connection for DDL
+    # Parse the DB URL to get asyncpg-compatible DSN
+    raw_dsn = DATABASE_URL.strip()
+    # Strip query params
+    if "?" in raw_dsn:
+        raw_dsn = raw_dsn.split("?")[0]
+
+    conn = await _asyncpg.connect(
+        dsn=raw_dsn,
+        ssl=_ssl_ctx,
+        statement_cache_size=0,
+    )
+    try:
+        # Rename profiles→users if needed (from previous deploy)
         try:
-            await conn.exec_driver_sql("ALTER TABLE IF EXISTS profiles RENAME TO users")
+            await conn.execute("ALTER TABLE IF EXISTS profiles RENAME TO users")
         except Exception:
             pass
-        # Drop any existing FK constraints on user_id that reference non-existent tables
+
+        # Drop broken FK constraints
         for tbl in ("deals", "settings", "goals"):
             try:
-                # PostgreSQL: drop FK constraint if it exists (constraint name pattern)
-                await conn.exec_driver_sql(
-                    f"ALTER TABLE {tbl} DROP CONSTRAINT IF EXISTS {tbl}_user_id_fkey"
-                )
+                await conn.execute(f"ALTER TABLE {tbl} DROP CONSTRAINT IF EXISTS {tbl}_user_id_fkey")
             except Exception:
                 pass
-        # Now create all tables (users first since it has no dependencies)
-        await conn.run_sync(Base.metadata.create_all)
-        # Add user_id columns to existing tables (plain integer, no FK constraint)
+
+        # Create users table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(80) UNIQUE NOT NULL,
+                display_name VARCHAR(120) DEFAULT '',
+                password_hash VARCHAR(256) NOT NULL,
+                password_salt VARCHAR(64) NOT NULL,
+                created_at VARCHAR(32) DEFAULT ''
+            )
+        """)
+
+        # Create settings table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER,
+                unit_comm_discount_le_200 FLOAT DEFAULT 190.0,
+                unit_comm_discount_gt_200 FLOAT DEFAULT 140.0,
+                permaplate FLOAT DEFAULT 40.0,
+                nitro_fill FLOAT DEFAULT 40.0,
+                pulse FLOAT DEFAULT 40.0,
+                finance_non_subvented FLOAT DEFAULT 40.0,
+                warranty FLOAT DEFAULT 25.0,
+                tire_wheel FLOAT DEFAULT 25.0,
+                hourly_rate_ny_offset FLOAT DEFAULT 15.0,
+                new_volume_bonus_15_16 FLOAT DEFAULT 1000.0,
+                new_volume_bonus_17_18 FLOAT DEFAULT 1200.0,
+                new_volume_bonus_19_20 FLOAT DEFAULT 1500.0,
+                new_volume_bonus_21_24 FLOAT DEFAULT 2000.0,
+                new_volume_bonus_25_plus FLOAT DEFAULT 2800.0,
+                used_volume_bonus_8_10 FLOAT DEFAULT 350.0,
+                used_volume_bonus_11_12 FLOAT DEFAULT 500.0,
+                used_volume_bonus_13_plus FLOAT DEFAULT 1000.0,
+                spot_bonus_5_9 FLOAT DEFAULT 50.0,
+                spot_bonus_10_12 FLOAT DEFAULT 80.0,
+                spot_bonus_13_plus FLOAT DEFAULT 100.0,
+                quarterly_bonus_threshold_units INTEGER DEFAULT 60,
+                quarterly_bonus_amount FLOAT DEFAULT 1200.0
+            )
+        """)
+
+        # Create goals table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS goals (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER,
+                year INTEGER NOT NULL,
+                month INTEGER NOT NULL,
+                unit_goal INTEGER DEFAULT 20,
+                commission_goal FLOAT DEFAULT 8000.0
+            )
+        """)
+
+        # Create deals table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS deals (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER,
+                sold_date DATE,
+                delivered_date DATE,
+                scheduled_date DATE,
+                status VARCHAR(24) DEFAULT 'Pending',
+                tag VARCHAR(24) DEFAULT '',
+                customer VARCHAR(120) DEFAULT '',
+                stock_num VARCHAR(40) DEFAULT '',
+                model VARCHAR(120) DEFAULT '',
+                new_used VARCHAR(16) DEFAULT '',
+                deal_type VARCHAR(32) DEFAULT '',
+                business_manager VARCHAR(80) DEFAULT '',
+                spot_sold BOOLEAN DEFAULT false,
+                discount_gt_200 VARCHAR(8) DEFAULT 'No',
+                aim_presentation VARCHAR(3) DEFAULT 'X',
+                permaplate BOOLEAN DEFAULT false,
+                nitro_fill BOOLEAN DEFAULT false,
+                pulse BOOLEAN DEFAULT false,
+                finance_non_subvented BOOLEAN DEFAULT false,
+                warranty BOOLEAN DEFAULT false,
+                tire_wheel BOOLEAN DEFAULT false,
+                hold_amount FLOAT DEFAULT 0.0,
+                aim_amount FLOAT DEFAULT 0.0,
+                fi_pvr FLOAT DEFAULT 0.0,
+                notes TEXT DEFAULT '',
+                unit_comm FLOAT DEFAULT 0.0,
+                add_ons FLOAT DEFAULT 0.0,
+                trade_hold_comm FLOAT DEFAULT 0.0,
+                total_deal_comm FLOAT DEFAULT 0.0,
+                pay_date DATE,
+                is_paid BOOLEAN DEFAULT false,
+                on_delivery_board BOOLEAN DEFAULT false,
+                gas_ready BOOLEAN DEFAULT false,
+                inspection_ready BOOLEAN DEFAULT false,
+                insurance_ready BOOLEAN DEFAULT false
+            )
+        """)
+
+        # Add missing columns to existing tables (idempotent)
         for tbl in ("deals", "settings", "goals"):
             try:
-                await conn.exec_driver_sql(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS user_id INTEGER")
+                await conn.execute(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS user_id INTEGER")
             except Exception:
                 pass
-        # Legacy column migrations for deals
+
         for col, typ, dflt in [
             ("scheduled_date", "DATE", "NULL"),
             ("on_delivery_board", "BOOLEAN", "false"),
@@ -140,10 +266,10 @@ async def startup():
             ("insurance_ready", "BOOLEAN", "false"),
         ]:
             try:
-                await conn.exec_driver_sql(f"ALTER TABLE deals ADD COLUMN IF NOT EXISTS {col} {typ} DEFAULT {dflt}")
+                await conn.execute(f"ALTER TABLE deals ADD COLUMN IF NOT EXISTS {col} {typ} DEFAULT {dflt}")
             except Exception:
                 pass
-        # Legacy column migrations for settings
+
         for col, typ, dflt in [
             ("hourly_rate_ny_offset", "FLOAT", "15.0"),
             ("new_volume_bonus_15_16", "FLOAT", "1000.0"), ("new_volume_bonus_17_18", "FLOAT", "1200.0"),
@@ -157,9 +283,11 @@ async def startup():
             ("quarterly_bonus_amount", "FLOAT", "1200.0"),
         ]:
             try:
-                await conn.exec_driver_sql(f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} {typ} DEFAULT {dflt}")
+                await conn.execute(f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} {typ} DEFAULT {dflt}")
             except Exception:
                 pass
+    finally:
+        await conn.close()
 
 
 # ─── Utility functions ───
