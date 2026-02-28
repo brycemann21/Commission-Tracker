@@ -842,9 +842,35 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
     return resp
 
 
-# ════════════════════════════════════════════════
-# DASHBOARD
-# ════════════════════════════════════════════════
+@app.get("/api/session-status")
+async def session_status(request: Request):
+    """Returns seconds remaining on current session — used by timeout warning."""
+    from fastapi.responses import JSONResponse
+    token = get_session_token(request)
+    if not token:
+        return JSONResponse({"seconds_remaining": 0, "authenticated": False})
+    try:
+        raw_conn = await engine.raw_connection()
+        try:
+            row = await raw_conn.fetchrow(
+                "SELECT expires_at, remember_me FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
+                token
+            )
+        finally:
+            await raw_conn.close()
+        if not row:
+            return JSONResponse({"seconds_remaining": 0, "authenticated": False})
+        delta = (row["expires_at"].replace(tzinfo=None) - datetime.utcnow()).total_seconds()
+        return JSONResponse({
+            "seconds_remaining": max(0, int(delta)),
+            "authenticated": True,
+            "remember_me": row["remember_me"],
+        })
+    except Exception:
+        return JSONResponse({"seconds_remaining": 86400, "authenticated": True})
+
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
@@ -1032,6 +1058,7 @@ async def deals_list(
     request: Request,
     q: str | None = None, status: str | None = None, paid: str | None = None,
     month: int | None = None, year: int | None = None, _nav: str | None = None,
+    search_all: str | None = None,
     db: AsyncSession = Depends(get_db)
 ):
     user_id = uid(request)
@@ -1052,16 +1079,20 @@ async def deals_list(
     start_sel, end_sel = month_bounds(date(y, m, 1))
 
     stmt = select(Deal).where(Deal.user_id == user_id).order_by(Deal.sold_date.asc().nullslast(), Deal.id.asc())
-    carry = ["inbound", "fo"]
-    stmt = stmt.where(or_(
-        # Sold in the selected month
-        and_(Deal.sold_date.is_not(None), Deal.sold_date >= start_sel, Deal.sold_date < end_sel),
-        # Delivered in the selected month but sold in a different month (cross-month carryover)
-        and_(Deal.delivered_date.is_not(None), Deal.delivered_date >= start_sel, Deal.delivered_date < end_sel,
-             or_(Deal.sold_date.is_(None), Deal.sold_date < start_sel, Deal.sold_date >= end_sel)),
-        # Inbound/FO tags not yet delivered (legacy carryover)
-        and_(func.lower(func.coalesce(Deal.tag, "")).in_(carry), Deal.status != "Delivered"),
-    ))
+
+    # Cross-month search: if searching, ignore month filter entirely
+    searching_all = bool(search_all == "1" and q and q.strip())
+    if not searching_all:
+        carry = ["inbound", "fo"]
+        stmt = stmt.where(or_(
+            # Sold in the selected month
+            and_(Deal.sold_date.is_not(None), Deal.sold_date >= start_sel, Deal.sold_date < end_sel),
+            # Delivered in the selected month but sold in a different month (cross-month carryover)
+            and_(Deal.delivered_date.is_not(None), Deal.delivered_date >= start_sel, Deal.delivered_date < end_sel,
+                 or_(Deal.sold_date.is_(None), Deal.sold_date < start_sel, Deal.sold_date >= end_sel)),
+            # Inbound/FO tags not yet delivered (legacy carryover)
+            and_(func.lower(func.coalesce(Deal.tag, "")).in_(carry), Deal.status != "Delivered"),
+        ))
     if status and status != "All": stmt = stmt.where(Deal.status == status)
     if paid == "Paid": stmt = stmt.where(Deal.is_paid.is_(True))
     elif paid == "Pending": stmt = stmt.where(Deal.is_paid.is_(False))
@@ -1074,6 +1105,7 @@ async def deals_list(
     resp = templates.TemplateResponse("deals.html", {
         "request": request, "user": user, "deals": deals, "q": q or "", "status": status or "All", "paid": paid or "All",
         "selected_year": y, "selected_month": m,
+        "searching_all": searching_all,
         "overdue_reminders": await get_overdue_reminders(db, user_id),
     })
     resp.set_cookie("ct_year", str(y), httponly=False, samesite="lax")
@@ -1313,22 +1345,31 @@ async def delivery_board(request: Request, db: AsyncSession = Depends(get_db)):
 
 @app.post("/delivery/{deal_id}/toggle")
 async def delivery_toggle(deal_id: int, request: Request, field: str = Form(...), db: AsyncSession = Depends(get_db)):
+    from fastapi.responses import JSONResponse
     if field not in {"gas_ready","inspection_ready","insurance_ready"}: return RedirectResponse(url="/delivery", status_code=303)
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
     setattr(deal, field, not getattr(deal, field)); await db.commit()
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True, "value": getattr(deal, field)})
     return RedirectResponse(url="/delivery", status_code=303)
 
 @app.post("/delivery/{deal_id}/deliver")
 async def delivery_deliver(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
     deal.status = "Delivered"; deal.delivered_date = today(); await db.commit()
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True})
     return RedirectResponse(url="/delivery", status_code=303)
 
 @app.post("/delivery/{deal_id}/remove")
 async def delivery_remove(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
     deal.on_delivery_board = False; deal.gas_ready = False; deal.inspection_ready = False; deal.insurance_ready = False
     await db.commit()
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True})
     return RedirectResponse(url="/delivery", status_code=303)
 
 @app.post("/delivery/{deal_id}/push")
@@ -1686,6 +1727,14 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
     imported = skipped = 0
     errors = []
 
+    # Pre-load existing stock numbers for duplicate detection
+    existing_stocks = set(
+        r[0] for r in (await db.execute(
+            select(Deal.stock_num).where(Deal.user_id == user_id, Deal.stock_num.isnot(None), Deal.stock_num != "")
+        )).all()
+    )
+    duplicates_skipped = 0
+
     for i, row in enumerate(rows):
         if i in skip_indices:
             skipped += 1
@@ -1694,6 +1743,11 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
             deal_in = _parse_row(row, mapping, settings)
             if deal_in is None:
                 skipped += 1
+                continue
+            # Duplicate detection — skip if stock number already exists
+            if deal_in.stock_num and deal_in.stock_num.strip() and deal_in.stock_num.strip() in existing_stocks:
+                skipped += 1
+                duplicates_skipped += 1
                 continue
             # Apply per-row overrides from the review editor
             ov = overrides.get(i, {})
@@ -1733,6 +1787,7 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
         "request": request, "user": user,
         "result": {
             "imported": imported, "skipped": skipped, "errors": errors,
+            "duplicates_skipped": duplicates_skipped,
             "batch_id": import_batch_id if imported > 0 else None,
             "filename": form.get("filename", "upload.csv"),
         },

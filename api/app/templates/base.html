@@ -121,6 +121,102 @@
     if(d&&!d.classList.contains('hidden')&&!w?.contains(e.target))d.classList.add('hidden');
   });
   </script>
+
+  <!-- Session timeout warning -->
+  <div id="sessionWarning" class="hidden fixed inset-0 z-[100]" style="background:rgba(0,0,0,0.55)">
+    <div class="flex items-center justify-center min-h-screen p-4">
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 text-center">
+        <div class="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
+          <svg class="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+          </svg>
+        </div>
+        <h2 class="text-lg font-bold mb-1">Session Expiring Soon</h2>
+        <p class="text-sm text-slate-500 mb-1">You'll be signed out in</p>
+        <div id="sessionCountdown" class="text-3xl font-bold text-amber-600 mb-4">2:00</div>
+        <p class="text-xs text-slate-400 mb-5">Any unsaved changes will be lost.</p>
+        <div class="flex gap-3">
+          <button onclick="extendSession()" class="flex-1 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">
+            Stay Signed In
+          </button>
+          <a href="/logout" class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">
+            Sign Out
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // ── Session timeout monitor ──
+  (function() {
+    const WARN_AT = 2 * 60; // show warning 2 minutes before expiry
+    const CHECK_INTERVAL = 60 * 1000; // check every 60s
+    let warningShown = false;
+    let countdownTimer = null;
+
+    function fmtTime(s) {
+      const m = Math.floor(s / 60), sec = s % 60;
+      return `${m}:${String(sec).padStart(2,'0')}`;
+    }
+
+    function showWarning(secondsLeft) {
+      if (warningShown) return;
+      warningShown = true;
+      const modal = document.getElementById('sessionWarning');
+      const countdown = document.getElementById('sessionCountdown');
+      modal.classList.remove('hidden');
+      let remaining = secondsLeft;
+      countdown.textContent = fmtTime(remaining);
+      countdownTimer = setInterval(() => {
+        remaining--;
+        countdown.textContent = fmtTime(Math.max(0, remaining));
+        if (remaining <= 0) {
+          clearInterval(countdownTimer);
+          window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+        }
+      }, 1000);
+    }
+
+    window.extendSession = async function() {
+      try {
+        // hitting any authenticated endpoint refreshes nothing server-side,
+        // but we can reload the page which resets the session check cycle
+        const res = await fetch('/api/session-status');
+        const data = await res.json();
+        if (data.authenticated && data.seconds_remaining > WARN_AT) {
+          document.getElementById('sessionWarning').classList.add('hidden');
+          clearInterval(countdownTimer);
+          warningShown = false;
+        } else {
+          // Session truly expiring — reload to trigger a proper re-auth
+          window.location.reload();
+        }
+      } catch { window.location.reload(); }
+    };
+
+    async function checkSession() {
+      try {
+        const res = await fetch('/api/session-status');
+        const data = await res.json();
+        if (!data.authenticated) {
+          window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+          return;
+        }
+        if (data.remember_me) return; // 30-day session, don't bother warning
+        if (data.seconds_remaining <= WARN_AT) {
+          showWarning(data.seconds_remaining);
+        }
+      } catch { /* network error, ignore */ }
+    }
+
+    // Start checking after 5 minutes (no point checking immediately)
+    setTimeout(() => {
+      checkSession();
+      setInterval(checkSession, CHECK_INTERVAL);
+    }, 5 * 60 * 1000);
+  })();
+  </script>
   {% endif %}
 
   <main class="{{ 'p-4' if (embed|default(false)) else 'max-w-6xl mx-auto px-4 py-6' }}">

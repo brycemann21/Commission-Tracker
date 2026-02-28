@@ -69,6 +69,10 @@
               class="px-2 py-2 text-slate-500 hover:bg-slate-100 rounded-r transition text-sm">›</button>
     </div>
     <input class="border rounded px-3 py-2 text-sm flex-1 min-w-[150px]" name="q" value="{{ q }}" placeholder="Search customer / stock / model" />
+    <label class="flex items-center gap-1.5 text-sm text-slate-600 whitespace-nowrap cursor-pointer border rounded px-3 py-2 hover:bg-slate-50 transition">
+      <input type="checkbox" name="search_all" value="1" {% if searching_all %}checked{% endif %} class="rounded">
+      All months
+    </label>
     <select class="border rounded px-3 py-2 text-sm" name="status">
       {% for s in ["All","Pending","Scheduled","Delivered","Dead"] %}
         <option value="{{ s }}" {% if status==s %}selected{% endif %}>{{ s }}</option>
@@ -84,6 +88,13 @@
 </div>
 
 <form method="post" action="/deals/bulk-delete" id="bulkForm">
+{% if searching_all %}
+<div class="mb-3 px-3 py-2 rounded-lg bg-violet-50 border border-violet-200 text-violet-700 text-sm flex items-center gap-2">
+  <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0"/></svg>
+  Searching across all months for <strong>"{{ q }}"</strong>
+  <a href="/deals?q={{ q }}" class="ml-auto text-violet-500 hover:text-violet-700 underline text-xs">Back to {{ selected_month }}/{{ selected_year }}</a>
+</div>
+{% endif %}
 <div id="bulkToolbar" class="hidden mb-3 flex flex-wrap items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
   <span id="bulkCount" class="text-sm font-medium text-red-700">0 deals selected</span>
   <button type="submit" onclick="return confirm('Permanently delete selected deals?')"
