@@ -28,6 +28,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
+import asyncpg
 import httpx
 from fastapi import Request
 from sqlalchemy import delete, select
@@ -260,7 +261,28 @@ async def get_or_create_user_from_supabase(
     return user
 
 
-# ── DB-backed session management ───────────────────────────────────────────────
+# ── DB-backed session management (raw asyncpg — pgBouncer safe) ───────────────
+#
+# ALL session operations use raw asyncpg connections with statement_cache_size=0.
+# This bypasses SQLAlchemy's prepared statement layer entirely, which is the only
+# reliable way to work with Supabase's pgBouncer in Transaction Mode.
+
+async def _raw_pg_conn():
+    """Open a raw asyncpg connection. Caller must close it."""
+    import os, ssl as _ssl
+    raw_dsn = os.environ.get("DATABASE_URL", "").strip().split("?")[0]
+    if not raw_dsn or "postgres" not in raw_dsn:
+        return None
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
+    try:
+        return await asyncpg.connect(dsn=raw_dsn, ssl=ctx, statement_cache_size=0)
+    except Exception as e:
+        logger.warning(f"raw_pg_conn failed: {e}")
+        return None
+
+
 async def create_session(
     db: AsyncSession,
     user_id: int,
@@ -269,62 +291,105 @@ async def create_session(
 ) -> str:
     token = secrets.token_urlsafe(64)
     ttl = SESSION_TTL_REMEMBER if remember_me else SESSION_TTL_SHORT
-    ua = None
-    ip = None
-    if request:
-        ua = (request.headers.get("user-agent") or "")[:256]
-        ip = request.client.host if request.client else None
+    expires_at = datetime.utcnow() + ttl
+    ua = (request.headers.get("user-agent") or "")[:256] if request else None
+    ip = (request.client.host if request.client else None) if request else None
 
-    session = UserSession(
-        token=token,
-        user_id=user_id,
-        expires_at=datetime.utcnow() + ttl,
-        remember_me=remember_me,
-        user_agent=ua,
-        ip_address=ip,
-    )
-    db.add(session)
-    await db.commit()
+    conn = await _raw_pg_conn()
+    if conn:
+        try:
+            await conn.execute(
+                """INSERT INTO user_sessions (token, user_id, created_at, expires_at, remember_me, user_agent, ip_address)
+                   VALUES ($1, $2, NOW(), $3, $4, $5, $6)""",
+                token, user_id, expires_at, remember_me, ua, ip
+            )
+        finally:
+            await conn.close()
+    else:
+        # SQLite fallback
+        session = UserSession(
+            token=token, user_id=user_id,
+            expires_at=expires_at, remember_me=remember_me,
+            user_agent=ua, ip_address=ip,
+        )
+        db.add(session)
+        await db.commit()
     return token
 
 
-async def get_user_id_from_session(db: AsyncSession, token: str | None) -> int | None:
+async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -> int | None:
     if not token:
         return None
-    row = (
-        await db.execute(
-            select(UserSession).where(
-                UserSession.token == token,
-                UserSession.expires_at > datetime.utcnow(),
+
+    conn = await _raw_pg_conn()
+    if conn:
+        try:
+            row = await conn.fetchrow(
+                "SELECT user_id FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
+                token
             )
-        )
-    ).scalar_one_or_none()
-    return row.user_id if row else None
+            return row["user_id"] if row else None
+        finally:
+            await conn.close()
+    else:
+        # SQLite fallback
+        row = (
+            await db.execute(
+                select(UserSession).where(
+                    UserSession.token == token,
+                    UserSession.expires_at > datetime.utcnow(),
+                )
+            )
+        ).scalar_one_or_none()
+        return row.user_id if row else None
 
 
 async def destroy_session(db: AsyncSession, token: str | None):
     if not token:
         return
-    await db.execute(delete(UserSession).where(UserSession.token == token))
-    await db.commit()
+    conn = await _raw_pg_conn()
+    if conn:
+        try:
+            await conn.execute("DELETE FROM user_sessions WHERE token = $1", token)
+        finally:
+            await conn.close()
+    else:
+        await db.execute(delete(UserSession).where(UserSession.token == token))
+        await db.commit()
 
 
 async def destroy_all_user_sessions(db: AsyncSession, user_id: int):
     """Log out all devices for a user."""
-    await db.execute(delete(UserSession).where(UserSession.user_id == user_id))
-    await db.commit()
+    conn = await _raw_pg_conn()
+    if conn:
+        try:
+            await conn.execute("DELETE FROM user_sessions WHERE user_id = $1", user_id)
+        finally:
+            await conn.close()
+    else:
+        await db.execute(delete(UserSession).where(UserSession.user_id == user_id))
+        await db.commit()
 
 
 async def cleanup_expired_sessions(db: AsyncSession):
-    """Delete expired session rows. Call periodically."""
-    result = await db.execute(
-        delete(UserSession).where(UserSession.expires_at <= datetime.utcnow())
-    )
-    await db.commit()
-    deleted = result.rowcount
-    if deleted:
-        logger.info(f"Session cleanup: removed {deleted} expired session(s)")
-    return deleted
+    """Delete expired session rows."""
+    conn = await _raw_pg_conn()
+    if conn:
+        try:
+            r1 = await conn.execute("DELETE FROM user_sessions WHERE expires_at <= NOW()")
+            r2 = await conn.execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
+            deleted = int(r1.split()[-1]) + int(r2.split()[-1])
+            if deleted:
+                logger.info(f"Session cleanup: removed {deleted} expired row(s)")
+            return deleted
+        finally:
+            await conn.close()
+    else:
+        result = await db.execute(
+            delete(UserSession).where(UserSession.expires_at <= datetime.utcnow())
+        )
+        await db.commit()
+        return result.rowcount
 
 
 # ── Password reset tokens (legacy fallback) ────────────────────────────────────
@@ -373,6 +438,7 @@ async def get_current_user(request: Request, db: AsyncSession) -> User | None:
     uid = await get_user_id_from_session(db, token)
     if uid is None:
         return None
+    # Use SQLAlchemy for user lookup (only runs on authenticated pages, not every middleware check)
     return (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
 
 

@@ -120,21 +120,18 @@ async def auth_middleware(request: Request, call_next):
 
     token = get_session_token(request)
 
+    # Session check uses raw asyncpg (no SQLAlchemy, pgBouncer-safe)
+    # Pass None as db — get_user_id_from_session uses raw pg when available
+    uid_val = await get_user_id_from_session(None, token)
+
     # For public pages: auto-redirect to dashboard if already logged in
     if path in PUBLIC_PATHS:
-        if token:
-            async with SessionLocal() as db:
-                uid_val = await get_user_id_from_session(db, token)
-            if uid_val is not None:
-                return RedirectResponse(url="/", status_code=303)
+        if uid_val is not None:
+            return RedirectResponse(url="/", status_code=303)
         return await call_next(request)
 
-    # Protected pages: validate session from DB
-    async with SessionLocal() as db:
-        uid_val = await get_user_id_from_session(db, token)
-
+    # Protected pages
     if uid_val is None:
-        # Preserve the intended destination so we can redirect back after login
         dest = request.url.path
         if request.url.query:
             dest += f"?{request.url.query}"
