@@ -427,50 +427,64 @@
           <div class="text-sm text-slate-500">Pending Deals</div>
           <div class="text-lg font-semibold">All Pending ({{ pending }})</div>
         </div>
-        <button type="button" id="closePendingModal" class="text-slate-500 hover:text-slate-900 text-2xl leading-none">&times;</button>
+        <div class="flex items-center gap-3">
+          <button id="modalDeleteBtn" type="button" onclick="submitModalBulkDelete()" class="hidden text-xs px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-700 text-white font-medium transition">
+            Delete Selected (<span id="modalDeleteCount">0</span>)
+          </button>
+          <button type="button" id="closePendingModal" class="text-slate-500 hover:text-slate-900 text-2xl leading-none">&times;</button>
+        </div>
       </div>
       <div class="p-4 overflow-auto" style="max-height: 75vh;">
-        <div class="overflow-x-auto bg-white rounded border border-slate-200">
-          <table class="min-w-full text-sm">
-            <thead class="bg-slate-900 text-white">
-              <tr>
-                <th class="text-left p-2">Sold Date</th>
-                <th class="text-left p-2">Customer</th>
-                <th class="text-left p-2">Tag</th>
-                <th class="text-left p-2">Stock #</th>
-                <th class="text-left p-2">Model</th>
-                <th class="text-left p-2">Notes</th>
-                <th class="p-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for d in pending_deals_all %}
-                <tr class="border-t {% if d.days_pending >= 7 %}bg-rose-50{% elif d.days_pending >= 3 %}bg-amber-50{% endif %}">
-                  <td class="p-2">{{ d.sold_date or "" }}{% if d.days_pending >= 3 %} <span class="text-[10px] font-medium {{ 'text-rose-600' if d.days_pending >= 7 else 'text-amber-600' }}">{{ d.days_pending }}d</span>{% endif %}</td>
-                  <td class="p-2 font-medium">{{ d.customer }}</td>
-                  <td class="p-2">{{ d.tag }}</td>
-                  <td class="p-2">{{ d.stock_num }}</td>
-                  <td class="p-2">{{ d.model }}</td>
-                  <td class="p-2">{{ d.notes or "" }}</td>
-                  <td class="p-2 text-right whitespace-nowrap">
-                    <a class="text-blue-600 hover:underline mr-2 text-xs" href="/deals/{{ d.id }}/edit">Edit</a>
-                    <form method="post" action="/deals/{{ d.id }}/mark_delivered" class="inline">
-                      <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
-                      <button class="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded text-xs font-medium" type="submit">Delivered</button>
-                    </form>
-                    <form method="post" action="/deals/{{ d.id }}/mark_dead" class="inline ml-1">
-                      <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
-                      <button class="bg-rose-600 hover:bg-rose-700 text-white px-2.5 py-1 rounded text-xs font-medium" type="submit">Dead</button>
-                    </form>
-                  </td>
+        <form id="modalBulkForm" method="post" action="/deals/bulk-delete">
+          <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
+          <div class="overflow-x-auto bg-white rounded border border-slate-200">
+            <table class="min-w-full text-sm">
+              <thead class="bg-slate-900 text-white">
+                <tr>
+                  <th class="p-2 w-8">
+                    <input type="checkbox" id="modalSelectAll" class="rounded cursor-pointer accent-white" title="Select all">
+                  </th>
+                  <th class="text-left p-2">Sold Date</th>
+                  <th class="text-left p-2">Customer</th>
+                  <th class="text-left p-2">Tag</th>
+                  <th class="text-left p-2">Stock #</th>
+                  <th class="text-left p-2">Model</th>
+                  <th class="text-left p-2">Notes</th>
+                  <th class="p-2"></th>
                 </tr>
-              {% endfor %}
-              {% if pending_deals_all|length == 0 %}
-                <tr class="border-t"><td class="p-3 text-slate-500" colspan="7">No pending deals.</td></tr>
-              {% endif %}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {% for d in pending_deals_all %}
+                  <tr class="border-t {% if d.days_pending >= 7 %}bg-rose-50{% elif d.days_pending >= 3 %}bg-amber-50{% endif %}">
+                    <td class="p-2">
+                      <input type="checkbox" name="deal_ids" value="{{ d.id }}" class="modal-checkbox rounded cursor-pointer" onchange="updateModalSelection()">
+                    </td>
+                    <td class="p-2">{{ d.sold_date or "" }}{% if d.days_pending >= 3 %} <span class="text-[10px] font-medium {{ 'text-rose-600' if d.days_pending >= 7 else 'text-amber-600' }}">{{ d.days_pending }}d</span>{% endif %}</td>
+                    <td class="p-2 font-medium">{{ d.customer }}</td>
+                    <td class="p-2">{{ d.tag }}</td>
+                    <td class="p-2">{{ d.stock_num }}</td>
+                    <td class="p-2">{{ d.model }}</td>
+                    <td class="p-2">{{ d.notes or "" }}</td>
+                    <td class="p-2 text-right whitespace-nowrap">
+                      <a class="text-blue-600 hover:underline mr-2 text-xs" href="/deals/{{ d.id }}/edit">Edit</a>
+                      <form method="post" action="/deals/{{ d.id }}/mark_delivered" class="inline">
+                        <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
+                        <button class="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded text-xs font-medium" type="submit">Delivered</button>
+                      </form>
+                      <form method="post" action="/deals/{{ d.id }}/mark_dead" class="inline ml-1">
+                        <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
+                        <button class="bg-rose-600 hover:bg-rose-700 text-white px-2.5 py-1 rounded text-xs font-medium" type="submit">Dead</button>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+                {% if pending_deals_all|length == 0 %}
+                  <tr class="border-t"><td class="p-3 text-slate-500" colspan="8">No pending deals.</td></tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </form>
       </div>
     </div>
   </div>
@@ -559,10 +573,42 @@
     const checked = document.querySelectorAll('.pending-checkbox:checked');
     if (checked.length === 0) return;
     const n = checked.length;
+    window._activeBulkForm = 'pending';
     document.getElementById('bulkDeleteSubtitle').textContent = `${n} deal${n !== 1 ? 's' : ''} selected`;
-    document.getElementById('bulkDeleteCountText').innerHTML = `<strong>${n} pending deal${n !== 1 ? 's' : ''}</strong>`;
+    document.getElementById('bulkDeleteCountText').innerHTML = `${n} pending deal${n !== 1 ? 's' : ''}`;
     document.getElementById('bulkDeleteModal').classList.remove('hidden');
     document.body.style.overflow = 'hidden';
+  }
+
+  // ── Multi-select in View All modal ──
+  function updateModalSelection() {
+    const checkboxes = document.querySelectorAll('.modal-checkbox');
+    const checked = document.querySelectorAll('.modal-checkbox:checked');
+    const btn = document.getElementById('modalDeleteBtn');
+    const countSpan = document.getElementById('modalDeleteCount');
+    const selectAll = document.getElementById('modalSelectAll');
+
+    countSpan.textContent = checked.length;
+    btn.classList.toggle('hidden', checked.length === 0);
+
+    if (checked.length === 0) { selectAll.indeterminate = false; selectAll.checked = false; }
+    else if (checked.length === checkboxes.length) { selectAll.indeterminate = false; selectAll.checked = true; }
+    else { selectAll.indeterminate = true; }
+  }
+
+  document.getElementById('modalSelectAll')?.addEventListener('change', function() {
+    document.querySelectorAll('.modal-checkbox').forEach(cb => cb.checked = this.checked);
+    updateModalSelection();
+  });
+
+  function submitModalBulkDelete() {
+    const checked = document.querySelectorAll('.modal-checkbox:checked');
+    if (checked.length === 0) return;
+    const n = checked.length;
+    window._activeBulkForm = 'modal';
+    document.getElementById('bulkDeleteSubtitle').textContent = `${n} deal${n !== 1 ? 's' : ''} selected`;
+    document.getElementById('bulkDeleteCountText').innerHTML = `${n} pending deal${n !== 1 ? 's' : ''}`;
+    document.getElementById('bulkDeleteModal').classList.remove('hidden');
   }
 
   function closeBulkDeleteModal() {
@@ -572,7 +618,11 @@
 
   function confirmBulkDelete() {
     closeBulkDeleteModal();
-    document.getElementById('pendingBulkForm').submit();
+    if (window._activeBulkForm === 'modal') {
+      document.getElementById('modalBulkForm').submit();
+    } else {
+      document.getElementById('pendingBulkForm').submit();
+    }
   }
 
   document.addEventListener('keydown', (e) => {
