@@ -5,15 +5,25 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="theme-color" content="#0f172a"/>
-  <title>{{ "Create Account" if mode == "register" else "Sign In" }} — Commission Tracker</title>
+  <title>
+    {% if mode == "register" %}Create Account
+    {% elif mode == "forgot" %}Reset Password
+    {% elif mode == "reset_confirm" %}Set New Password
+    {% else %}Sign In
+    {% endif %} — Commission Tracker
+  </title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-50 min-h-screen flex items-center justify-center p-4">
   <div class="w-full max-w-sm">
+
     <!-- Logo -->
     <div class="text-center mb-8">
       <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-slate-900 text-white mb-4">
-        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+        </svg>
       </div>
       <h1 class="text-2xl font-bold text-slate-900">Commission Tracker</h1>
       <p class="text-slate-500 mt-1 text-sm">Track your deals, commissions &amp; bonuses</p>
@@ -21,26 +31,103 @@
 
     <!-- Card -->
     <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-      <!-- Tabs -->
-      <div class="flex mb-6 bg-slate-100 rounded-lg p-1">
-        <a href="/login" class="flex-1 text-center py-2 text-sm font-medium rounded-md transition {{ 'bg-white shadow-sm text-slate-900' if mode == 'login' else 'text-slate-500 hover:text-slate-700' }}">Sign In</a>
-        <a href="/register" class="flex-1 text-center py-2 text-sm font-medium rounded-md transition {{ 'bg-white shadow-sm text-slate-900' if mode == 'register' else 'text-slate-500 hover:text-slate-700' }}">Create Account</a>
-      </div>
 
-      {% if error %}
-      <div class="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{{ error }}</div>
+      {% if mode in ("login", "register") %}
+      <!-- Tab nav -->
+      <div class="flex mb-6 bg-slate-100 rounded-lg p-1">
+        <a href="/login" class="flex-1 text-center py-2 text-sm font-medium rounded-md transition
+          {{ 'bg-white shadow-sm text-slate-900' if mode == 'login' else 'text-slate-500 hover:text-slate-700' }}">
+          Sign In
+        </a>
+        <a href="/register" class="flex-1 text-center py-2 text-sm font-medium rounded-md transition
+          {{ 'bg-white shadow-sm text-slate-900' if mode == 'register' else 'text-slate-500 hover:text-slate-700' }}">
+          Create Account
+        </a>
+      </div>
+      {% elif mode == "forgot" %}
+      <h2 class="text-lg font-semibold text-slate-900 mb-1">Reset your password</h2>
+      <p class="text-sm text-slate-500 mb-5">Enter your email and we'll send you a reset link.</p>
+      {% elif mode == "reset_confirm" %}
+      <h2 class="text-lg font-semibold text-slate-900 mb-1">Set a new password</h2>
+      <p class="text-sm text-slate-500 mb-5">Choose a strong password (at least 6 characters).</p>
       {% endif %}
 
-      {% if mode == "register" %}
+      <!-- Alerts -->
+      {% if error %}
+      <div class="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm flex items-start gap-2">
+        <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="M12 8v4m0 4h.01"/>
+        </svg>
+        {{ error }}
+      </div>
+      {% endif %}
+
+      {% if success %}
+      <div class="mb-4 p-3 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm flex items-start gap-2">
+        <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+        {{ success }}
+      </div>
+      {% endif %}
+
+      <!-- ── SIGN IN ── -->
+      {% if mode == "login" %}
+      <form method="POST" action="/login" class="space-y-4">
+        <input type="hidden" name="next" value="{{ next }}"/>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">
+            {{ "Email" if supabase_enabled else "Username or Email" }}
+          </label>
+          <input name="{{ 'email' if supabase_enabled else 'username' }}"
+                 type="{{ 'email' if supabase_enabled else 'text' }}"
+                 required autocomplete="{{ 'email' if supabase_enabled else 'username' }}"
+                 class="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none transition"
+                 placeholder="{{ 'you@example.com' if supabase_enabled else 'Your username' }}"/>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
+          <input name="password" type="password" required autocomplete="current-password"
+                 class="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none transition"
+                 placeholder="Your password"/>
+        </div>
+        <!-- Remember me + Forgot -->
+        <div class="flex items-center justify-between">
+          <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+            <input type="checkbox" name="remember_me" value="on"
+                   class="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"/>
+            Remember me
+          </label>
+          <a href="/forgot-password" class="text-sm text-slate-500 hover:text-slate-900 transition">
+            Forgot password?
+          </a>
+        </div>
+        <button type="submit"
+                class="w-full py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 active:bg-slate-700 transition">
+          Sign In
+        </button>
+      </form>
+
+      <!-- ── CREATE ACCOUNT ── -->
+      {% elif mode == "register" %}
       <form method="POST" action="/register" class="space-y-4">
+        {% if supabase_enabled %}
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Email</label>
+          <input name="email" type="email" required autocomplete="email"
+                 class="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none transition"
+                 placeholder="you@example.com"/>
+        </div>
+        {% else %}
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">Username</label>
           <input name="username" type="text" required minlength="3" maxlength="80" autocomplete="username"
                  class="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none transition"
                  placeholder="e.g. jsmith"/>
         </div>
+        {% endif %}
         <div>
-          <label class="block text-sm font-medium text-slate-700 mb-1">Display Name</label>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Display Name <span class="text-slate-400 font-normal">(optional)</span></label>
           <input name="display_name" type="text" maxlength="120" autocomplete="name"
                  class="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none transition"
                  placeholder="John Smith"/>
@@ -57,26 +144,61 @@
                  class="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none transition"
                  placeholder="Re-enter password"/>
         </div>
-        <button type="submit" class="w-full py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 active:bg-slate-700 transition">
+        <button type="submit"
+                class="w-full py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 active:bg-slate-700 transition">
           Create Account
         </button>
       </form>
-      {% else %}
-      <form method="POST" action="/login" class="space-y-4">
+
+      <!-- ── FORGOT PASSWORD ── -->
+      {% elif mode == "forgot" %}
+      <form method="POST" action="/forgot-password" class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-slate-700 mb-1">Username</label>
-          <input name="username" type="text" required autocomplete="username"
+          <label class="block text-sm font-medium text-slate-700 mb-1">Email address</label>
+          <input name="email" type="email" required autocomplete="email"
                  class="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none transition"
-                 placeholder="Your username"/>
+                 placeholder="you@example.com"/>
+        </div>
+        <button type="submit"
+                class="w-full py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 active:bg-slate-700 transition">
+          Send Reset Link
+        </button>
+        <a href="/login" class="block text-center text-sm text-slate-500 hover:text-slate-900 transition mt-2">
+          ← Back to Sign In
+        </a>
+      </form>
+
+      <!-- ── RESET PASSWORD CONFIRM ── -->
+      {% elif mode == "reset_confirm" %}
+      {# Supabase puts the access_token in the URL fragment (#access_token=...).
+         This script extracts it and populates the hidden field. #}
+      <script>
+        window.addEventListener("DOMContentLoaded", function () {
+          const hash = window.location.hash.substring(1);
+          const params = new URLSearchParams(hash);
+          const at = params.get("access_token") || "{{ access_token | default('') }}";
+          const field = document.getElementById("access_token_field");
+          if (field && at) field.value = at;
+        });
+      </script>
+      <form method="POST" action="/auth/reset-confirm" class="space-y-4">
+        <input type="hidden" name="access_token" id="access_token_field" value="{{ access_token | default('') }}"/>
+        <input type="hidden" name="token" value="{{ token | default('') }}"/>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">New Password</label>
+          <input name="password" type="password" required minlength="6" autocomplete="new-password"
+                 class="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none transition"
+                 placeholder="At least 6 characters"/>
         </div>
         <div>
-          <label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
-          <input name="password" type="password" required autocomplete="current-password"
+          <label class="block text-sm font-medium text-slate-700 mb-1">Confirm New Password</label>
+          <input name="password2" type="password" required minlength="6" autocomplete="new-password"
                  class="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none transition"
-                 placeholder="Your password"/>
+                 placeholder="Re-enter new password"/>
         </div>
-        <button type="submit" class="w-full py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 active:bg-slate-700 transition">
-          Sign In
+        <button type="submit"
+                class="w-full py-2.5 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 active:bg-slate-700 transition">
+          Update Password
         </button>
       </form>
       {% endif %}

@@ -1,5 +1,6 @@
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, Integer, Float, Date, Boolean, Text
+from sqlalchemy import String, Integer, Float, Date, Boolean, Text, DateTime
+from datetime import datetime
 
 class Base(DeclarativeBase):
     pass
@@ -8,16 +9,40 @@ class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    email: Mapped[str | None] = mapped_column(String(254), unique=True, nullable=True)
     display_name: Mapped[str] = mapped_column(String(120), default="")
-    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
-    password_salt: Mapped[str] = mapped_column(String(64), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False, default="")
+    password_salt: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    supabase_id: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[str] = mapped_column(String(32), default="")
+
+class UserSession(Base):
+    """Persistent sessions stored in DB — survives server restarts."""
+    __tablename__ = "user_sessions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    remember_me: Mapped[bool] = mapped_column(Boolean, default=False)
+    user_agent: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+class PasswordResetToken(Base):
+    """Single-use password reset tokens."""
+    __tablename__ = "password_reset_tokens"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
 
 class Settings(Base):
     __tablename__ = "settings"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-
     unit_comm_discount_le_200: Mapped[float] = mapped_column(Float, default=190.0)
     unit_comm_discount_gt_200: Mapped[float] = mapped_column(Float, default=140.0)
     permaplate: Mapped[float] = mapped_column(Float, default=40.0)
@@ -54,7 +79,6 @@ class Deal(Base):
     __tablename__ = "deals"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-
     sold_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     delivered_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     scheduled_date: Mapped[Date | None] = mapped_column(Date, nullable=True)

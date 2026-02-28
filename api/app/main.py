@@ -1,3 +1,4 @@
+import logging
 import os
 import io
 import csv
@@ -17,16 +18,29 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy.pool import NullPool
 from sqlalchemy import select, func, or_, and_
 
-from .models import Base, User, Deal, Settings, Goal
+from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken
 from .schemas import DealIn
 from .payplan import calc_commission
 from .utils import parse_date, today
 from .auth import (
+    # Legacy password helpers
     hash_password, verify_password,
+    # Supabase Auth
+    SUPABASE_ENABLED,
+    supabase_sign_up, supabase_sign_in,
+    supabase_reset_password, supabase_update_password, supabase_get_user,
+    get_or_create_user_from_supabase,
+    # Session management (DB-backed)
     create_session, get_user_id_from_session, destroy_session,
+    destroy_all_user_sessions, cleanup_expired_sessions,
+    # Password reset (legacy)
+    create_reset_token, validate_reset_token, consume_reset_token,
+    # Request helpers
     get_session_token, get_current_user, get_or_create_settings,
 )
 
+
+logger = logging.getLogger("main")
 
 # ─── DB setup ───
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:////tmp/commission.db").strip()
@@ -96,18 +110,37 @@ async def get_db():
 
 
 # ─── Auth helpers ───
-PUBLIC_PATHS = {"/login", "/register"}
+PUBLIC_PATHS = {"/login", "/register", "/forgot-password", "/auth/reset-confirm"}
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
-    if path in PUBLIC_PATHS or path.startswith("/static"):
+    if path.startswith("/static"):
         return await call_next(request)
+
     token = get_session_token(request)
-    uid = get_user_id_from_session(token)
-    if uid is None:
-        return RedirectResponse(url="/login", status_code=303)
-    request.state.user_id = uid
+
+    # For public pages: auto-redirect to dashboard if already logged in
+    if path in PUBLIC_PATHS:
+        if token:
+            async with SessionLocal() as db:
+                uid_val = await get_user_id_from_session(db, token)
+            if uid_val is not None:
+                return RedirectResponse(url="/", status_code=303)
+        return await call_next(request)
+
+    # Protected pages: validate session from DB
+    async with SessionLocal() as db:
+        uid_val = await get_user_id_from_session(db, token)
+
+    if uid_val is None:
+        # Preserve the intended destination so we can redirect back after login
+        dest = request.url.path
+        if request.url.query:
+            dest += f"?{request.url.query}"
+        return RedirectResponse(url=f"/login?next={dest}", status_code=303)
+
+    request.state.user_id = uid_val
     return await call_next(request)
 
 
@@ -127,6 +160,9 @@ async def startup():
         # SQLite: use SQLAlchemy create_all (no pgBouncer issues)
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        # Session cleanup on startup
+        async with SessionLocal() as db:
+            await cleanup_expired_sessions(db)
         return
 
     # PostgreSQL (Supabase): use raw asyncpg connection for DDL
@@ -258,17 +294,54 @@ async def startup():
             except Exception:
                 pass
 
-        for col, typ, dflt in [
-            ("scheduled_date", "DATE", "NULL"),
-            ("on_delivery_board", "BOOLEAN", "false"),
-            ("gas_ready", "BOOLEAN", "false"),
-            ("inspection_ready", "BOOLEAN", "false"),
-            ("insurance_ready", "BOOLEAN", "false"),
+        # Create user_sessions table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                id SERIAL PRIMARY KEY,
+                token VARCHAR(128) UNIQUE NOT NULL,
+                user_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW(),
+                expires_at TIMESTAMP NOT NULL,
+                remember_me BOOLEAN DEFAULT false,
+                user_agent VARCHAR(256),
+                ip_address VARCHAR(64)
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token)")
+
+        # Create password_reset_tokens table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                id SERIAL PRIMARY KEY,
+                token VARCHAR(128) UNIQUE NOT NULL,
+                user_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW(),
+                expires_at TIMESTAMP NOT NULL,
+                used BOOLEAN DEFAULT false
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_reset_tokens_token ON password_reset_tokens(token)")
+
+        # Add new columns to users table (idempotent)
+        for col, typ in [
+            ("email", "VARCHAR(254)"),
+            ("supabase_id", "VARCHAR(64)"),
+            ("email_verified", "BOOLEAN DEFAULT false"),
         ]:
             try:
-                await conn.execute(f"ALTER TABLE deals ADD COLUMN IF NOT EXISTS {col} {typ} DEFAULT {dflt}")
+                await conn.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typ}")
             except Exception:
                 pass
+
+        # Add unique indexes for new user columns
+        try:
+            await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL")
+        except Exception:
+            pass
+        try:
+            await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_id ON users(supabase_id) WHERE supabase_id IS NOT NULL")
+        except Exception:
+            pass
 
         for col, typ, dflt in [
             ("hourly_rate_ny_offset", "FLOAT", "15.0"),
@@ -288,6 +361,26 @@ async def startup():
                 pass
     finally:
         await conn.close()
+
+    # Clean up any expired sessions from previous runs
+    async with SessionLocal() as db:
+        await cleanup_expired_sessions(db)
+
+
+import asyncio
+
+@app.on_event("startup")
+async def start_session_cleanup_task():
+    """Run session cleanup every 6 hours in the background."""
+    async def _loop():
+        while True:
+            await asyncio.sleep(6 * 3600)
+            try:
+                async with SessionLocal() as db:
+                    await cleanup_expired_sessions(db)
+            except Exception as e:
+                logger.warning(f"Session cleanup error: {e}")
+    asyncio.create_task(_loop())
 
 
 # ─── Utility functions ───
@@ -336,81 +429,329 @@ def _pct(n, d):
 # ════════════════════════════════════════════════
 # AUTH ROUTES
 # ════════════════════════════════════════════════
+
+def _set_session_cookie(resp, token: str, remember_me: bool):
+    """Set the session cookie with appropriate TTL."""
+    max_age = 60 * 60 * 24 * 30 if remember_me else None  # 30 days or session cookie
+    resp.set_cookie(
+        "ct_session", token,
+        httponly=True,
+        samesite="lax",
+        secure=False,  # Set True if using HTTPS
+        max_age=max_age,
+    )
+
+
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, error: str = ""):
-    return templates.TemplateResponse("login.html", {"request": request, "error": error, "mode": "login"})
+async def login_page(request: Request, error: str = "", next: str = "/"):
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": error,
+        "success": "",
+        "mode": "login",
+        "supabase_enabled": SUPABASE_ENABLED,
+        "next": next,
+    })
+
 
 @app.post("/login")
 async def login_post(
     request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
     db: AsyncSession = Depends(get_db),
+    email: str = Form(""),
+    username: str = Form(""),
+    password: str = Form(...),
+    remember_me: str = Form(""),
+    next: str = Form("/"),
 ):
-    username = username.strip().lower()
-    user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
-    if not user or not verify_password(password, user.password_hash, user.password_salt):
-        return templates.TemplateResponse("login.html", {
-            "request": request,
-            "error": "Invalid username or password",
-            "mode": "login",
-        })
-    token = create_session(user.id)
-    resp = RedirectResponse(url="/", status_code=303)
-    resp.set_cookie("ct_session", token, httponly=True, samesite="lax", max_age=60*60*24*30)
+    remember = remember_me.lower() in ("on", "1", "true", "yes")
+    redirect_to = next if next.startswith("/") else "/"
+    error_ctx = {
+        "request": request, "mode": "login", "success": "",
+        "supabase_enabled": SUPABASE_ENABLED, "next": redirect_to,
+    }
+
+    if SUPABASE_ENABLED:
+        # ── Supabase path ──
+        login_email = (email or username).strip().lower()
+        if not login_email or not password:
+            return templates.TemplateResponse("login.html", {
+                **error_ctx, "error": "Please enter your email and password."
+            })
+        result = await supabase_sign_in(login_email, password)
+        if "error" in result:
+            return templates.TemplateResponse("login.html", {**error_ctx, "error": result["error"]})
+
+        sb_user = result.get("user") or {}
+        local_user = await get_or_create_user_from_supabase(db, sb_user)
+        await get_or_create_settings(db, local_user.id)
+        token = await create_session(db, local_user.id, remember_me=remember, request=request)
+
+    else:
+        # ── Legacy path ──
+        uname = (username or email).strip().lower()
+        if not uname or not password:
+            return templates.TemplateResponse("login.html", {
+                **error_ctx, "error": "Please enter your username and password."
+            })
+        user = (await db.execute(select(User).where(User.username == uname))).scalar_one_or_none()
+        if not user or not verify_password(password, user.password_hash, user.password_salt):
+            return templates.TemplateResponse("login.html", {
+                **error_ctx, "error": "Incorrect username or password. Please try again."
+            })
+        token = await create_session(db, user.id, remember_me=remember, request=request)
+
+    resp = RedirectResponse(url=redirect_to, status_code=303)
+    _set_session_cookie(resp, token, remember)
     return resp
+
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request, error: str = ""):
-    return templates.TemplateResponse("login.html", {"request": request, "error": error, "mode": "register"})
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": error,
+        "success": "",
+        "mode": "register",
+        "supabase_enabled": SUPABASE_ENABLED,
+        "next": "/",
+    })
+
 
 @app.post("/register")
 async def register_post(
     request: Request,
-    username: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    email: str = Form(""),
+    username: str = Form(""),
     display_name: str = Form(""),
     password: str = Form(...),
     password2: str = Form(...),
-    db: AsyncSession = Depends(get_db),
 ):
-    username = username.strip().lower()
-    errors = []
-    if len(username) < 3:
-        errors.append("Username must be at least 3 characters")
-    if len(password) < 6:
-        errors.append("Password must be at least 6 characters")
+    error_ctx = {
+        "request": request, "mode": "register", "success": "",
+        "supabase_enabled": SUPABASE_ENABLED, "next": "/",
+    }
+
+    if SUPABASE_ENABLED:
+        # ── Supabase path ──
+        reg_email = email.strip().lower()
+        errors = []
+        if not reg_email or "@" not in reg_email:
+            errors.append("A valid email address is required.")
+        if len(password) < 6:
+            errors.append("Password must be at least 6 characters.")
+        if password != password2:
+            errors.append("Passwords don't match.")
+        if errors:
+            return templates.TemplateResponse("login.html", {**error_ctx, "error": " ".join(errors)})
+
+        result = await supabase_sign_up(reg_email, password)
+        if "error" in result:
+            return templates.TemplateResponse("login.html", {**error_ctx, "error": result["error"]})
+
+        sb_user = result.get("user") or {}
+        # Supabase may require email confirmation — check if session exists
+        session_data = result.get("session")
+        local_user = await get_or_create_user_from_supabase(
+            db, sb_user, display_name=display_name.strip() or reg_email.split("@")[0]
+        )
+        await get_or_create_settings(db, local_user.id)
+
+        if not session_data:
+            # Email confirmation required — show success message
+            return templates.TemplateResponse("login.html", {
+                **error_ctx,
+                "mode": "login",
+                "error": "",
+                "success": "Account created! Check your email to confirm before signing in.",
+            })
+
+        token = await create_session(db, local_user.id, remember_me=False, request=request)
+        resp = RedirectResponse(url="/", status_code=303)
+        _set_session_cookie(resp, token, False)
+        return resp
+
+    else:
+        # ── Legacy path ──
+        uname = (username or email).strip().lower()
+        errors = []
+        if len(uname) < 3:
+            errors.append("Username must be at least 3 characters.")
+        if len(password) < 6:
+            errors.append("Password must be at least 6 characters.")
+        if password != password2:
+            errors.append("Passwords don't match.")
+        existing = (await db.execute(select(User).where(User.username == uname))).scalar_one_or_none()
+        if existing:
+            errors.append("Username already taken.")
+        if errors:
+            return templates.TemplateResponse("login.html", {**error_ctx, "error": " ".join(errors)})
+
+        pw_hash, pw_salt = hash_password(password)
+        user = User(
+            username=uname,
+            display_name=(display_name.strip() or uname),
+            password_hash=pw_hash,
+            password_salt=pw_salt,
+            created_at=datetime.utcnow().isoformat(),
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        await get_or_create_settings(db, user.id)
+        token = await create_session(db, user.id, remember_me=False, request=request)
+        resp = RedirectResponse(url="/", status_code=303)
+        _set_session_cookie(resp, token, False)
+        return resp
+
+
+# ── Forgot Password ────────────────────────────────────────────────────────────
+@app.get("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_page(request: Request, error: str = "", success: str = ""):
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": error,
+        "success": success,
+        "mode": "forgot",
+        "supabase_enabled": SUPABASE_ENABLED,
+        "next": "/",
+    })
+
+
+@app.post("/forgot-password")
+async def forgot_password_post(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    email: str = Form(...),
+):
+    email = email.strip().lower()
+    error_ctx = {
+        "request": request, "mode": "forgot",
+        "supabase_enabled": SUPABASE_ENABLED, "next": "/",
+    }
+    # Always show a generic success so we don't leak whether an account exists
+    generic_ok = "If an account with that email exists, you'll receive a reset link shortly."
+
+    if SUPABASE_ENABLED:
+        result = await supabase_reset_password(email)
+        if "error" in result:
+            return templates.TemplateResponse("login.html", {**error_ctx, "error": result["error"], "success": ""})
+        return templates.TemplateResponse("login.html", {**error_ctx, "error": "", "success": generic_ok})
+
+    else:
+        # Legacy: find user and create token
+        user = (await db.execute(
+            select(User).where((User.email == email) | (User.username == email))
+        )).scalar_one_or_none()
+        if user:
+            token = await create_reset_token(db, user.id)
+            reset_url = f"{request.base_url}reset-password?token={token}"
+            # TODO: send email with reset_url via your SMTP provider
+            logger.info(f"Password reset link for {email}: {reset_url}")
+        return templates.TemplateResponse("login.html", {**error_ctx, "error": "", "success": generic_ok})
+
+
+# ── Reset Password Confirm (Supabase callback + legacy token) ──────────────────
+@app.get("/auth/reset-confirm", response_class=HTMLResponse)
+async def reset_confirm_page(request: Request, access_token: str = "", error: str = ""):
+    """
+    Supabase redirects here after the user clicks the reset link in their email.
+    The access_token is appended as a query parameter by Supabase.
+    """
+    if not access_token:
+        # Check URL fragment (#access_token=...) — handled client-side in JS below
+        pass
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": error,
+        "success": "",
+        "mode": "reset_confirm",
+        "access_token": access_token,
+        "supabase_enabled": SUPABASE_ENABLED,
+        "next": "/",
+    })
+
+
+@app.post("/auth/reset-confirm")
+async def reset_confirm_post(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    access_token: str = Form(""),
+    token: str = Form(""),
+    password: str = Form(...),
+    password2: str = Form(...),
+):
+    error_ctx = {
+        "request": request, "mode": "reset_confirm", "success": "",
+        "supabase_enabled": SUPABASE_ENABLED, "next": "/",
+        "access_token": access_token,
+    }
     if password != password2:
-        errors.append("Passwords don't match")
-    existing = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
-    if existing:
-        errors.append("Username already taken")
-    if errors:
+        return templates.TemplateResponse("login.html", {**error_ctx, "error": "Passwords don't match."})
+    if len(password) < 6:
+        return templates.TemplateResponse("login.html", {**error_ctx, "error": "Password must be at least 6 characters."})
+
+    if SUPABASE_ENABLED and access_token:
+        result = await supabase_update_password(access_token, password)
+        if "error" in result:
+            return templates.TemplateResponse("login.html", {**error_ctx, "error": result["error"]})
         return templates.TemplateResponse("login.html", {
-            "request": request,
-            "error": ". ".join(errors),
-            "mode": "register",
+            **error_ctx, "mode": "login", "error": "",
+            "success": "Password updated! You can now sign in with your new password."
         })
-    pw_hash, pw_salt = hash_password(password)
-    user = User(
-        username=username,
-        display_name=(display_name.strip() or username),
-        password_hash=pw_hash,
-        password_salt=pw_salt,
-        created_at=datetime.utcnow().isoformat(),
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    # Auto-create settings for the new user
-    await get_or_create_settings(db, user.id)
-    token = create_session(user.id)
-    resp = RedirectResponse(url="/", status_code=303)
-    resp.set_cookie("ct_session", token, httponly=True, samesite="lax", max_age=60*60*24*30)
-    return resp
+
+    elif token:
+        # Legacy reset token
+        user_id = await validate_reset_token(db, token)
+        if not user_id:
+            return templates.TemplateResponse("login.html", {
+                **error_ctx, "error": "This reset link has expired or already been used. Please request a new one."
+            })
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if not user:
+            return templates.TemplateResponse("login.html", {**error_ctx, "error": "Account not found."})
+        pw_hash, pw_salt = hash_password(password)
+        user.password_hash = pw_hash
+        user.password_salt = pw_salt
+        await consume_reset_token(db, token)
+        await destroy_all_user_sessions(db, user_id)
+        await db.commit()
+        return templates.TemplateResponse("login.html", {
+            **error_ctx, "mode": "login", "error": "",
+            "success": "Password updated! You can now sign in."
+        })
+
+    return templates.TemplateResponse("login.html", {**error_ctx, "error": "Invalid reset request."})
+
+
+@app.get("/reset-password", response_class=HTMLResponse)
+async def reset_password_legacy(request: Request, token: str = ""):
+    """Legacy reset-password page for email links in non-Supabase mode."""
+    error = ""
+    if token:
+        from sqlalchemy import select
+        from .models import PasswordResetToken
+        async with SessionLocal() as db:
+            valid_uid = await validate_reset_token(db, token)
+        if not valid_uid:
+            error = "This reset link has expired or already been used."
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": error,
+        "success": "",
+        "mode": "reset_confirm",
+        "access_token": "",
+        "token": token,
+        "supabase_enabled": SUPABASE_ENABLED,
+        "next": "/",
+    })
+
 
 @app.get("/logout")
-async def logout(request: Request):
-    destroy_session(get_session_token(request))
+async def logout(request: Request, db: AsyncSession = Depends(get_db)):
+    token = get_session_token(request)
+    await destroy_session(db, token)
     resp = RedirectResponse(url="/login", status_code=303)
     resp.delete_cookie("ct_session")
     return resp
