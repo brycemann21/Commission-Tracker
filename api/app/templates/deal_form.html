@@ -213,6 +213,31 @@
         </div>
 
         <div class="mt-3 text-xs text-slate-500" id="lc_hint"></div>
+
+        <!-- Commission Override -->
+        <div class="mt-4 border-t border-slate-200 pt-3">
+          <label class="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+            <svg class="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            Manual Override
+          </label>
+          <div class="text-[11px] text-slate-500 mb-1.5">Leave blank to use calculated commission. Set a value to override the total (e.g. for January deals).</div>
+          <div class="relative">
+            <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+            <input
+              type="number"
+              step="1"
+              min="0"
+              name="commission_override"
+              id="commission_override"
+              placeholder="e.g. 750"
+              value="{{ deal.commission_override if deal and deal.commission_override is not none else '' }}"
+              class="w-full border rounded pl-6 pr-3 py-2 text-sm {% if deal and deal.commission_override is not none %}border-amber-400 bg-amber-50{% else %}border-slate-300{% endif %}"
+            >
+          </div>
+          <div id="override_active_msg" class="mt-1 text-[11px] text-amber-700 font-medium {% if not (deal and deal.commission_override is not none) %}hidden{% endif %}">
+            ⚠ Override active — calculated total ignored
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -479,6 +504,23 @@
         });
 
         calc();
+      }
+
+      // Commission override field — highlight and warn when active
+      {
+        const ovInput = document.getElementById('commission_override');
+        const ovMsg = document.getElementById('override_active_msg');
+        if (ovInput && ovMsg) {
+          const update = () => {
+            const hasVal = ovInput.value.trim() !== '';
+            ovInput.classList.toggle('border-amber-400', hasVal);
+            ovInput.classList.toggle('bg-amber-50', hasVal);
+            ovInput.classList.toggle('border-slate-300', !hasVal);
+            ovMsg.classList.toggle('hidden', !hasVal);
+          };
+          ovInput.addEventListener('input', update);
+          update();
+        }
       }
     });
   </script>

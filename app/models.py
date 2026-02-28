@@ -110,6 +110,7 @@ class Deal(Base):
     pay_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     is_paid: Mapped[bool] = mapped_column(Boolean, default=False)
     import_batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    commission_override: Mapped[float | None] = mapped_column(Float, nullable=True)
     on_delivery_board: Mapped[bool] = mapped_column(Boolean, default=False)
     gas_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     inspection_ready: Mapped[bool] = mapped_column(Boolean, default=False)

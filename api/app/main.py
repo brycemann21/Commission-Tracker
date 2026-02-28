@@ -295,6 +295,12 @@ async def startup():
             except Exception:
                 pass
 
+        # Add commission_override column to deals if missing
+        try:
+            await conn.execute("ALTER TABLE deals ADD COLUMN IF NOT EXISTS commission_override FLOAT")
+        except Exception:
+            pass
+
         # Create user_sessions table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS user_sessions (
@@ -1054,6 +1060,7 @@ async def deal_save(
     finance_non_subvented: int = Form(0), warranty: int = Form(0), tire_wheel: int = Form(0),
     hold_amount: float = Form(0.0), aim_amount: float = Form(0.0), fi_pvr: float = Form(0.0),
     notes: str | None = Form(None), pay_date: str | None = Form(None), is_paid: int = Form(0),
+    commission_override: str | None = Form(None),
     next: str | None = Form(None), db: AsyncSession = Depends(get_db),
 ):
     user_id = uid(request)
@@ -1095,11 +1102,22 @@ async def deal_save(
     )
     uc, ao, th, tot = calc_commission(deal_in, settings)
 
+    # If user provided a manual override, use it as total_deal_comm
+    comm_ov: float | None = None
+    if commission_override is not None and commission_override.strip() != "":
+        try:
+            comm_ov = float(commission_override.replace("$", "").replace(",", "").strip())
+        except ValueError:
+            comm_ov = None
+    if comm_ov is not None:
+        tot = comm_ov
+
     if deal_id:
         for k, v in deal_in.model_dump().items(): setattr(existing, k, v)
         existing.unit_comm = uc; existing.add_ons = ao; existing.trade_hold_comm = th; existing.total_deal_comm = tot
+        existing.commission_override = comm_ov
     else:
-        deal = Deal(**deal_in.model_dump(), user_id=user_id, unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot)
+        deal = Deal(**deal_in.model_dump(), user_id=user_id, unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot, commission_override=comm_ov)
         db.add(deal)
     await db.commit()
     return RedirectResponse(url=(next or "/deals"), status_code=303)
@@ -1337,7 +1355,7 @@ def _parse_row(row: dict, mapping: dict[str, str], settings) -> DealIn | None:
     discount = _yn_field("discount_gt_200")
     spot = _yn_field("spot_sold")
 
-    if spot and not delivered: delivered = today()
+    if spot and not delivered: delivered = sold or today()
     if spot: st = "Delivered"
 
     return DealIn(

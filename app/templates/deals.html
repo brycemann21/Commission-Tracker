@@ -153,8 +153,8 @@
           <input type="checkbox" name="deal_ids" value="{{ d.id }}"
                  class="deal-checkbox rounded" onchange="updateBulkToolbar()">
         </td>
-        <td class="p-2">{{ d.sold_date or "" }}</td>
-        <td class="p-2">{{ d.delivered_date or "" }}</td>
+        <td class="p-2 text-slate-600 whitespace-nowrap">{{ d.sold_date.strftime('%-m/%-d') if d.sold_date else "" }}</td>
+        <td class="p-2 text-slate-600 whitespace-nowrap">{{ d.delivered_date.strftime('%-m/%-d') if d.delivered_date else "" }}</td>
         <td class="p-2">
           <button
             type="button"
@@ -212,7 +212,7 @@
           </form>
         </td>
         <td class="p-2 text-right whitespace-nowrap">
-          <button type="button" class="underline text-sm" data-edit-id="{{ d.id }}" data-edit-title="{{ d.customer|e }}">Edit</button>
+          <button type="button" class="underline text-sm text-blue-600 hover:text-blue-800" data-edit-id="{{ d.id }}" data-edit-title="{{ d.customer|e }}">Edit</button>
           {% if not d.on_delivery_board and d.status != 'Delivered' and d.status != 'Dead' %}
             <form method="post" action="/delivery/{{ d.id }}/push" class="inline ml-1">
               <input type="hidden" name="next" value="/deals">
