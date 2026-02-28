@@ -14,7 +14,7 @@ class DealIn(BaseModel):
     deal_type: str = ""
     business_manager: str = ""
     spot_sold: bool = False
-    discount_gt_200: str = "No"
+    discount_gt_200: bool = False
     aim_presentation: str = "X"
     permaplate: bool = False
     nitro_fill: bool = False

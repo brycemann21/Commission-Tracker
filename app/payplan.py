@@ -6,8 +6,7 @@ def calc_commission(deal: DealIn, settings: Settings):
     if not deal.customer:
         return 0.0, 0.0, 0.0, 0.0
 
-    disc = (deal.discount_gt_200 or "No").strip().lower()
-    unit = settings.unit_comm_discount_gt_200 if disc in ("yes","y","true","1") else settings.unit_comm_discount_le_200
+    unit = settings.unit_comm_discount_gt_200 if deal.discount_gt_200 else settings.unit_comm_discount_le_200
 
     addons = 0.0
     addons += (1 if deal.permaplate else 0) * settings.permaplate

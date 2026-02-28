@@ -265,7 +265,7 @@ async def startup():
                 deal_type VARCHAR(32) DEFAULT '',
                 business_manager VARCHAR(80) DEFAULT '',
                 spot_sold BOOLEAN DEFAULT false,
-                discount_gt_200 VARCHAR(8) DEFAULT 'No',
+                discount_gt_200 BOOLEAN DEFAULT false,
                 aim_presentation VARCHAR(3) DEFAULT 'X',
                 permaplate BOOLEAN DEFAULT false,
                 nitro_fill BOOLEAN DEFAULT false,
@@ -451,7 +451,7 @@ def _set_session_cookie(resp, token: str, remember_me: bool):
         "ct_session", token,
         httponly=True,
         samesite="lax",
-        secure=False,  # Set True if using HTTPS
+        secure=True,
         max_age=max_age,
     )
 
@@ -1051,7 +1051,7 @@ async def deal_save(
     stock_num: str | None = Form(None), model: str | None = Form(None),
     new_used: str | None = Form(None), deal_type: str | None = Form(None),
     business_manager: str | None = Form(None), spot_sold: int = Form(0),
-    discount_gt_200: str = Form("No"), aim_presentation: str = Form("X"),
+    discount_gt_200: str = Form("No"),  # kept as str from form, converted below aim_presentation: str = Form("X"),
     permaplate: int = Form(0), nitro_fill: int = Form(0), pulse: int = Form(0),
     finance_non_subvented: int = Form(0), warranty: int = Form(0), tire_wheel: int = Form(0),
     hold_amount: float = Form(0.0), aim_amount: float = Form(0.0), fi_pvr: float = Form(0.0),
@@ -1087,7 +1087,7 @@ async def deal_save(
         tag=(tag or "").strip(), customer=customer.strip(),
         stock_num=(stock_num or "").strip(), model=(model or "").strip(),
         new_used=new_used or "", deal_type=dt, business_manager=(business_manager or ""),
-        spot_sold=bool(spot_sold), discount_gt_200=(discount_gt_200 or "No"),
+        spot_sold=bool(spot_sold), discount_gt_200=(discount_gt_200 or "No").strip().lower() in ("yes","y","true","1"),
         aim_presentation=(aim_presentation or "X"),
         permaplate=bool(permaplate), nitro_fill=bool(nitro_fill), pulse=bool(pulse),
         finance_non_subvented=bool(dt in ("Finance","Lease") or finance_non_subvented),
@@ -1218,73 +1218,261 @@ async def export_csv(request: Request, month: str | None = None, db: AsyncSessio
 
 
 # ════════════════════════════════════════════════
-# CSV IMPORT
+# CSV IMPORT (with AI column mapping)
 # ════════════════════════════════════════════════
+
+# Known field targets for AI mapping
+_IMPORT_FIELDS = {
+    "customer": ["customer","customer name","name","buyer","client","purchaser"],
+    "sold_date": ["sold date","sold","sale date","date sold","contract date"],
+    "delivered_date": ["delivered date","delivery date","del date","date delivered","deliver"],
+    "scheduled_date": ["scheduled date","schedule date","appt date","appointment"],
+    "status": ["status","deal status","state"],
+    "stock_num": ["stock #","stock number","stock","vin","unit #","unit number","stk"],
+    "model": ["model","vehicle","car","description","year make model","ymm"],
+    "new_used": ["new/used","new used","type","n/u","condition"],
+    "deal_type": ["f/c/l","deal type","finance type","type","fcl","fin type"],
+    "business_manager": ["f&i","fi","business manager","finance manager","fi mgr","bm"],
+    "spot_sold": ["spot","spot sold","spot delivery","spotted"],
+    "discount_gt_200": ["discount>200","discount over 200","discount","disc>200","over 200"],
+    "aim_presentation": ["aim","aim presentation","demo"],
+    "permaplate": ["permaplate","perma plate","perm"],
+    "nitro_fill": ["nitro fill","nitro","nitrogen","nitrofill"],
+    "pulse": ["pulse","pulse protection"],
+    "finance_non_subvented": ["finance","finance product","non subvented","non-subvented","fin"],
+    "warranty": ["warranty","extended warranty","ext warranty","ew"],
+    "tire_wheel": ["tire&wheel","tire wheel","tire & wheel","t&w","tires"],
+    "hold_amount": ["hold amount","hold","holdback","hold $","gross hold"],
+    "aim_amount": ["aim amount","aim $","aim gross"],
+    "fi_pvr": ["fi pvr","pvr","per vehicle retail","f&i pvr"],
+    "is_paid": ["paid","payment","pay status"],
+    "pay_date": ["pay date","paid date","payment date","check date"],
+    "notes": ["notes","note","comments","comment","remarks"],
+    "tag": ["tag","deal tag","category"],
+}
+
+def _smart_map_columns(csv_headers: list[str]) -> dict[str, str]:
+    """
+    Map CSV column headers to internal field names using fuzzy matching.
+    Returns {csv_header: internal_field_name}.
+    Falls back to exact/fuzzy keyword matching — no API call needed.
+    """
+    import difflib
+    mapping = {}
+    used_fields = set()
+    headers_lower = {h: h.strip().lower() for h in csv_headers}
+
+    for csv_col, col_lower in headers_lower.items():
+        best_field = None
+        best_score = 0.0
+
+        for field, keywords in _IMPORT_FIELDS.items():
+            if field in used_fields:
+                continue
+            for kw in keywords:
+                # Exact match
+                if col_lower == kw:
+                    best_field = field
+                    best_score = 1.0
+                    break
+                # Fuzzy match
+                score = difflib.SequenceMatcher(None, col_lower, kw).ratio()
+                if score > best_score and score > 0.7:
+                    best_score = score
+                    best_field = field
+            if best_score == 1.0:
+                break
+
+        if best_field and best_score >= 0.7:
+            mapping[csv_col] = best_field
+            used_fields.add(best_field)
+
+    return mapping
+
+
+def _parse_row(row: dict, mapping: dict[str, str], settings) -> DealIn | None:
+    """Convert a raw CSV row using the column mapping into a DealIn."""
+    def _get(field): return (row.get(
+        next((c for c, f in mapping.items() if f == field), ""), ""
+    ) or "").strip()
+
+    def _yn(val): return val.lower() in ("y","yes","1","true","x") if val else False
+    def _yn_field(field): return _yn(_get(field))
+
+    cust = _get("customer")
+    if not cust:
+        return None
+
+    sold = parse_date(_get("sold_date"))
+    delivered = parse_date(_get("delivered_date"))
+    sched = parse_date(_get("scheduled_date"))
+
+    st = _get("status") or "Pending"
+    if st.lower() in ("delivered","d","del"): st = "Delivered"
+    elif st.lower() in ("dead","x","lost"): st = "Dead"
+    elif st.lower() in ("scheduled","sched","appt"): st = "Scheduled"
+    else: st = "Pending"
+
+    nu = _get("new_used")
+    if nu.lower() in ("n","new"): nu = "New"
+    elif nu.lower() in ("u","used"): nu = "Used"
+    else: nu = nu.title() if nu else ""
+
+    dt = _get("deal_type")
+    if dt.lower() in ("f","finance","fin"): dt = "Finance"
+    elif dt.lower() in ("c","cash","cash/sub-vented","sub","subvented"): dt = "Cash/Sub-Vented"
+    elif dt.lower() in ("l","lease"): dt = "Lease"
+
+    aim_raw = _get("aim_presentation")
+    if aim_raw.lower() in ("y","yes","1"): aim = "Yes"
+    elif aim_raw.lower() in ("n","no","0"): aim = "No"
+    else: aim = "X"
+
+    try: hold = float(_get("hold_amount").replace("$","").replace(",","") or 0)
+    except: hold = 0.0
+    try: aim_amt = float(_get("aim_amount").replace("$","").replace(",","") or 0)
+    except: aim_amt = 0.0
+    try: fi_pvr = float(_get("fi_pvr").replace("$","").replace(",","") or 0)
+    except: fi_pvr = 0.0
+
+    fin = _yn_field("finance_non_subvented") or dt in ("Finance","Lease")
+    discount = _yn_field("discount_gt_200")
+    spot = _yn_field("spot_sold")
+
+    if spot and not delivered: delivered = today()
+    if spot: st = "Delivered"
+
+    return DealIn(
+        sold_date=sold, delivered_date=delivered, scheduled_date=sched,
+        status=st, tag=_get("tag"), customer=cust,
+        stock_num=_get("stock_num"), model=_get("model"),
+        new_used=nu, deal_type=dt, business_manager=_get("business_manager"),
+        spot_sold=spot, discount_gt_200=discount, aim_presentation=aim,
+        permaplate=_yn_field("permaplate"), nitro_fill=_yn_field("nitro_fill"),
+        pulse=_yn_field("pulse"), finance_non_subvented=fin,
+        warranty=_yn_field("warranty"), tire_wheel=_yn_field("tire_wheel"),
+        hold_amount=hold, aim_amount=aim_amt, fi_pvr=fi_pvr,
+        notes=_get("notes"),
+        pay_date=parse_date(_get("pay_date")),
+        is_paid=_yn_field("is_paid"),
+    )
+
+
 @app.get("/import", response_class=HTMLResponse)
 async def import_page(request: Request, db: AsyncSession = Depends(get_db)):
     user = await _user(request, db)
-    return templates.TemplateResponse("import.html", {"request": request, "user": user, "result": None})
+    return templates.TemplateResponse("import.html", {
+        "request": request, "user": user, "result": None,
+        "preview": None, "mapping": None,
+    })
+
+
+@app.post("/import/preview", response_class=HTMLResponse)
+async def import_preview(request: Request, file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+    """Step 1: Upload CSV, detect columns, show mapping preview before committing."""
+    import json
+    user = await _user(request, db)
+    raw = await file.read()
+    text = raw.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    headers = reader.fieldnames or []
+    rows = list(reader)
+
+    mapping = _smart_map_columns(list(headers))
+
+    # Build preview of first 5 rows
+    preview_rows = []
+    for row in rows[:5]:
+        deal = _parse_row(row, mapping, None)
+        if deal:
+            preview_rows.append({
+                "customer": deal.customer,
+                "sold_date": str(deal.sold_date or ""),
+                "model": deal.model,
+                "status": deal.status,
+                "new_used": deal.new_used,
+                "deal_type": deal.deal_type,
+            })
+
+    # Store raw CSV in session via hidden field (base64 for safety)
+    import base64
+    csv_b64 = base64.b64encode(raw).decode()
+
+    return templates.TemplateResponse("import.html", {
+        "request": request, "user": user, "result": None,
+        "preview": preview_rows,
+        "mapping": mapping,
+        "csv_headers": list(headers),
+        "all_fields": list(_IMPORT_FIELDS.keys()),
+        "total_rows": len(rows),
+        "csv_b64": csv_b64,
+        "filename": file.filename or "upload.csv",
+    })
+
 
 @app.post("/import", response_class=HTMLResponse)
-async def import_csv(request: Request, file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
+    """Step 2: Confirm import with mapping (possibly user-adjusted)."""
+    import base64, json
+    form = await request.form()
     user_id = uid(request)
+    user = await _user(request, db)
     settings = await get_or_create_settings(db, user_id)
-    text = (await file.read()).decode("utf-8-sig")
+
+    csv_b64 = form.get("csv_b64", "")
+    if not csv_b64:
+        return templates.TemplateResponse("import.html", {
+            "request": request, "user": user, "result": {"imported": 0, "skipped": 0, "errors": ["No CSV data found. Please re-upload."]},
+            "preview": None, "mapping": None,
+        })
+
+    raw = base64.b64decode(csv_b64)
+    text = raw.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text))
-    imported = skipped = 0; errors = []
+    headers = list(reader.fieldnames or [])
+    rows = list(reader)
 
-    def _yn(val): return (val or "").strip().lower() in ("y","yes","1","true")
+    # Rebuild mapping from form (user may have adjusted dropdowns)
+    mapping = {}
+    for h in headers:
+        field_val = form.get(f"map_{h}", "")
+        if field_val:
+            mapping[h] = field_val
 
-    for i, row in enumerate(reader, start=2):
+    # If no form mapping (direct POST), auto-detect
+    if not mapping:
+        mapping = _smart_map_columns(headers)
+
+    imported = skipped = 0
+    errors = []
+
+    for i, row in enumerate(rows, start=2):
         try:
-            cust = (row.get("Customer") or row.get("customer") or "").strip()
-            if not cust: skipped += 1; continue
-            sold = parse_date(row.get("Sold Date") or row.get("sold_date") or "")
-            delivered = parse_date(row.get("Delivered Date") or row.get("delivered_date") or "")
-            sched = parse_date(row.get("Scheduled Date") or row.get("scheduled_date") or "")
-            st = (row.get("Status") or "Pending").strip()
-            if st.lower() in ("delivered","d"): st = "Delivered"
-            elif st.lower() in ("dead","x"): st = "Dead"
-            elif st.lower() in ("scheduled","sched"): st = "Scheduled"
-            else: st = "Pending"
-            nu = (row.get("New/Used") or "").strip()
-            if nu.lower() in ("n","new"): nu = "New"
-            elif nu.lower() in ("u","used"): nu = "Used"
-            dt = (row.get("F/C/L") or "").strip()
-            if dt.lower() in ("f","finance"): dt = "Finance"
-            elif dt.lower() in ("c","cash","cash/sub-vented"): dt = "Cash/Sub-Vented"
-            elif dt.lower() in ("l","lease"): dt = "Lease"
-            try: hold = float(row.get("Hold Amount") or "0")
-            except: hold = 0.0
-            aim = (row.get("Aim") or "X").strip()
-            if aim.lower() in ("y","yes"): aim = "Yes"
-            elif aim.lower() in ("n","no"): aim = "No"
-            else: aim = "X"
-            fin = _yn(row.get("Finance") or "")
-            if not fin and dt in ("Finance","Lease"): fin = True
-
-            deal_in = DealIn(
-                sold_date=sold, delivered_date=delivered, scheduled_date=sched, status=st,
-                tag=(row.get("Tag") or "").strip(), customer=cust,
-                stock_num=(row.get("Stock #") or "").strip(), model=(row.get("Model") or "").strip(),
-                new_used=nu, deal_type=dt, business_manager=(row.get("F&I") or "").strip(),
-                spot_sold=_yn(row.get("Spot") or ""),
-                discount_gt_200="Yes" if _yn(row.get("Discount>200") or "") else "No",
-                aim_presentation=aim,
-                permaplate=_yn(row.get("PermaPlate") or ""), nitro_fill=_yn(row.get("Nitro Fill") or ""),
-                pulse=_yn(row.get("Pulse") or ""), finance_non_subvented=fin,
-                warranty=_yn(row.get("Warranty") or ""), tire_wheel=_yn(row.get("Tire&Wheel") or ""),
-                hold_amount=hold, notes=(row.get("Notes") or "").strip(),
-                pay_date=parse_date(row.get("Pay Date") or ""), is_paid=_yn(row.get("Paid") or ""),
-            )
+            deal_in = _parse_row(row, mapping, settings)
+            if deal_in is None:
+                skipped += 1
+                continue
             uc, ao, th, tot = calc_commission(deal_in, settings)
-            db.add(Deal(**deal_in.model_dump(), user_id=user_id, unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot))
+            db.add(Deal(
+                **deal_in.model_dump(),
+                user_id=user_id,
+                unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot,
+            ))
             imported += 1
         except Exception as e:
             errors.append(f"Row {i}: {e}")
-    await db.commit()
-    user = await _user(request, db)
-    return templates.TemplateResponse("import.html", {"request": request, "user": user, "result": {"imported": imported, "skipped": skipped, "errors": errors}})
+
+    try:
+        await db.commit()
+    except Exception as e:
+        errors.append(f"Database error: {e}")
+        imported = 0
+
+    return templates.TemplateResponse("import.html", {
+        "request": request, "user": user,
+        "result": {"imported": imported, "skipped": skipped, "errors": errors},
+        "preview": None, "mapping": None,
+    })
 
 
 # ════════════════════════════════════════════════

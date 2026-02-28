@@ -121,9 +121,8 @@
     <div>
       <label class="text-xs text-slate-500">Discount</label>
       <select class="w-full border rounded px-3 py-2" name="discount_gt_200">
-        {% for s in ["No","Yes"] %}
-          <option value="{{ s }}" {% if deal and deal.discount_gt_200==s %}selected{% endif %}>{{ s }}</option>
-        {% endfor %}
+        <option value="No" {% if not deal or not deal.discount_gt_200 %}selected{% endif %}>No</option>
+        <option value="Yes" {% if deal and deal.discount_gt_200 %}selected{% endif %}>Yes</option>
       </select>
       <div class="text-xs text-slate-400 mt-1">Unit comm = {{ settings.unit_comm_discount_le_200 }} (No) / {{ settings.unit_comm_discount_gt_200 }} (Yes)</div>
     </div>
@@ -389,7 +388,7 @@
       {
         const SETTINGS = {
           unit_le: {{ settings.unit_comm_discount_le_200 or 0 }},
-          unit_gt: {{ settings.unit_comm_discount_gt_200 or 0 }},
+          unit_gt: {{ settings.unit_comm_discount_gt_200 or 0 }}, // used below
           permaplate: {{ settings.permaplate or 0 }},
           nitro_fill: {{ settings.nitro_fill or 0 }},
           pulse: {{ settings.pulse or 0 }},
@@ -407,7 +406,7 @@
 
         const els = {
           customer: $('input[name="customer"]'),
-          discount: $('select[name="discount_gt_200"]'),
+          discount_el: $('select[name="discount_gt_200"]'),
           hold: $('input[name="hold_amount"]'),
           dealType: $('select[name="deal_type"]'),
           permaplate: $('input[name="permaplate"]'),

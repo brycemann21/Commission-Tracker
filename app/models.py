@@ -91,7 +91,7 @@ class Deal(Base):
     deal_type: Mapped[str] = mapped_column(String(32), default="")
     business_manager: Mapped[str] = mapped_column(String(80), default="")
     spot_sold: Mapped[bool] = mapped_column(Boolean, default=False)
-    discount_gt_200: Mapped[str] = mapped_column(String(8), default="No")
+    discount_gt_200: Mapped[bool] = mapped_column(Boolean, default=False)
     aim_presentation: Mapped[str] = mapped_column(String(3), default="X")
     permaplate: Mapped[bool] = mapped_column(Boolean, default=False)
     nitro_fill: Mapped[bool] = mapped_column(Boolean, default=False)
