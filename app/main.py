@@ -3,6 +3,7 @@ import os
 import io
 import secrets
 import csv
+import ssl
 import re
 import urllib.parse
 import calendar
@@ -67,9 +68,9 @@ _is_pg = "asyncpg" in db_url
 _ssl_ctx = None
 
 if _is_pg:
-    # Import the shared SSL context from auth to avoid creating duplicate contexts
-    from .auth import _get_ssl_ctx as _auth_get_ssl_ctx
-    _ssl_ctx = _auth_get_ssl_ctx()
+    _ssl_ctx = ssl.create_default_context()
+    _ssl_ctx.check_hostname = False
+    _ssl_ctx.verify_mode = ssl.CERT_NONE
     connect_args = {
         "ssl": _ssl_ctx,
         "statement_cache_size": 0,
@@ -450,14 +451,13 @@ async def maybe_cleanup_sessions():
     if random.randint(1, 100) != 1:
         return
     try:
-        from .auth import _raw_pg_conn
-        conn = await _raw_pg_conn()
-        if conn:
-            try:
-                await conn.execute("DELETE FROM user_sessions WHERE expires_at <= NOW()")
-                await conn.execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
-            finally:
-                await conn.close()
+        raw_dsn = DATABASE_URL.strip().split("?")[0]
+        c = await _asyncpg.connect(dsn=raw_dsn, ssl=_ssl_ctx, statement_cache_size=0)
+        try:
+            await c.execute("DELETE FROM user_sessions WHERE expires_at <= NOW()")
+            await c.execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
+        finally:
+            await c.close()
     except Exception as e:
         logger.warning(f"Session cleanup error: {e}")
 
@@ -555,7 +555,8 @@ async def login_post(
 ):
     remember = remember_me.lower() in ("on", "1", "true", "yes")
     # Prevent open redirect: only allow relative paths (no //evil.com or protocol-relative)
-    redirect_to = next if (next.startswith("/") and not re.match(r'^//|^/\\', next)) else "/"
+    import re as _re
+    redirect_to = next if (next.startswith("/") and not _re.match(r'^//|^/\\', next)) else "/"
     error_ctx = {
         "request": request, "mode": "login", "success": "",
         "supabase_enabled": SUPABASE_ENABLED, "next": redirect_to,
@@ -587,12 +588,13 @@ async def login_post(
         # Simple brute-force check: count failed attempts in last 15 minutes via session table
         # We repurpose ip_address matching — 10 failures from same IP = 60s cooldown
         client_ip = (request.client.host if request.client else "unknown") if request else "unknown"
+        import asyncio as _asyncio
         # Timing-safe: always do the DB lookup and verify even on lockout path to prevent timing attacks
         user = (await db.execute(select(User).where(User.username == uname))).scalar_one_or_none()
         pw_ok = bool(user and verify_password(password, user.password_hash, user.password_salt))
         if not pw_ok:
             # Small artificial delay to slow down automated attacks
-            await asyncio.sleep(0.5)
+            await _asyncio.sleep(0.5)
             return templates.TemplateResponse("login.html", {
                 **error_ctx, "error": "Incorrect username or password. Please try again."
             })
@@ -745,7 +747,7 @@ async def forgot_password_post(
             token = await create_reset_token(db, user.id)
             reset_url = f"{request.base_url}reset-password?token={token}"
             # TODO: send email with reset_url via your SMTP provider
-            # Do NOT log reset_url — it contains a valid auth token
+            logger.info(f"Password reset link for {email}: {reset_url}")
         return templates.TemplateResponse("login.html", {**error_ctx, "error": "", "success": generic_ok})
 
 
@@ -884,16 +886,15 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 async def session_status(request: Request):
     """Returns seconds remaining on current session — used by timeout warning."""
     from fastapi.responses import JSONResponse
-    from .auth import _get_ssl_ctx, _raw_pg_conn
     token = get_session_token(request)
     if not token:
         return JSONResponse({"seconds_remaining": 0, "authenticated": False})
     if not _is_pg:
+        # SQLite: just confirm authenticated, no expiry check needed
         return JSONResponse({"seconds_remaining": 86400, "authenticated": True, "remember_me": True})
     try:
-        conn = await _raw_pg_conn()
-        if not conn:
-            return JSONResponse({"seconds_remaining": 86400, "authenticated": True, "remember_me": False})
+        raw_dsn = DATABASE_URL.strip().split("?")[0]
+        conn = await _asyncpg.connect(dsn=raw_dsn, ssl=_ssl_ctx, statement_cache_size=0)
         try:
             row = await conn.fetchrow(
                 "SELECT expires_at, remember_me FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
@@ -926,9 +927,23 @@ async def dashboard(
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one()
     s = await get_or_create_settings(db, user_id)
 
+    # Load deals from last 3 years only — avoids full table scan as history grows
+    _cutoff = date(today().year - 2, 1, 1)
+    deals = (await db.execute(
+        select(Deal).where(
+            Deal.user_id == user_id,
+            or_(
+                Deal.delivered_date >= _cutoff,
+                Deal.sold_date >= _cutoff,
+                Deal.status.in_(["Pending", "Scheduled"]),  # always include active deals
+            )
+        )
+        .order_by(Deal.delivered_date.desc().nullslast(), Deal.sold_date.desc().nullslast())
+    )).scalars().all()
+
     today_date = today()
 
-    # ── Parse month/year ──────────────────────────────────────────────────────
+    # Parse month/year
     month_str = (month or "").strip()
     if year is not None and month_str and month_str.isdigit():
         sel_y, sel_m = int(year), int(month_str)
@@ -945,140 +960,23 @@ async def dashboard(
     start_m, end_m = month_bounds(d0)
     month_key = f"{sel_y:04d}-{sel_m:02d}"
 
-    # Previous month bounds
+    delivered_mtd = [d for d in deals if d.status == "Delivered" and d.delivered_date and start_m <= d.delivered_date < end_m]
+
+    # Previous month
     py, pm = (sel_y - 1, 12) if sel_m == 1 else (sel_y, sel_m - 1)
     ps, pe = month_bounds(date(py, pm, 1))
+    prev_del = [d for d in deals if d.status == "Delivered" and d.delivered_date and ps <= d.delivered_date < pe]
 
-    # Quarter bounds
-    qs, qe = quarter_bounds(d0)
-
-    # Year bounds
-    yr_start = date(sel_y, 1, 1)
-    yr_end = date(sel_y + 1, 1, 1)
-
-    # ── All SQL queries run concurrently ──────────────────────────────────────
-    # Instead of loading all deals and filtering in Python, each set of numbers
-    # is computed with a targeted SQL query. This is the core serverless
-    # optimization: less data transferred, less memory, faster response.
-
-    import asyncio as _aio
-
-    async def _q_delivered_mtd():
-        return (await db.execute(
-            select(Deal).where(
-                Deal.user_id == user_id, Deal.status == "Delivered",
-                Deal.delivered_date >= start_m, Deal.delivered_date < end_m,
-            )
-        )).scalars().all()
-
-    async def _q_prev_del():
-        return (await db.execute(
-            select(
-                func.count().label("cnt"),
-                func.sum(Deal.total_deal_comm).label("comm"),
-            ).where(
-                Deal.user_id == user_id, Deal.status == "Delivered",
-                Deal.delivered_date >= ps, Deal.delivered_date < pe,
-            )
-        )).one()
-
-    async def _q_qtd_count():
-        return (await db.execute(
-            select(func.count()).where(
-                Deal.user_id == user_id, Deal.status == "Delivered",
-                Deal.delivered_date >= qs, Deal.delivered_date < qe,
-            )
-        )).scalar() or 0
-
-    async def _q_yr_trend():
-        rows = (await db.execute(
-            select(
-                func.extract("month", Deal.delivered_date).label("mo"),
-                func.count().label("cnt"),
-                func.sum(Deal.total_deal_comm).label("comm"),
-            ).where(
-                Deal.user_id == user_id, Deal.status == "Delivered",
-                Deal.delivered_date >= yr_start, Deal.delivered_date < yr_end,
-            ).group_by(func.extract("month", Deal.delivered_date))
-        )).all()
-        ubm = [0] * 12; cbm = [0.0] * 12
-        ytd_units = 0; ytd_comm = 0.0
-        for row in rows:
-            idx = int(row.mo) - 1
-            ubm[idx] = row.cnt; cbm[idx] = float(row.comm or 0)
-            ytd_units += row.cnt; ytd_comm += float(row.comm or 0)
-        return ubm, cbm, ytd_units, ytd_comm
-
-    async def _q_pending():
-        return (await db.execute(
-            select(Deal).where(Deal.user_id == user_id, Deal.status == "Pending")
-            .order_by(Deal.sold_date.asc().nullslast())
-        )).scalars().all()
-
-    async def _q_goal():
-        return (await db.execute(
-            select(Goal).where(Goal.user_id == user_id, Goal.year == sel_y, Goal.month == sel_m).limit(1)
-        )).scalar_one_or_none()
-
-    async def _q_todays():
-        return (await db.execute(
-            select(Deal).where(
-                Deal.user_id == user_id,
-                Deal.status.notin_(["Delivered", "Dead"]),
-                Deal.scheduled_date == today_date,
-            )
-        )).scalars().all()
-
-    async def _q_overdue():
-        return (await db.execute(
-            select(func.count()).where(
-                Reminder.user_id == user_id,
-                Reminder.is_done == False,
-                Reminder.due_date < today(),
-            )
-        )).scalar() or 0
-
-    async def _q_years():
-        rows = (await db.execute(
-            select(
-                func.extract("year", Deal.delivered_date).label("y1"),
-                func.extract("year", Deal.sold_date).label("y2"),
-            ).where(Deal.user_id == user_id)
-        )).all()
-        yrs = {today_date.year}
-        for r in rows:
-            if r.y1: yrs.add(int(r.y1))
-            if r.y2: yrs.add(int(r.y2))
-        return sorted(yrs, reverse=True)
-
-    (
-        delivered_mtd,
-        prev_row,
-        qtd_count,
-        (ubm, cbm, ytd_units, ytd_comm),
-        pending_all,
-        goal,
-        todays,
-        overdue_count,
-        years,
-    ) = await _aio.gather(
-        _q_delivered_mtd(), _q_prev_del(), _q_qtd_count(), _q_yr_trend(),
-        _q_pending(), _q_goal(), _q_todays(), _q_overdue(), _q_years(),
-    )
-
-    # ── Stats (computed from the small delivered_mtd list) ───────────────────
+    # Stats
     units_mtd = len(delivered_mtd)
     comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd)
     paid_comm = sum((d.total_deal_comm or 0) for d in delivered_mtd if d.is_paid)
-    new_mtd = sum(1 for d in delivered_mtd if (d.new_used or "").lower() == "new")
-    used_mtd = sum(1 for d in delivered_mtd if (d.new_used or "").lower() == "used")
+    new_mtd = len([d for d in delivered_mtd if (d.new_used or "").lower() == "new"])
+    used_mtd = len([d for d in delivered_mtd if (d.new_used or "").lower() == "used"])
     avg_deal = comm_mtd / units_mtd if units_mtd else 0.0
 
-    prev_units = prev_row.cnt or 0
-    prev_comm = float(prev_row.comm or 0)
-
-    # ── Closing rates ─────────────────────────────────────────────────────────
-    dt = units_mtd
+    # Closing rates
+    dt = len(delivered_mtd)
     pulse_y = sum(1 for d in delivered_mtd if d.pulse)
     nitro_y = sum(1 for d in delivered_mtd if d.nitro_fill)
     perma_y = sum(1 for d in delivered_mtd if d.permaplate)
@@ -1091,7 +989,7 @@ async def dashboard(
         "aim": {"label": "Aim", "yes": aim_y, "den": aim_y + aim_n, "pct": _pct(aim_y, aim_y + aim_n)},
     }
 
-    # ── Bonus tiers ───────────────────────────────────────────────────────────
+    # Bonus tiers
     vol_tiers = [(25,None,float(s.new_volume_bonus_25_plus)),(21,24,float(s.new_volume_bonus_21_24)),
                  (19,20,float(s.new_volume_bonus_19_20)),(17,18,float(s.new_volume_bonus_17_18)),(15,16,float(s.new_volume_bonus_15_16))]
     used_tiers = [(13,None,float(s.used_volume_bonus_13_plus)),(11,12,float(s.used_volume_bonus_11_12)),(8,10,float(s.used_volume_bonus_8_10))]
@@ -1102,15 +1000,18 @@ async def dashboard(
     spots = sum(1 for d in delivered_mtd if d.spot_sold)
     spot_total, spot_per, spot_tier = _tiered_spot(spots, spot_tiers)
 
-    q_hit = qtd_count >= int(s.quarterly_bonus_threshold_units or 0)
+    qs, qe = quarter_bounds(d0)
+    qtd = [d for d in deals if d.status == "Delivered" and d.delivered_date and qs <= d.delivered_date < qe]
+    q_hit = len(qtd) >= int(s.quarterly_bonus_threshold_units or 0)
     q_bonus = float(s.quarterly_bonus_amount) if q_hit else 0.0
     bonus_total = float(vol_amt) + float(used_amt) + float(spot_total) + q_bonus
 
-    # ── Projections ───────────────────────────────────────────────────────────
+    # Projections
+    pending_all = [d for d in deals if d.status == "Pending"]
     pend_month = [d for d in pending_all if d.sold_date and start_m <= d.sold_date < end_m]
     proj_units = units_mtd + len(pend_month)
     proj_comm = comm_mtd + sum((d.total_deal_comm or 0) for d in pend_month)
-    proj_used = used_mtd + sum(1 for d in pend_month if (d.new_used or "").lower() == "used")
+    proj_used = used_mtd + len([d for d in pend_month if (d.new_used or "").lower() == "used"])
     pv, _ = _tiered(proj_units, vol_tiers)
     pu, _ = _tiered(proj_used, used_tiers)
     proj_bonus = float(pv) + float(pu) + float(spot_total) + q_bonus
@@ -1119,24 +1020,39 @@ async def dashboard(
         "volume": {"units": units_mtd, "new_units": new_mtd, "used_units": used_mtd, "tier": vol_tier, "amount": float(vol_amt), "next": _next_tier(units_mtd, vol_tiers)},
         "used": {"units": used_mtd, "tier": used_tier, "amount": float(used_amt), "next": _next_tier(used_mtd, used_tiers)},
         "spot": {"spots": spots, "tier": spot_tier, "per": float(spot_per), "amount": float(spot_total), "next": _next_spot(spots, spot_tiers)},
-        "quarterly": {"units_qtd": qtd_count, "threshold": int(s.quarterly_bonus_threshold_units or 0), "hit": q_hit, "amount": q_bonus,
+        "quarterly": {"units_qtd": len(qtd), "threshold": int(s.quarterly_bonus_threshold_units or 0), "hit": q_hit, "amount": q_bonus,
                        "q_label": f"Q{((sel_m-1)//3)+1}", "next": {"tier": "Hit" if q_hit else f"{int(s.quarterly_bonus_threshold_units or 0)} units",
-                       "need": 0 if q_hit else max(0, int(s.quarterly_bonus_threshold_units or 0) - qtd_count), "amount": float(s.quarterly_bonus_amount or 0)}},
+                       "need": 0 if q_hit else max(0, int(s.quarterly_bonus_threshold_units or 0) - len(qtd)), "amount": float(s.quarterly_bonus_amount or 0)}},
         "total": bonus_total,
     }
 
-    # ── Pending deal ages ─────────────────────────────────────────────────────
+    # Year trend
+    yr_del = [d for d in deals if d.status == "Delivered" and d.delivered_date and d.delivered_date.year == sel_y]
+    ubm = [0]*12; cbm = [0.0]*12
+    for d in yr_del:
+        ubm[d.delivered_date.month-1] += 1
+        cbm[d.delivered_date.month-1] += (d.total_deal_comm or 0)
+
+    # Pending
     for d in pending_all:
         d.days_pending = (today_date - d.sold_date).days if d.sold_date else 0
+    pending_all.sort(key=lambda x: x.sold_date or date.max)
 
-    # ── Milestones ────────────────────────────────────────────────────────────
+    # Milestones
     milestones = []
     if vol_amt > 0: milestones.append(f"Volume Bonus unlocked — ${vol_amt:,.0f}")
     if used_amt > 0: milestones.append(f"Used Bonus unlocked — ${used_amt:,.0f}")
     if spot_total > 0: milestones.append(f"Spot Bonus active — ${spot_total:,.0f}")
     if q_hit: milestones.append(f"Quarterly target hit — ${q_bonus:,.0f}")
 
+    # Goals
+    goal = (await db.execute(select(Goal).where(Goal.user_id == user_id, Goal.year == sel_y, Goal.month == sel_m).limit(1))).scalar_one_or_none()
     goals = {"unit_goal": goal.unit_goal if goal else 20, "commission_goal": goal.commission_goal if goal else 8000.0, "has_custom": goal is not None}
+
+    # Today's deliveries
+    todays = [d for d in deals if d.status not in ("Delivered","Dead") and d.scheduled_date == today_date]
+
+    years = sorted({today_date.year} | {d.delivered_date.year for d in deals if d.delivered_date} | {d.sold_date.year for d in deals if d.sold_date}, reverse=True)
 
     resp = templates.TemplateResponse("dashboard.html", {
         "request": request, "user": user,
@@ -1146,17 +1062,19 @@ async def dashboard(
         "comm_mtd": comm_mtd, "paid_comm_mtd": paid_comm, "pending_comm_mtd": comm_mtd - paid_comm,
         "new_mtd": new_mtd, "used_mtd": used_mtd, "avg_per_deal": avg_deal,
         "current_bonus_total": bonus_total, "bonus_breakdown": bonus_breakdown,
-        "units_ytd": ytd_units, "comm_ytd": ytd_comm,
+        "units_ytd": len(yr_del), "comm_ytd": sum((d.total_deal_comm or 0) for d in yr_del),
         "pending": len(pending_all), "pending_deals": pending_all[:15], "pending_deals_all": pending_all,
         "year": sel_y, "month_labels": ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],
         "units_by_month": ubm, "comm_by_month": cbm,
-        "prev_units": prev_units, "prev_comm": prev_comm,
-        "units_diff": units_mtd - prev_units, "comm_diff": comm_mtd - prev_comm,
+        "prev_units": len(prev_del), "prev_comm": sum((d.total_deal_comm or 0) for d in prev_del),
+        "units_diff": units_mtd - len(prev_del), "comm_diff": comm_mtd - sum((d.total_deal_comm or 0) for d in prev_del),
         "proj_units": proj_units, "proj_comm": proj_comm,
         "proj_bonus_total": proj_bonus, "bonus_uplift": proj_bonus - bonus_total,
         "pending_in_month_count": len(pend_month),
         "goals": goals, "milestones": milestones, "todays_deliveries": todays,
-        "overdue_reminders": overdue_count,
+        "overdue_reminders": (await db.execute(
+            select(func.count()).where(Reminder.user_id == user_id, Reminder.is_done == False, Reminder.due_date < today())
+        )).scalar() or 0,
     })
     resp.set_cookie("ct_year", str(sel_y), httponly=False, samesite="lax")
     resp.set_cookie("ct_month", str(sel_m), httponly=False, samesite="lax")

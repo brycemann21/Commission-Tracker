@@ -13,21 +13,18 @@ Strategy:
 Sessions:
   - Stored in the `user_sessions` DB table (persistent across restarts).
   - TTL: 30 days (remember me) or 24 hours (session only).
+  - Cleanup task runs on startup + periodically to purge expired rows.
 
-Serverless optimizations applied:
-  - Module-level httpx.AsyncClient with keep-alive (reused across warm
-    Lambda invocations — skips DNS + TCP + TLS per Supabase call).
-  - Module-level SSL context (avoid re-creating per DB connection).
-  - In-memory session cache (TTL=30s) to halve DB round-trips on every
-    request's auth middleware check without meaningful staleness risk.
+Password Reset:
+  - Supabase mode: delegates to Supabase's built-in reset-by-email.
+  - Legacy mode: generates a `password_reset_tokens` row and you can
+    wire up an SMTP sender (see send_reset_email stub below).
 """
 
 import hashlib
 import logging
 import os
 import secrets
-import ssl as _ssl_mod
-import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -47,67 +44,13 @@ SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
 SUPABASE_AUTH_URL = f"{SUPABASE_URL}/auth/v1" if SUPABASE_URL else ""
 SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_ANON_KEY)
 
+# App's own public URL (needed to build password-reset redirect links)
 APP_URL = os.environ.get("APP_URL", "http://localhost:8000").rstrip("/")
 
+# Session TTLs
 SESSION_TTL_REMEMBER = timedelta(days=30)
 SESSION_TTL_SHORT = timedelta(hours=24)
 
-# ── Shared HTTP client (module-level — reused across warm Lambda invocations) ──
-# Avoids per-request DNS resolution + TCP + TLS handshake to Supabase.
-_http_client: httpx.AsyncClient | None = None
-
-def _get_http_client() -> httpx.AsyncClient:
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(
-            timeout=10,
-            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-        )
-    return _http_client
-
-# ── In-memory session cache ────────────────────────────────────────────────────
-# Every authenticated request hits the DB to validate the session cookie.
-# Caching (token → user_id) for 30s cuts ~50% of DB round-trips on warm
-# invocations. The risk window is tiny: a revoked session stays valid for
-# at most 30 more seconds, which is acceptable for this use case.
-_SESSION_CACHE: dict[str, tuple[int, float]] = {}
-_SESSION_CACHE_TTL = 30.0  # seconds
-
-def _cache_get(token: str) -> int | None:
-    entry = _SESSION_CACHE.get(token)
-    if entry and time.monotonic() < entry[1]:
-        return entry[0]
-    if entry:
-        del _SESSION_CACHE[token]
-    return None
-
-def _cache_set(token: str, user_id: int) -> None:
-    if len(_SESSION_CACHE) > 500:
-        cutoff = time.monotonic()
-        expired = [k for k, v in _SESSION_CACHE.items() if v[1] < cutoff]
-        for k in expired:
-            del _SESSION_CACHE[k]
-    _SESSION_CACHE[token] = (user_id, time.monotonic() + _SESSION_CACHE_TTL)
-
-def _cache_delete(token: str) -> None:
-    _SESSION_CACHE.pop(token, None)
-
-def _cache_delete_user(user_id: int) -> None:
-    to_del = [k for k, v in _SESSION_CACHE.items() if v[0] == user_id]
-    for k in to_del:
-        del _SESSION_CACHE[k]
-
-# ── SSL context (module-level — avoid re-creating per connection) ──────────────
-_pg_ssl_ctx: _ssl_mod.SSLContext | None = None
-
-def _get_ssl_ctx() -> _ssl_mod.SSLContext:
-    global _pg_ssl_ctx
-    if _pg_ssl_ctx is None:
-        ctx = _ssl_mod.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = _ssl_mod.CERT_NONE
-        _pg_ssl_ctx = ctx
-    return _pg_ssl_ctx
 
 # ── Password hashing (legacy fallback) ────────────────────────────────────────
 def hash_password(password: str) -> tuple[str, str]:
@@ -115,91 +58,136 @@ def hash_password(password: str) -> tuple[str, str]:
     h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000)
     return h.hex(), salt
 
+
 def verify_password(password: str, stored_hash: str, stored_salt: str) -> bool:
     h = hashlib.pbkdf2_hmac("sha256", password.encode(), stored_salt.encode(), 100_000)
     return secrets.compare_digest(h.hex(), stored_hash)
 
+
 # ── Supabase Auth helpers ──────────────────────────────────────────────────────
 def _supabase_headers() -> dict:
-    return {"apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json"}
+    return {
+        "apikey": SUPABASE_ANON_KEY,
+        "Content-Type": "application/json",
+    }
+
 
 async def supabase_sign_up(email: str, password: str) -> dict:
+    """
+    Register a new user via Supabase Auth.
+    Returns {"user": {...}, "access_token": "...", "error": "..."}.
+    """
     if not SUPABASE_ENABLED:
         return {"error": "Supabase not configured"}
-    r = await _get_http_client().post(
-        f"{SUPABASE_AUTH_URL}/signup",
-        headers=_supabase_headers(),
-        json={"email": email, "password": password},
-    )
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(
+            f"{SUPABASE_AUTH_URL}/signup",
+            headers=_supabase_headers(),
+            json={"email": email, "password": password},
+        )
     data = r.json()
     if r.status_code not in (200, 201):
         msg = data.get("error_description") or data.get("msg") or data.get("message") or "Sign-up failed"
         return {"error": _friendly_error(msg)}
     return data
 
+
 async def supabase_sign_in(email: str, password: str) -> dict:
+    """
+    Sign in via Supabase Auth (email + password).
+    Returns Supabase session dict or {"error": "..."}.
+    """
     if not SUPABASE_ENABLED:
         return {"error": "Supabase not configured"}
-    r = await _get_http_client().post(
-        f"{SUPABASE_AUTH_URL}/token?grant_type=password",
-        headers=_supabase_headers(),
-        json={"email": email, "password": password},
-    )
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(
+            f"{SUPABASE_AUTH_URL}/token?grant_type=password",
+            headers=_supabase_headers(),
+            json={"email": email, "password": password},
+        )
     data = r.json()
     if r.status_code != 200:
         msg = data.get("error_description") or data.get("msg") or data.get("message") or "Invalid credentials"
         return {"error": _friendly_error(msg)}
     return data
 
+
 async def supabase_reset_password(email: str) -> dict:
+    """
+    Trigger Supabase's built-in password reset email.
+    The email contains a link pointing back to APP_URL/auth/reset-confirm.
+    """
     if not SUPABASE_ENABLED:
         return {"error": "Supabase not configured"}
-    r = await _get_http_client().post(
-        f"{SUPABASE_AUTH_URL}/recover",
-        headers=_supabase_headers(),
-        json={"email": email, "redirect_to": f"{APP_URL}/auth/reset-confirm"},
-    )
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(
+            f"{SUPABASE_AUTH_URL}/recover",
+            headers=_supabase_headers(),
+            json={
+                "email": email,
+                "redirect_to": f"{APP_URL}/auth/reset-confirm",
+            },
+        )
     if r.status_code == 200:
         return {}
     data = r.json()
-    return {"error": _friendly_error(data.get("error_description") or data.get("msg") or "Reset failed")}
+    msg = data.get("error_description") or data.get("msg") or "Reset failed"
+    return {"error": _friendly_error(msg)}
+
 
 async def supabase_update_password(access_token: str, new_password: str) -> dict:
+    """Update the password for the currently authenticated Supabase user."""
     if not SUPABASE_ENABLED:
         return {"error": "Supabase not configured"}
-    r = await _get_http_client().put(
-        f"{SUPABASE_AUTH_URL}/user",
-        headers={**_supabase_headers(), "Authorization": f"Bearer {access_token}"},
-        json={"password": new_password},
-    )
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.put(
+            f"{SUPABASE_AUTH_URL}/user",
+            headers={**_supabase_headers(), "Authorization": f"Bearer {access_token}"},
+            json={"password": new_password},
+        )
     if r.status_code == 200:
         return {}
     data = r.json()
-    return {"error": _friendly_error(data.get("error_description") or data.get("msg") or "Update failed")}
+    msg = data.get("error_description") or data.get("msg") or "Update failed"
+    return {"error": _friendly_error(msg)}
+
 
 async def supabase_verify_token_hash(token_hash: str, token_type: str = "recovery") -> dict:
+    """
+    Exchange a PKCE token_hash for a session (access_token).
+    Used when Supabase sends ?token_hash= instead of #access_token= in the reset link.
+    """
     if not SUPABASE_ENABLED:
         return {"error": "Supabase not configured"}
-    r = await _get_http_client().post(
-        f"{SUPABASE_AUTH_URL}/verify",
-        headers=_supabase_headers(),
-        json={"token_hash": token_hash, "type": token_type},
-    )
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(
+            f"{SUPABASE_AUTH_URL}/verify",
+            headers=_supabase_headers(),
+            json={"token_hash": token_hash, "type": token_type},
+        )
     data = r.json()
     if r.status_code == 200:
         return data
-    return {"error": _friendly_error(data.get("error_description") or data.get("msg") or "Verification failed")}
+    msg = data.get("error_description") or data.get("msg") or "Verification failed"
+    return {"error": _friendly_error(msg)}
+
 
 async def supabase_get_user(access_token: str) -> dict | None:
+    """Fetch Supabase user record from an access token."""
     if not SUPABASE_ENABLED:
         return None
-    r = await _get_http_client().get(
-        f"{SUPABASE_AUTH_URL}/user",
-        headers={**_supabase_headers(), "Authorization": f"Bearer {access_token}"},
-    )
-    return r.json() if r.status_code == 200 else None
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(
+            f"{SUPABASE_AUTH_URL}/user",
+            headers={**_supabase_headers(), "Authorization": f"Bearer {access_token}"},
+        )
+    if r.status_code == 200:
+        return r.json()
+    return None
+
 
 def _friendly_error(msg: str) -> str:
+    """Map Supabase error strings to user-friendly messages."""
     m = msg.lower()
     if "invalid login" in m or "invalid credentials" in m or "email not confirmed" in m:
         return "Incorrect email or password. Please try again."
@@ -215,35 +203,50 @@ def _friendly_error(msg: str) -> str:
         return "This reset link has expired or already been used. Please request a new one."
     return msg
 
+
 # ── Local user sync ────────────────────────────────────────────────────────────
 async def get_or_create_user_from_supabase(
     db: AsyncSession,
     supabase_user: dict,
     display_name: str = "",
 ) -> User:
+    """
+    Given a Supabase user dict, find or create the matching local User row.
+    """
     sb_id = supabase_user.get("id", "")
     email = (supabase_user.get("email") or "").lower().strip()
     email_verified = supabase_user.get("email_confirmed_at") is not None
 
-    user = (await db.execute(select(User).where(User.supabase_id == sb_id))).scalar_one_or_none()
+    # Try by supabase_id first (most stable)
+    user = (
+        await db.execute(select(User).where(User.supabase_id == sb_id))
+    ).scalar_one_or_none()
 
     if user is None and email:
-        user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+        # Fallback: existing account with matching email (legacy migration)
+        user = (
+            await db.execute(select(User).where(User.email == email))
+        ).scalar_one_or_none()
         if user:
             user.supabase_id = sb_id
 
     if user is None:
+        # Brand-new user
         username = email.split("@")[0][:80] if email else sb_id[:80]
+        # Ensure username is unique
         base = username
         i = 1
         while (await db.execute(select(User).where(User.username == username))).scalar_one_or_none():
             username = f"{base}{i}"
             i += 1
         user = User(
-            username=username, email=email,
+            username=username,
+            email=email,
             display_name=display_name or username,
-            supabase_id=sb_id, email_verified=email_verified,
-            password_hash="", password_salt="",
+            supabase_id=sb_id,
+            email_verified=email_verified,
+            password_hash="",
+            password_salt="",
             created_at=datetime.utcnow().isoformat(),
         )
         db.add(user)
@@ -257,18 +260,29 @@ async def get_or_create_user_from_supabase(
     await db.refresh(user)
     return user
 
-# ── Raw asyncpg connection helper ─────────────────────────────────────────────
-async def _raw_pg_conn() -> asyncpg.Connection | None:
+
+# ── DB-backed session management (raw asyncpg — pgBouncer safe) ───────────────
+#
+# ALL session operations use raw asyncpg connections with statement_cache_size=0.
+# This bypasses SQLAlchemy's prepared statement layer entirely, which is the only
+# reliable way to work with Supabase's pgBouncer in Transaction Mode.
+
+async def _raw_pg_conn():
+    """Open a raw asyncpg connection. Caller must close it."""
+    import os, ssl as _ssl
     raw_dsn = os.environ.get("DATABASE_URL", "").strip().split("?")[0]
     if not raw_dsn or "postgres" not in raw_dsn:
         return None
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
     try:
-        return await asyncpg.connect(dsn=raw_dsn, ssl=_get_ssl_ctx(), statement_cache_size=0)
+        return await asyncpg.connect(dsn=raw_dsn, ssl=ctx, statement_cache_size=0)
     except Exception as e:
         logger.warning(f"raw_pg_conn failed: {e}")
         return None
 
-# ── DB-backed session management ──────────────────────────────────────────────
+
 async def create_session(
     db: AsyncSession,
     user_id: int,
@@ -292,24 +306,20 @@ async def create_session(
         finally:
             await conn.close()
     else:
-        db.add(UserSession(
-            token=token, user_id=user_id, expires_at=expires_at,
-            remember_me=remember_me, user_agent=ua, ip_address=ip,
-        ))
+        # SQLite fallback
+        session = UserSession(
+            token=token, user_id=user_id,
+            expires_at=expires_at, remember_me=remember_me,
+            user_agent=ua, ip_address=ip,
+        )
+        db.add(session)
         await db.commit()
-
-    _cache_set(token, user_id)
     return token
 
 
 async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -> int | None:
     if not token:
         return None
-
-    # Fast path: in-memory cache hit — no DB round-trip needed
-    cached = _cache_get(token)
-    if cached is not None:
-        return cached
 
     conn = await _raw_pg_conn()
     if conn:
@@ -318,13 +328,11 @@ async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -
                 "SELECT user_id FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
                 token
             )
-            if row:
-                _cache_set(token, row["user_id"])
-                return row["user_id"]
-            return None
+            return row["user_id"] if row else None
         finally:
             await conn.close()
     else:
+        # SQLite fallback
         row = (
             await db.execute(
                 select(UserSession).where(
@@ -333,16 +341,12 @@ async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -
                 )
             )
         ).scalar_one_or_none()
-        if row:
-            _cache_set(token, row.user_id)
-            return row.user_id
-        return None
+        return row.user_id if row else None
 
 
 async def destroy_session(db: AsyncSession, token: str | None):
     if not token:
         return
-    _cache_delete(token)
     conn = await _raw_pg_conn()
     if conn:
         try:
@@ -355,7 +359,7 @@ async def destroy_session(db: AsyncSession, token: str | None):
 
 
 async def destroy_all_user_sessions(db: AsyncSession, user_id: int):
-    _cache_delete_user(user_id)
+    """Log out all devices for a user."""
     conn = await _raw_pg_conn()
     if conn:
         try:
@@ -368,6 +372,7 @@ async def destroy_all_user_sessions(db: AsyncSession, user_id: int):
 
 
 async def cleanup_expired_sessions(db: AsyncSession):
+    """Delete expired session rows."""
     conn = await _raw_pg_conn()
     if conn:
         try:
@@ -386,18 +391,22 @@ async def cleanup_expired_sessions(db: AsyncSession):
         await db.commit()
         return result.rowcount
 
+
 # ── Password reset tokens (legacy fallback) ────────────────────────────────────
 async def create_reset_token(db: AsyncSession, user_id: int) -> str:
     token = secrets.token_urlsafe(48)
-    db.add(PasswordResetToken(
-        token=token, user_id=user_id,
+    row = PasswordResetToken(
+        token=token,
+        user_id=user_id,
         expires_at=datetime.utcnow() + timedelta(hours=1),
-    ))
+    )
+    db.add(row)
     await db.commit()
     return token
 
 
 async def validate_reset_token(db: AsyncSession, token: str) -> int | None:
+    """Returns user_id if valid and unused, else None."""
     row = (
         await db.execute(
             select(PasswordResetToken).where(
@@ -418,6 +427,7 @@ async def consume_reset_token(db: AsyncSession, token: str):
         row.used = True
         await db.commit()
 
+
 # ── Request helpers ────────────────────────────────────────────────────────────
 def get_session_token(request: Request) -> str | None:
     return request.cookies.get("ct_session")
@@ -428,9 +438,11 @@ async def get_current_user(request: Request, db: AsyncSession) -> User | None:
     uid = await get_user_id_from_session(db, token)
     if uid is None:
         return None
+    # Use SQLAlchemy for user lookup (only runs on authenticated pages, not every middleware check)
     return (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
 
-# ── Settings helper ───────────────────────────────────────────────────────────
+
+# ── Settings helper (unchanged) ───────────────────────────────────────────────
 from .models import Settings
 
 
@@ -441,7 +453,8 @@ async def get_or_create_settings(db: AsyncSession, user_id: int) -> Settings:
     if not s:
         s = Settings(
             user_id=user_id,
-            unit_comm_discount_le_200=190.0, unit_comm_discount_gt_200=140.0,
+            unit_comm_discount_le_200=190.0,
+            unit_comm_discount_gt_200=140.0,
             permaplate=40.0, nitro_fill=40.0, pulse=40.0,
             finance_non_subvented=40.0, warranty=25.0, tire_wheel=25.0,
             hourly_rate_ny_offset=15.0,
