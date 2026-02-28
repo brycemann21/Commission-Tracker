@@ -187,15 +187,14 @@
       </td>
 
       <td class="p-2 text-right no-label">
-        <form method="post" action="/deals/{{ d.id }}/toggle_paid" class="inline">
-          <input type="hidden" name="next" value="{{ request.url }}">
-          <button type="submit" title="{{ 'Mark Unpaid' if d.is_paid else 'Mark Paid' }}"
-                  class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap
-                  {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100
-                  {% else %}bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100{% endif %}">
-            {{ "✓ Paid" if d.is_paid else "Pay?" }}
-          </button>
-        </form>
+        <button type="button"
+          data-paid="{{ '1' if d.is_paid else '0' }}"
+          onclick="togglePaid(this, {{ d.id }})"
+          class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap
+          {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100
+          {% else %}bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100{% endif %}">
+          {{ "✓ Paid" if d.is_paid else "Pay?" }}
+        </button>
       </td>
     </tr>
     {% endfor %}
@@ -330,6 +329,28 @@
     if (!span && activeEl) cancelEdit(activeEl);
   });
 })();
+
+// Toggle paid — no page reload
+async function togglePaid(btn, dealId) {
+  btn.disabled = true; btn.style.opacity = '0.6';
+  try {
+    const res = await fetch(`/deals/${dealId}/toggle_paid`, { method: 'POST', headers: { 'Accept': 'application/json' } });
+    const data = await res.json();
+    if (!data.ok) throw 0;
+    const paid = data.is_paid;
+    btn.dataset.paid = paid ? '1' : '0';
+    btn.textContent = paid ? '✓ Paid' : 'Pay?';
+    btn.className = `text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap ${paid ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`;
+    // Also update the commission badge color in same row
+    const commBadge = btn.closest('tr')?.querySelector('[data-field="commission_override"] span');
+    if (commBadge) {
+      commBadge.className = commBadge.className.replace(/bg-emerald-50 border-emerald-200 text-emerald-800|bg-white border-slate-200 text-slate-900/g, '');
+      commBadge.classList.add(...(paid ? ['bg-emerald-50','border-emerald-200','text-emerald-800'] : ['bg-white','border-slate-200','text-slate-900']));
+    }
+  } catch {
+    btn.textContent = 'Error';
+  } finally { btn.disabled = false; btn.style.opacity = ''; }
+}
 
 // Bulk select
 const selectAll = document.getElementById('selectAll');

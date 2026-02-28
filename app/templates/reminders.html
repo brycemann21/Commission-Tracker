@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+  .reminder-card { transition: opacity 0.2s, transform 0.2s; }
+  .reminder-card.done { opacity: 0.45; }
+  .reminder-card.removing { opacity: 0; transform: translateX(30px); }
+  .priority-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .overdue  { background: #ef4444; }
+  .due-today{ background: #f59e0b; }
+  .upcoming { background: #3b82f6; }
+  .no-date  { background: #94a3b8; }
+</style>
+
+<div class="flex items-center justify-between mb-5">
+  <div>
+    <h1 class="text-xl font-bold">Reminders</h1>
+    <div class="text-xs text-slate-500">Click a reminder to edit • Check off when done</div>
+  </div>
+  <button onclick="openForm()" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+    Add Reminder
+  </button>
+</div>
+
+<!-- Reminder list -->
+<div id="reminderList" class="space-y-2">
+  {% set active = reminders | selectattr('is_done', 'equalto', false) | list %}
+  {% set done   = reminders | selectattr('is_done', 'equalto', true)  | list %}
+
+  {% if not reminders %}
+  <div class="text-center py-16 text-slate-400">
+    <svg class="w-10 h-10 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+    <div class="font-medium">No reminders yet</div>
+    <div class="text-sm mt-1">Add one to track follow-ups, titles, and tasks</div>
+  </div>
+  {% endif %}
+
+  {% for d in active %}
+  {% set is_overdue  = d.due_date and d.due_date < today %}
+  {% set is_today    = d.due_date and d.due_date == today %}
+  <div class="reminder-card bg-white rounded-lg border border-slate-200 shadow-sm flex items-start gap-3 p-3 cursor-pointer hover:border-slate-300 transition {% if is_overdue %}border-l-4 border-l-red-400{% elif is_today %}border-l-4 border-l-amber-400{% endif %}"
+       data-id="{{ d.id }}" onclick="handleCardClick(event, {{ d.id }})">
+    <button type="button" onclick="event.stopPropagation(); toggleDone({{ d.id }})"
+            class="mt-0.5 shrink-0 w-5 h-5 rounded-full border-2 {% if is_overdue %}border-red-400{% elif is_today %}border-amber-400{% else %}border-slate-300{% endif %} flex items-center justify-center hover:bg-slate-100 transition">
+    </button>
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="font-medium text-slate-900 text-sm">{{ d.title }}</span>
+        {% if d.due_date %}
+          <span class="text-[11px] px-2 py-0.5 rounded-full font-medium
+            {% if is_overdue %}bg-red-100 text-red-700
+            {% elif is_today %}bg-amber-100 text-amber-700
+            {% else %}bg-blue-100 text-blue-700{% endif %}">
+            {% if is_overdue %}Overdue · {% endif %}
+            {% if is_today %}Today{% else %}{{ d.due_date.strftime('%-m/%-d') }}{% endif %}
+          </span>
+        {% endif %}
+      </div>
+      {% if d.body %}
+        <div class="text-xs text-slate-500 mt-0.5 truncate">{{ d.body }}</div>
+      {% endif %}
+    </div>
+    <button type="button" onclick="event.stopPropagation(); deleteReminder({{ d.id }})"
+            class="shrink-0 text-slate-300 hover:text-red-500 transition p-1 rounded">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+  {% endfor %}
+
+  {% if done %}
+  <div class="pt-3 pb-1">
+    <button onclick="document.getElementById('doneSection').classList.toggle('hidden')"
+            class="text-xs font-semibold text-slate-400 hover:text-slate-600 flex items-center gap-1 transition">
+      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+      Completed ({{ done|length }})
+    </button>
+  </div>
+  <div id="doneSection" class="hidden space-y-2">
+    {% for d in done %}
+    <div class="reminder-card done bg-white rounded-lg border border-slate-200 flex items-start gap-3 p-3 cursor-pointer"
+         data-id="{{ d.id }}" onclick="handleCardClick(event, {{ d.id }})">
+      <button type="button" onclick="event.stopPropagation(); toggleDone({{ d.id }})"
+              class="mt-0.5 shrink-0 w-5 h-5 rounded-full border-2 border-emerald-400 bg-emerald-400 flex items-center justify-center hover:bg-emerald-500 transition">
+        <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+      </button>
+      <div class="flex-1 min-w-0">
+        <span class="text-sm text-slate-400 line-through">{{ d.title }}</span>
+        {% if d.body %}<div class="text-xs text-slate-400 mt-0.5 truncate">{{ d.body }}</div>{% endif %}
+      </div>
+      <button type="button" onclick="event.stopPropagation(); deleteReminder({{ d.id }})"
+              class="shrink-0 text-slate-300 hover:text-red-500 transition p-1 rounded">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- Add/Edit Modal -->
+<div id="reminderModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.45)">
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+        <h2 id="modalHeading" class="font-semibold text-lg">Add Reminder</h2>
+        <button onclick="closeForm()" class="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>
+      </div>
+      <div class="p-5 space-y-4">
+        <input type="hidden" id="remId" value="">
+        <div>
+          <label class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Title *</label>
+          <input id="remTitle" type="text" placeholder="e.g. Follow up on title for BAGLIERI"
+                 class="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900">
+        </div>
+        <div>
+          <label class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Notes</label>
+          <textarea id="remBody" rows="2" placeholder="Any extra details..."
+                    class="mt-1 w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-slate-900"></textarea>
+        </div>
+        <div>
+          <label class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Due Date</label>
+          <input id="remDue" type="date" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900">
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 px-5 pb-5">
+        <button onclick="closeForm()" class="px-4 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 transition">Cancel</button>
+        <button onclick="saveReminder()" class="px-5 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-5 right-5 z-50 hidden px-4 py-2 rounded-lg shadow-lg text-sm font-medium text-white bg-emerald-600"></div>
+
+<script>
+  // In-memory store of reminders (mirrors server state for instant UI updates)
+  const _reminders = {
+    {% for d in reminders %}
+    {{ d.id }}: {
+      id: {{ d.id }},
+      title: {{ d.title | tojson }},
+      body: {{ (d.body or '') | tojson }},
+      due_date: {{ (d.due_date.isoformat() if d.due_date else 'null') }},
+      is_done: {{ 'true' if d.is_done else 'false' }},
+    },
+    {% endfor %}
+  };
+
+  const today = '{{ today.isoformat() }}';
+
+  function toast(msg, ms=1800) {
+    const el = document.getElementById('toast');
+    el.textContent = msg; el.classList.remove('hidden');
+    clearTimeout(el._t); el._t = setTimeout(() => el.classList.add('hidden'), ms);
+  }
+
+  function openForm(id=null) {
+    document.getElementById('remId').value = id || '';
+    document.getElementById('modalHeading').textContent = id ? 'Edit Reminder' : 'Add Reminder';
+    const r = id ? _reminders[id] : null;
+    document.getElementById('remTitle').value = r ? r.title : '';
+    document.getElementById('remBody').value  = r ? (r.body || '') : '';
+    document.getElementById('remDue').value   = r ? (r.due_date || '') : '';
+    document.getElementById('reminderModal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('remTitle').focus(), 50);
+  }
+
+  function closeForm() {
+    document.getElementById('reminderModal').classList.add('hidden');
+  }
+
+  function handleCardClick(e, id) {
+    if (e.target.closest('button')) return;
+    openForm(id);
+  }
+
+  async function saveReminder() {
+    const id    = document.getElementById('remId').value;
+    const title = document.getElementById('remTitle').value.trim();
+    const body  = document.getElementById('remBody').value.trim();
+    const due   = document.getElementById('remDue').value;
+    if (!title) { document.getElementById('remTitle').focus(); return; }
+
+    const fd = new FormData();
+    if (id) fd.append('reminder_id', id);
+    fd.append('title', title); fd.append('body', body);
+    if (due) fd.append('due_date', due);
+
+    const res  = await fetch('/reminders/save', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!data.ok) { toast('Error saving', 2000); return; }
+
+    _reminders[data.id] = data;
+    closeForm();
+    toast(id ? 'Updated ✓' : 'Reminder added ✓');
+    // Re-render the card or add new one
+    renderCard(data);
+  }
+
+  function dateLabel(iso) {
+    if (!iso) return '';
+    const [y,m,d] = iso.split('-').map(Number);
+    const t = today.split('-').map(Number);
+    const isToday   = y===t[0] && m===t[1] && d===t[2];
+    const isOverdue = iso < today;
+    const disp = isToday ? 'Today' : `${m}/${d}`;
+    if (isOverdue) return `<span class="text-[11px] px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-700">Overdue · ${disp}</span>`;
+    if (isToday)   return `<span class="text-[11px] px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700">Today</span>`;
+    return `<span class="text-[11px] px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700">${disp}</span>`;
+  }
+
+  function buildCardHTML(r) {
+    const isOverdue = r.due_date && r.due_date < today;
+    const isToday   = r.due_date && r.due_date === today;
+    const borderCls = !r.is_done && isOverdue ? 'border-l-4 border-l-red-400' : (!r.is_done && isToday ? 'border-l-4 border-l-amber-400' : '');
+    const doneCls   = r.is_done ? 'done' : '';
+    const checkInner = r.is_done
+      ? `<div class="mt-0.5 shrink-0 w-5 h-5 rounded-full border-2 border-emerald-400 bg-emerald-400 flex items-center justify-center hover:bg-emerald-500 transition"><svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></div>`
+      : `<div class="mt-0.5 shrink-0 w-5 h-5 rounded-full border-2 ${isOverdue?'border-red-400':isToday?'border-amber-400':'border-slate-300'} flex items-center justify-center hover:bg-slate-100 transition"></div>`;
+    const titleEl = r.is_done
+      ? `<span class="text-sm text-slate-400 line-through">${r.title}</span>`
+      : `<span class="font-medium text-slate-900 text-sm">${r.title}</span> ${dateLabel(r.due_date)}`;
+    const bodyEl = r.body ? `<div class="text-xs text-${r.is_done?'slate-400':'slate-500'} mt-0.5 truncate">${r.body}</div>` : '';
+    return `<div class="reminder-card ${doneCls} bg-white rounded-lg border border-slate-200 shadow-sm flex items-start gap-3 p-3 cursor-pointer hover:border-slate-300 transition ${borderCls}"
+         data-id="${r.id}" onclick="handleCardClick(event,${r.id})">
+      <button type="button" onclick="event.stopPropagation();toggleDone(${r.id})" class="shrink-0">${checkInner}</button>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">${titleEl}</div>${bodyEl}
+      </div>
+      <button type="button" onclick="event.stopPropagation();deleteReminder(${r.id})" class="shrink-0 text-slate-300 hover:text-red-500 transition p-1 rounded">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>`;
+  }
+
+  function renderCard(r) {
+    const list = document.getElementById('reminderList');
+    const existing = list.querySelector(`[data-id="${r.id}"]`);
+    const newHTML = buildCardHTML(r);
+    if (existing) {
+      existing.outerHTML = newHTML;
+    } else {
+      // Prepend to active section (before the "Completed" divider if present)
+      const doneDiv = list.querySelector('.pt-3.pb-1');
+      if (doneDiv) {
+        doneDiv.insertAdjacentHTML('beforebegin', newHTML);
+      } else {
+        // Remove empty state if present
+        const empty = list.querySelector('.text-center');
+        if (empty) empty.remove();
+        list.insertAdjacentHTML('afterbegin', newHTML);
+      }
+    }
+  }
+
+  async function toggleDone(id) {
+    const res  = await fetch(`/reminders/${id}/toggle`, { method: 'POST', headers: { 'Accept': 'application/json' } });
+    const data = await res.json();
+    if (!data.ok) return;
+    _reminders[id].is_done = data.is_done;
+    renderCard(_reminders[id]);
+    toast(data.is_done ? 'Marked done ✓' : 'Reopened');
+  }
+
+  async function deleteReminder(id) {
+    const card = document.querySelector(`[data-id="${id}"]`);
+    if (card) { card.classList.add('removing'); }
+    await fetch(`/reminders/${id}/delete`, { method: 'POST' });
+    delete _reminders[id];
+    setTimeout(() => card?.remove(), 220);
+  }
+
+  // Close modal on backdrop click or Escape
+  document.getElementById('reminderModal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeForm();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeForm();
+    if (e.key === 'Enter' && !document.getElementById('reminderModal').classList.contains('hidden')) {
+      if (document.activeElement?.tagName !== 'TEXTAREA') saveReminder();
+    }
+  });
+</script>
+
+{% endblock %}

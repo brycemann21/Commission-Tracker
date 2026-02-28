@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy.pool import NullPool
 from sqlalchemy import select, func, or_, and_
 
-from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken
+from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder
 from .schemas import DealIn
 from .payplan import calc_commission
 from .utils import parse_date, today
@@ -367,6 +367,22 @@ async def startup():
                 await conn.execute(f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} {typ} DEFAULT {dflt}")
             except Exception:
                 pass
+
+        # Create reminders table
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS reminders (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    title VARCHAR(200) NOT NULL,
+                    body TEXT DEFAULT '',
+                    due_date DATE,
+                    is_done BOOLEAN DEFAULT false,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+        except Exception:
+            pass
     finally:
         # Clean up expired sessions via raw asyncpg (avoids pgBouncer prepared stmt issue)
         try:
@@ -952,6 +968,9 @@ async def dashboard(
         "proj_bonus_total": proj_bonus, "bonus_uplift": proj_bonus - bonus_total,
         "pending_in_month_count": len(pend_month),
         "goals": goals, "milestones": milestones, "todays_deliveries": todays,
+        "overdue_reminders": (await db.execute(
+            select(func.count()).where(Reminder.user_id == user_id, Reminder.is_done == False, Reminder.due_date < today())
+        )).scalar() or 0,
     })
     resp.set_cookie("ct_year", str(sel_y), httponly=False, samesite="lax")
     resp.set_cookie("ct_month", str(sel_m), httponly=False, samesite="lax")
@@ -1127,10 +1146,13 @@ async def deal_save(
 
 @app.post("/deals/{deal_id}/toggle_paid")
 async def toggle_paid(deal_id: int, request: Request, next: str | None = Form(None), db: AsyncSession = Depends(get_db)):
+    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
     deal.is_paid = not deal.is_paid
     if deal.is_paid and not deal.pay_date: deal.pay_date = today()
     await db.commit()
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True, "is_paid": deal.is_paid})
     return RedirectResponse(url=(next or "/deals"), status_code=303)
 
 
@@ -1183,16 +1205,22 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
 
 @app.post("/deals/{deal_id}/mark_delivered")
 async def mark_delivered(deal_id: int, request: Request, redirect: str | None = Form(None), month: str | None = Form(None), db: AsyncSession = Depends(get_db)):
+    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
     deal.status = "Delivered"; deal.delivered_date = today()
     await db.commit()
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True, "status": "Delivered", "delivered_date": deal.delivered_date.isoformat()})
     return RedirectResponse(url=(redirect or (f"/?month={month}" if month else "/")), status_code=303)
 
 @app.post("/deals/{deal_id}/mark_dead")
 async def mark_dead(deal_id: int, request: Request, redirect: str | None = Form(None), month: str | None = Form(None), db: AsyncSession = Depends(get_db)):
+    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one()
     deal.status = "Dead"
     await db.commit()
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True, "status": "Dead"})
     return RedirectResponse(url=(redirect or (f"/?month={month}" if month else "/")), status_code=303)
 
 # Backwards compat aliases
@@ -1753,6 +1781,59 @@ async def bulk_delete_deals(
     await db.commit()
     return RedirectResponse(url=redirect_url, status_code=303)
 
+
+# ════════════════════════════════════════════════
+# REMINDERS
+# ════════════════════════════════════════════════
+
+@app.get("/reminders", response_class=HTMLResponse)
+async def reminders_page(request: Request, db: AsyncSession = Depends(get_db)):
+    user_id = uid(request)
+    reminders = (await db.execute(
+        select(Reminder).where(Reminder.user_id == user_id).order_by(Reminder.is_done, Reminder.due_date.nulls_last(), Reminder.created_at.desc())
+    )).scalars().all()
+    return templates.TemplateResponse("reminders.html", {"request": request, "reminders": reminders, "today": today()})
+
+@app.post("/reminders/save")
+async def reminder_save(
+    request: Request,
+    reminder_id: int | None = Form(None),
+    title: str = Form(""),
+    body: str = Form(""),
+    due_date: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+):
+    from fastapi.responses import JSONResponse
+    user_id = uid(request)
+    due = parse_date(due_date) if due_date else None
+    if reminder_id:
+        r = (await db.execute(select(Reminder).where(Reminder.id == reminder_id, Reminder.user_id == user_id))).scalar_one_or_none()
+        if r:
+            r.title = title.strip(); r.body = body.strip(); r.due_date = due
+    else:
+        r = Reminder(user_id=user_id, title=title.strip(), body=body.strip(), due_date=due)
+        db.add(r)
+    await db.commit()
+    await db.refresh(r)
+    return JSONResponse({"ok": True, "id": r.id, "title": r.title, "body": r.body,
+                         "due_date": r.due_date.isoformat() if r.due_date else None,
+                         "is_done": r.is_done})
+
+@app.post("/reminders/{reminder_id}/toggle")
+async def reminder_toggle(reminder_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    from fastapi.responses import JSONResponse
+    r = (await db.execute(select(Reminder).where(Reminder.id == reminder_id, Reminder.user_id == uid(request)))).scalar_one_or_none()
+    if not r: return JSONResponse({"ok": False}, status_code=404)
+    r.is_done = not r.is_done
+    await db.commit()
+    return JSONResponse({"ok": True, "is_done": r.is_done})
+
+@app.post("/reminders/{reminder_id}/delete")
+async def reminder_delete(reminder_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    from fastapi.responses import JSONResponse
+    r = (await db.execute(select(Reminder).where(Reminder.id == reminder_id, Reminder.user_id == uid(request)))).scalar_one_or_none()
+    if r: await db.delete(r); await db.commit()
+    return JSONResponse({"ok": True})
 
 # ════════════════════════════════════════════════
 # PAY PLAN

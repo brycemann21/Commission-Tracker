@@ -328,14 +328,12 @@
                     data-value="{{ (d.notes or '')|e }}" title="{{ d.notes or '' }}">{{ d.notes or '—' }}</span>
             </td>
             <td class="p-2 text-right whitespace-nowrap">
-              <form method="post" action="/deals/{{ d.id }}/mark_delivered" class="inline">
-                <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
-                <button class="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded text-xs font-medium transition" type="submit">Delivered</button>
-              </form>
-              <form method="post" action="/deals/{{ d.id }}/mark_dead" class="inline ml-1">
-                <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
-                <button class="bg-rose-600 hover:bg-rose-700 text-white px-2.5 py-1 rounded text-xs font-medium transition" type="submit">Dead</button>
-              </form>
+              <button type="button"
+                onclick="quickAction(this, '/deals/{{ d.id }}/mark_delivered')"
+                class="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded text-xs font-medium transition">Delivered</button>
+              <button type="button"
+                onclick="quickAction(this, '/deals/{{ d.id }}/mark_dead')"
+                class="bg-rose-600 hover:bg-rose-700 text-white px-2.5 py-1 rounded text-xs font-medium transition ml-1">Dead</button>
             </td>
           </tr>
         {% endfor %}
@@ -488,14 +486,12 @@
                     <td class="p-2">{{ d.notes or "" }}</td>
                     <td class="p-2 text-right whitespace-nowrap">
                       <a class="text-blue-600 hover:underline mr-2 text-xs" href="/deals/{{ d.id }}/edit">Edit</a>
-                      <form method="post" action="/deals/{{ d.id }}/mark_delivered" class="inline">
-                        <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
-                        <button class="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded text-xs font-medium" type="submit">Delivered</button>
-                      </form>
-                      <form method="post" action="/deals/{{ d.id }}/mark_dead" class="inline ml-1">
-                        <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
-                        <button class="bg-rose-600 hover:bg-rose-700 text-white px-2.5 py-1 rounded text-xs font-medium" type="submit">Dead</button>
-                      </form>
+                      <button type="button"
+                        onclick="quickAction(this, '/deals/{{ d.id }}/mark_delivered')"
+                        class="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded text-xs font-medium">Delivered</button>
+                      <button type="button"
+                        onclick="quickAction(this, '/deals/{{ d.id }}/mark_dead')"
+                        class="bg-rose-600 hover:bg-rose-700 text-white px-2.5 py-1 rounded text-xs font-medium ml-1">Dead</button>
                     </td>
                   </tr>
                 {% endfor %}
@@ -568,6 +564,37 @@
 
 {# ═══════ SCRIPTS ═══════ #}
 <script>
+  // ── Quick fetch actions (no page reload) ──
+  async function quickAction(btn, url) {
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+    try {
+      const res = await fetch(url, { method: 'POST', headers: { 'Accept': 'application/json' } });
+      const data = await res.json();
+      if (!data.ok) throw new Error();
+      // Remove the row from the pending table instantly
+      const row = btn.closest('tr');
+      if (row) {
+        row.style.transition = 'opacity 0.25s';
+        row.style.opacity = '0';
+        setTimeout(() => {
+          row.remove();
+          // Update the pending count badge
+          const badge = document.querySelector('h2 .text-slate-500');
+          if (badge) {
+            const cur = parseInt(badge.textContent.replace(/\D/g,'')) || 0;
+            badge.textContent = `(${Math.max(0, cur - 1)})`;
+          }
+        }, 250);
+      }
+    } catch {
+      btn.disabled = false;
+      btn.style.opacity = '';
+      btn.textContent = 'Error – retry';
+      btn.classList.add('bg-red-100', 'text-red-700');
+    }
+  }
+
   // ── Inline edit for pending deals ──
   (function() {
     let active = null;
