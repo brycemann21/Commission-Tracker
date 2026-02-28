@@ -6,8 +6,12 @@
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
   <meta name="theme-color" content="#ffffff"/>
+  <!-- Resource hints: resolve CDN DNS before the browser needs the file -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
   <title>{{ title or "Commission Tracker" }}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Production Tailwind (minified, ~15KB vs ~350KB dev bundle) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
   <style>
     @media(max-width:640px){.nav-links{display:none}.nav-links.open{display:flex;flex-direction:column;position:absolute;top:100%;left:0;right:0;background:white;border-bottom:1px solid #e2e8f0;padding:8px 16px 12px;gap:4px;z-index:50;box-shadow:0 4px 6px -1px rgb(0 0 0/.1)}.nav-links.open a,.nav-links.open button{padding:10px 12px}.hamburger{display:flex!important}}
     @media(pointer:coarse){button,a,input[type="checkbox"],select{min-height:44px}.touch-row td{padding-top:12px;padding-bottom:12px}}
