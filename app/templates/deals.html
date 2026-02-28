@@ -46,6 +46,28 @@
     <div class="text-xs text-slate-500">{{ selected_month }}/{{ selected_year }} · Shows deals sold <em>or</em> delivered this month · <span class="text-violet-600 font-medium">↪ carry</span> = sold prior month, delivered this month · Click any cell to edit inline</div>
   </div>
   <form class="md:ml-auto flex flex-wrap gap-2" method="get" action="/deals">
+    <!-- Month navigator -->
+    <div class="flex items-center gap-1 border rounded bg-white">
+      <button type="submit" name="_nav" value="prev"
+              formaction="/deals"
+              class="px-2 py-2 text-slate-500 hover:bg-slate-100 rounded-l transition text-sm">‹</button>
+      <select name="month" onchange="this.form.submit()"
+              class="border-0 px-1 py-2 text-sm bg-transparent focus:outline-none">
+        {% for mo in range(1,13) %}
+          <option value="{{ mo }}" {% if mo == selected_month %}selected{% endif %}>
+            {{ ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][mo] }}
+          </option>
+        {% endfor %}
+      </select>
+      <select name="year" onchange="this.form.submit()"
+              class="border-0 px-1 py-2 text-sm bg-transparent focus:outline-none">
+        {% for yr in range(selected_year - 2, selected_year + 2) %}
+          <option value="{{ yr }}" {% if yr == selected_year %}selected{% endif %}>{{ yr }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" name="_nav" value="next"
+              class="px-2 py-2 text-slate-500 hover:bg-slate-100 rounded-r transition text-sm">›</button>
+    </div>
     <input class="border rounded px-3 py-2 text-sm flex-1 min-w-[150px]" name="q" value="{{ q }}" placeholder="Search customer / stock / model" />
     <select class="border rounded px-3 py-2 text-sm" name="status">
       {% for s in ["All","Pending","Scheduled","Delivered","Dead"] %}

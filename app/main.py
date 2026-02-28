@@ -383,6 +383,20 @@ async def startup():
             """)
         except Exception:
             pass
+
+        # Fix goals unique constraint — ensure it includes user_id
+        # Old constraint was on (year, month) only which breaks multi-user
+        try:
+            await conn.execute("ALTER TABLE goals DROP CONSTRAINT IF EXISTS goals_year_month_unique")
+        except Exception:
+            pass
+        try:
+            await conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS goals_user_year_month_idx
+                ON goals(user_id, year, month)
+            """)
+        except Exception:
+            pass
     finally:
         # Clean up expired sessions via raw asyncpg (avoids pgBouncer prepared stmt issue)
         try:
@@ -423,6 +437,16 @@ def month_bounds(d: date):
     start = date(d.year, d.month, 1)
     end = date(d.year + 1, 1, 1) if d.month == 12 else date(d.year, d.month + 1, 1)
     return start, end
+
+async def get_overdue_reminders(db: AsyncSession, user_id: int) -> int:
+    """Returns count of overdue reminders for nav badge — used on all pages."""
+    try:
+        result = await db.execute(
+            select(func.count()).where(Reminder.user_id == user_id, Reminder.is_done == False, Reminder.due_date < today())
+        )
+        return result.scalar() or 0
+    except Exception:
+        return 0
 
 def quarter_bounds(d: date):
     q = ((d.month - 1) // 3) * 3 + 1
@@ -988,13 +1012,13 @@ async def goals_save(request: Request, unit_goal: int = Form(20), commission_goa
     except: y = td.year
     try: m = int(request.cookies.get("ct_month") or td.month)
     except: m = td.month
-    # Use upsert to handle the unique constraint on (year, month) safely
+    # Use upsert to handle the unique constraint on (user_id, year, month) safely
     from sqlalchemy import text
     await db.execute(text("""
         INSERT INTO goals (user_id, year, month, unit_goal, commission_goal)
         VALUES (:uid, :y, :m, :u, :c)
-        ON CONFLICT (year, month)
-        DO UPDATE SET user_id=:uid, unit_goal=:u, commission_goal=:c
+        ON CONFLICT (user_id, year, month)
+        DO UPDATE SET unit_goal=:u, commission_goal=:c
     """), {"uid": user_id, "y": y, "m": m, "u": unit_goal, "c": commission_goal})
     await db.commit()
     return RedirectResponse(url=f"/?year={y}&month={m}", status_code=303)
@@ -1004,14 +1028,28 @@ async def goals_save(request: Request, unit_goal: int = Form(20), commission_goa
 # DEALS LIST
 # ════════════════════════════════════════════════
 @app.get("/deals", response_class=HTMLResponse)
-async def deals_list(request: Request, q: str | None = None, status: str | None = None, paid: str | None = None, db: AsyncSession = Depends(get_db)):
+async def deals_list(
+    request: Request,
+    q: str | None = None, status: str | None = None, paid: str | None = None,
+    month: int | None = None, year: int | None = None, _nav: str | None = None,
+    db: AsyncSession = Depends(get_db)
+):
     user_id = uid(request)
     td = today()
-    try: y = int(request.cookies.get("ct_year") or td.year)
+    # Start from query params, fall back to cookies, fall back to today
+    try: y = year or int(request.cookies.get("ct_year") or td.year)
     except: y = td.year
-    try: m = int(request.cookies.get("ct_month") or td.month)
+    try: m = month or int(request.cookies.get("ct_month") or td.month)
     except: m = td.month
-    start_sel, end_sel = month_bounds(date(y, max(1,min(12,m)), 1))
+    # Handle prev/next navigation
+    if _nav == "prev":
+        m -= 1
+        if m < 1: m = 12; y -= 1
+    elif _nav == "next":
+        m += 1
+        if m > 12: m = 1; y += 1
+    m = max(1, min(12, m))
+    start_sel, end_sel = month_bounds(date(y, m, 1))
 
     stmt = select(Deal).where(Deal.user_id == user_id).order_by(Deal.sold_date.asc().nullslast(), Deal.id.asc())
     carry = ["inbound", "fo"]
@@ -1033,10 +1071,14 @@ async def deals_list(request: Request, q: str | None = None, status: str | None 
 
     deals = (await db.execute(stmt)).scalars().all()
     user = await _user(request, db)
-    return templates.TemplateResponse("deals.html", {
+    resp = templates.TemplateResponse("deals.html", {
         "request": request, "user": user, "deals": deals, "q": q or "", "status": status or "All", "paid": paid or "All",
         "selected_year": y, "selected_month": m,
+        "overdue_reminders": await get_overdue_reminders(db, user_id),
     })
+    resp.set_cookie("ct_year", str(y), httponly=False, samesite="lax")
+    resp.set_cookie("ct_month", str(m), httponly=False, samesite="lax")
+    return resp
 
 
 # ════════════════════════════════════════════════
@@ -1053,6 +1095,7 @@ async def deal_new(request: Request, db: AsyncSession = Depends(get_db)):
     return templates.TemplateResponse("deal_form.html", {
         "request": request, "user": user, "deal": None, "settings": settings,
         "next_url": request.query_params.get("next") or "",
+        "overdue_reminders": await get_overdue_reminders(db, user_id),
         "mtd": {"units": u, "comm": c, "avg": c/u if u else 0, "month_label": today().strftime("%B %Y")},
     })
 
@@ -1070,6 +1113,7 @@ async def deal_edit(deal_id: int, request: Request, db: AsyncSession = Depends(g
     return templates.TemplateResponse("deal_form.html", {
         "request": request, "user": user, "deal": deal, "settings": settings, "embed": embed,
         "next_url": request.query_params.get("next") or "",
+        "overdue_reminders": await get_overdue_reminders(db, user_id),
         "mtd": {"units": u, "comm": c, "avg": c/u if u else 0, "month_label": today().strftime("%B %Y")},
     })
 
@@ -1265,7 +1309,7 @@ async def delivery_board(request: Request, db: AsyncSession = Depends(get_db)):
         .order_by(Deal.delivered_date.desc())
     )).scalars().all()
     user = await _user(request, db)
-    return templates.TemplateResponse("delivery_board.html", {"request": request, "user": user, "prep": prep, "ready": ready, "delivered": delivered, "total": len(prep)+len(ready)})
+    return templates.TemplateResponse("delivery_board.html", {"request": request, "user": user, "prep": prep, "ready": ready, "delivered": delivered, "total": len(prep)+len(ready), "overdue_reminders": await get_overdue_reminders(db, uid(request))})
 
 @app.post("/delivery/{deal_id}/toggle")
 async def delivery_toggle(deal_id: int, request: Request, field: str = Form(...), db: AsyncSession = Depends(get_db)):
@@ -1800,7 +1844,7 @@ async def reminders_page(request: Request, db: AsyncSession = Depends(get_db)):
     reminders = (await db.execute(
         select(Reminder).where(Reminder.user_id == user_id).order_by(Reminder.is_done, Reminder.due_date.nulls_last(), Reminder.created_at.desc())
     )).scalars().all()
-    return templates.TemplateResponse("reminders.html", {"request": request, "reminders": reminders, "today": today()})
+    return templates.TemplateResponse("reminders.html", {"request": request, "reminders": reminders, "today": today(), "overdue_reminders": await get_overdue_reminders(db, uid(request))})
 
 @app.post("/reminders/save")
 async def reminder_save(
@@ -1850,7 +1894,7 @@ async def reminder_delete(reminder_id: int, request: Request, db: AsyncSession =
 async def payplan_get(request: Request, db: AsyncSession = Depends(get_db)):
     s = await get_or_create_settings(db, uid(request))
     user = await _user(request, db)
-    return templates.TemplateResponse("payplan.html", {"request": request, "user": user, "s": s})
+    return templates.TemplateResponse("payplan.html", {"request": request, "user": user, "s": s, "overdue_reminders": await get_overdue_reminders(db, uid(request))})
 
 @app.post("/payplan")
 async def payplan_post(
