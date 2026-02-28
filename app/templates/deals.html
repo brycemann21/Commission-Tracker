@@ -31,18 +31,12 @@
   @keyframes flash-green { 0%,100% { background: transparent; } 50% { background: #dcfce7; } }
   @keyframes flash-red   { 0%,100% { background: transparent; } 50% { background: #fee2e2; } }
 
+  /* Keep table layout on all screen sizes — horizontal scroll on mobile */
+  .deals-table { table-layout: auto; }
   @media (max-width: 767px) {
-    .deals-table thead { display: none; }
-    .deals-table, .deals-table tbody, .deals-table tr, .deals-table td { display: block; width: 100%; box-sizing: border-box; }
-    .deals-table tr { border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 10px; padding: 8px 10px; background: #fff; position: relative; }
-    .deals-table td { padding: 2px 4px; border: none; font-size: 0.82rem; }
-    .deals-table td[data-label]::before {
-      content: attr(data-label) ": ";
-      font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
-      color: #94a3b8; margin-right: 4px;
-    }
-    .deals-table td.no-label::before { display: none; }
-    .deals-table .checkbox-cell { position: absolute; top: 10px; right: 10px; width: auto; }
+    .deals-table { font-size: 0.72rem; }
+    .deals-table th, .deals-table td { padding: 4px 5px; }
+    .deals-table .editable { padding: 1px 2px; }
   }
 </style>
 
