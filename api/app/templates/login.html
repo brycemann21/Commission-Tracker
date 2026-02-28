@@ -170,19 +170,33 @@
 
       <!-- ── RESET PASSWORD CONFIRM ── -->
       {% elif mode == "reset_confirm" %}
-      {# Supabase puts the access_token in the URL fragment (#access_token=...).
-         This script extracts it and populates the hidden field. #}
+      {# Supabase sends the token in the URL fragment (#access_token=...) for legacy flow
+         or as a query param for PKCE. This script handles both. #}
       <script>
         window.addEventListener("DOMContentLoaded", function () {
+          // Try fragment first (legacy Supabase flow)
           const hash = window.location.hash.substring(1);
-          const params = new URLSearchParams(hash);
-          const at = params.get("access_token") || "{{ access_token | default('') }}";
+          const hashParams = new URLSearchParams(hash);
+          const fromHash = hashParams.get("access_token");
+
+          // Then try query string (PKCE flow / some Supabase versions)
+          const searchParams = new URLSearchParams(window.location.search);
+          const fromQuery = searchParams.get("access_token");
+
+          // Use server-provided value as final fallback
+          const serverValue = "{{ access_token | default('') }}";
+
+          const at = fromHash || fromQuery || serverValue;
           const field = document.getElementById("access_token_field");
           if (field && at) field.value = at;
+
+          // If we still have nothing and there is a token_hash, that is fine —
+          // the server will use it directly via the token_hash field.
         });
       </script>
       <form method="POST" action="/auth/reset-confirm" class="space-y-4">
         <input type="hidden" name="access_token" id="access_token_field" value="{{ access_token | default('') }}"/>
+        <input type="hidden" name="token_hash" value="{{ token_hash | default('') }}"/>
         <input type="hidden" name="token" value="{{ token | default('') }}"/>
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">New Password</label>

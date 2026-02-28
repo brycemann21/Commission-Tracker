@@ -151,6 +151,26 @@ async def supabase_update_password(access_token: str, new_password: str) -> dict
     return {"error": _friendly_error(msg)}
 
 
+async def supabase_verify_token_hash(token_hash: str, token_type: str = "recovery") -> dict:
+    """
+    Exchange a PKCE token_hash for a session (access_token).
+    Used when Supabase sends ?token_hash= instead of #access_token= in the reset link.
+    """
+    if not SUPABASE_ENABLED:
+        return {"error": "Supabase not configured"}
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(
+            f"{SUPABASE_AUTH_URL}/verify",
+            headers=_supabase_headers(),
+            json={"token_hash": token_hash, "type": token_type},
+        )
+    data = r.json()
+    if r.status_code == 200:
+        return data
+    msg = data.get("error_description") or data.get("msg") or "Verification failed"
+    return {"error": _friendly_error(msg)}
+
+
 async def supabase_get_user(access_token: str) -> dict | None:
     """Fetch Supabase user record from an access token."""
     if not SUPABASE_ENABLED:

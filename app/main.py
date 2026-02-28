@@ -28,7 +28,7 @@ from .auth import (
     # Supabase Auth
     SUPABASE_ENABLED,
     supabase_sign_up, supabase_sign_in,
-    supabase_reset_password, supabase_update_password, supabase_get_user,
+    supabase_reset_password, supabase_update_password, supabase_verify_token_hash, supabase_get_user,
     get_or_create_user_from_supabase,
     # Session management (DB-backed)
     create_session, get_user_id_from_session, destroy_session,
@@ -141,7 +141,10 @@ async def auth_middleware(request: Request, call_next):
         return RedirectResponse(url=f"/login?next={dest}", status_code=303)
 
     request.state.user_id = uid_val
-    return await call_next(request)
+    response = await call_next(request)
+    # Piggyback probabilistic session cleanup (Vercel serverless-safe)
+    asyncio.create_task(maybe_cleanup_sessions())
+    return response
 
 
 def uid(request: Request) -> int:
@@ -370,24 +373,28 @@ async def startup():
 
 
 import asyncio
+import random
 
-@app.on_event("startup")
-async def start_session_cleanup_task():
-    """Run session cleanup every 6 hours via raw asyncpg."""
-    async def _loop():
-        while True:
-            await asyncio.sleep(6 * 3600)
-            try:
-                raw_dsn = DATABASE_URL.strip().split("?")[0]
-                c = await _asyncpg.connect(dsn=raw_dsn, ssl=_ssl_ctx, statement_cache_size=0)
-                try:
-                    await c.execute("DELETE FROM user_sessions WHERE expires_at <= NOW()")
-                    await c.execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
-                finally:
-                    await c.close()
-            except Exception as e:
-                logger.warning(f"Session cleanup error: {e}")
-    asyncio.create_task(_loop())
+# Vercel is serverless — no persistent background tasks.
+# Instead, we piggyback cleanup on ~1% of incoming requests.
+_cleanup_counter = 0
+
+async def maybe_cleanup_sessions():
+    """Probabilistic cleanup: runs on roughly 1 in 100 requests."""
+    if not _is_pg:
+        return
+    if random.randint(1, 100) != 1:
+        return
+    try:
+        raw_dsn = DATABASE_URL.strip().split("?")[0]
+        c = await _asyncpg.connect(dsn=raw_dsn, ssl=_ssl_ctx, statement_cache_size=0)
+        try:
+            await c.execute("DELETE FROM user_sessions WHERE expires_at <= NOW()")
+            await c.execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
+        finally:
+            await c.close()
+    except Exception as e:
+        logger.warning(f"Session cleanup error: {e}")
 
 
 # ─── Utility functions ───
@@ -661,20 +668,37 @@ async def forgot_password_post(
 
 # ── Reset Password Confirm (Supabase callback + legacy token) ──────────────────
 @app.get("/auth/reset-confirm", response_class=HTMLResponse)
-async def reset_confirm_page(request: Request, access_token: str = "", error: str = ""):
+async def reset_confirm_page(
+    request: Request,
+    access_token: str = "",
+    token_hash: str = "",
+    type: str = "",
+    error: str = "",
+    error_description: str = "",
+):
     """
     Supabase redirects here after the user clicks the reset link in their email.
-    The access_token is appended as a query parameter by Supabase.
+    Handles both legacy (#access_token fragment) and PKCE (?token_hash=) flows.
+    Also handles Supabase error redirects (?error=...&error_description=...).
     """
-    if not access_token:
-        # Check URL fragment (#access_token=...) — handled client-side in JS below
-        pass
+    # Surface Supabase errors (e.g. expired link)
+    if error:
+        friendly = error_description or "This reset link is invalid or has expired. Please request a new one."
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": friendly,
+            "success": "",
+            "mode": "forgot",
+            "supabase_enabled": SUPABASE_ENABLED,
+            "next": "/",
+        })
     return templates.TemplateResponse("login.html", {
         "request": request,
-        "error": error,
+        "error": "",
         "success": "",
         "mode": "reset_confirm",
         "access_token": access_token,
+        "token_hash": token_hash,
         "supabase_enabled": SUPABASE_ENABLED,
         "next": "/",
     })
@@ -685,6 +709,7 @@ async def reset_confirm_post(
     request: Request,
     db: AsyncSession = Depends(get_db),
     access_token: str = Form(""),
+    token_hash: str = Form(""),
     token: str = Form(""),
     password: str = Form(...),
     password2: str = Form(...),
@@ -692,12 +717,20 @@ async def reset_confirm_post(
     error_ctx = {
         "request": request, "mode": "reset_confirm", "success": "",
         "supabase_enabled": SUPABASE_ENABLED, "next": "/",
-        "access_token": access_token,
+        "access_token": access_token, "token_hash": token_hash,
     }
     if password != password2:
         return templates.TemplateResponse("login.html", {**error_ctx, "error": "Passwords don't match."})
     if len(password) < 6:
         return templates.TemplateResponse("login.html", {**error_ctx, "error": "Password must be at least 6 characters."})
+
+    # PKCE flow: exchange token_hash for access_token first
+    if SUPABASE_ENABLED and token_hash and not access_token:
+        verify = await supabase_verify_token_hash(token_hash)
+        if "error" in verify:
+            return templates.TemplateResponse("login.html", {**error_ctx, "error": verify["error"]})
+        access_token = (verify.get("access_token") or
+                        (verify.get("session") or {}).get("access_token", ""))
 
     if SUPABASE_ENABLED and access_token:
         result = await supabase_update_password(access_token, password)
