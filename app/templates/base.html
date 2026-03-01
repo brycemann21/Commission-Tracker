@@ -18,7 +18,7 @@
   <!-- For maximum performance, compile with: npx tailwindcss -i input.css -o static/tw.css --minify -->
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <style>
-    @media(max-width:640px){.nav-links{display:none}.nav-links.open{display:flex;flex-direction:column;position:absolute;top:100%;left:0;right:0;background:white;border-bottom:1px solid #e2e8f0;padding:8px 16px 12px;gap:4px;z-index:50;box-shadow:0 4px 6px -1px rgb(0 0 0/.1)}.nav-links.open a,.nav-links.open button{padding:10px 12px}.hamburger{display:flex!important}}
+    @media(max-width:900px){.nav-links{display:none}.nav-links.open{display:flex;flex-direction:column;position:absolute;top:100%;left:0;right:0;background:white;border-bottom:1px solid #e2e8f0;padding:8px 16px 12px;gap:4px;z-index:50;box-shadow:0 4px 6px -1px rgb(0 0 0/.1)}.nav-links.open a,.nav-links.open button{padding:10px 12px}.hamburger{display:flex!important}}
     @media(pointer:coarse){button,a,input[type="checkbox"],select{min-height:44px}.touch-row td{padding-top:12px;padding-bottom:12px}}
     kbd{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 6px;border-radius:5px;background:#f1f5f9;border:1px solid #e2e8f0;font-family:ui-monospace,monospace;font-size:12px;font-weight:600;color:#334155}
   </style>
@@ -38,7 +38,7 @@
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
 
-      <div id="navLinks" class="nav-links flex items-center gap-1 ml-auto">
+      <div id="navLinks" class="nav-links flex flex-wrap items-center gap-1 ml-auto">
         <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path=='/' else 'text-slate-600 hover:bg-slate-100' }}" href="/">Dashboard</a>
         <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/deals') else 'text-slate-600 hover:bg-slate-100' }}" href="/deals">Sales Entry</a>
         <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/delivery') else 'text-slate-600 hover:bg-slate-100' }}" href="/delivery">Delivery Board</a>
