@@ -524,43 +524,103 @@ async def get_or_create_settings(db: AsyncSession, user_id: int, dealership_id: 
     
     Settings are per-dealership (the pay plan is set by the dealer, not individual salespeople).
     The user_id fallback handles pre-migration data where settings were per-user.
+    Also deduplicates: if multiple settings rows exist for the same dealership, keeps the
+    one with actual data and deletes the empty/default ones.
     """
+    all_candidates = []
+
     # Primary: look up by dealership_id
     if dealership_id:
-        s = (
-            await db.execute(select(Settings).where(Settings.dealership_id == dealership_id).limit(1))
-        ).scalar_one_or_none()
-        if s:
-            return s
+        rows = (
+            await db.execute(select(Settings).where(Settings.dealership_id == dealership_id))
+        ).scalars().all()
+        all_candidates.extend(rows)
 
-    # Fallback: look up by user_id (pre-migration data)
-    s = (
-        await db.execute(select(Settings).where(Settings.user_id == user_id).limit(1))
-    ).scalar_one_or_none()
-    if s:
+    # Also look up by user_id (pre-migration data may exist under user_id only)
+    user_rows = (
+        await db.execute(select(Settings).where(Settings.user_id == user_id))
+    ).scalars().all()
+    # Add any that aren't already in the list (by id)
+    existing_ids = {s.id for s in all_candidates}
+    for r in user_rows:
+        if r.id not in existing_ids:
+            all_candidates.append(r)
+
+    if not all_candidates:
+        # Create new settings for this dealership
+        s = Settings(
+            user_id=user_id,
+            dealership_id=dealership_id,
+            unit_comm_discount_le_200=190.0, unit_comm_discount_gt_200=140.0,
+            permaplate=40.0, nitro_fill=40.0, pulse=40.0,
+            finance_non_subvented=40.0, warranty=25.0, tire_wheel=25.0,
+            hourly_rate_ny_offset=15.0,
+            new_volume_bonus_15_16=1000.0, new_volume_bonus_17_18=1200.0,
+            new_volume_bonus_19_20=1500.0, new_volume_bonus_21_24=2000.0,
+            new_volume_bonus_25_plus=2800.0,
+            used_volume_bonus_8_10=350.0, used_volume_bonus_11_12=500.0,
+            used_volume_bonus_13_plus=1000.0,
+            spot_bonus_5_9=50.0, spot_bonus_10_12=80.0, spot_bonus_13_plus=100.0,
+            quarterly_bonus_threshold_units=60, quarterly_bonus_amount=1200.0,
+        )
+        db.add(s)
+        await db.commit()
+        await db.refresh(s)
+        return s
+
+    if len(all_candidates) == 1:
+        s = all_candidates[0]
         # Backfill dealership_id if missing
+        changed = False
         if dealership_id and not s.dealership_id:
             s.dealership_id = dealership_id
+            changed = True
+        if user_id and not s.user_id:
+            s.user_id = user_id
+            changed = True
+        if changed:
             await db.commit()
         return s
 
-    # Create new settings for this dealership
-    s = Settings(
-        user_id=user_id,
-        dealership_id=dealership_id,
-        unit_comm_discount_le_200=190.0, unit_comm_discount_gt_200=140.0,
-        permaplate=40.0, nitro_fill=40.0, pulse=40.0,
-        finance_non_subvented=40.0, warranty=25.0, tire_wheel=25.0,
-        hourly_rate_ny_offset=15.0,
-        new_volume_bonus_15_16=1000.0, new_volume_bonus_17_18=1200.0,
-        new_volume_bonus_19_20=1500.0, new_volume_bonus_21_24=2000.0,
-        new_volume_bonus_25_plus=2800.0,
-        used_volume_bonus_8_10=350.0, used_volume_bonus_11_12=500.0,
-        used_volume_bonus_13_plus=1000.0,
-        spot_bonus_5_9=50.0, spot_bonus_10_12=80.0, spot_bonus_13_plus=100.0,
-        quarterly_bonus_threshold_units=60, quarterly_bonus_amount=1200.0,
-    )
-    db.add(s)
+    # Multiple rows found — deduplicate. Pick the one that looks most "real"
+    # (has non-default values), and delete the rest.
+    def _has_real_data(s: Settings) -> bool:
+        """Check if this settings row has been customized from defaults."""
+        return (
+            s.unit_comm_discount_le_200 != 190.0 or
+            s.unit_comm_discount_gt_200 != 140.0 or
+            s.permaplate != 40.0 or
+            s.new_volume_bonus_15_16 != 1000.0 or
+            s.new_volume_bonus_25_plus != 2800.0
+        )
+
+    def _is_all_zero(s: Settings) -> bool:
+        """Check if all values are zeroed out (broken row)."""
+        return (
+            s.unit_comm_discount_le_200 == 0 and
+            s.unit_comm_discount_gt_200 == 0 and
+            s.permaplate == 0 and
+            s.nitro_fill == 0
+        )
+
+    # Sort: prefer rows with real data, then non-zero, then by id (oldest first)
+    all_candidates.sort(key=lambda s: (
+        not _has_real_data(s),   # Real data first
+        _is_all_zero(s),         # Zeroed rows last
+        s.id,                    # Oldest first as tiebreaker
+    ))
+
+    keeper = all_candidates[0]
+    # Ensure keeper has dealership_id and user_id set
+    if dealership_id and not keeper.dealership_id:
+        keeper.dealership_id = dealership_id
+    if user_id and not keeper.user_id:
+        keeper.user_id = user_id
+
+    # Delete duplicates
+    for dup in all_candidates[1:]:
+        await db.delete(dup)
+
     await db.commit()
-    await db.refresh(s)
-    return s
+    logger.info(f"Settings dedup: kept id={keeper.id}, deleted {len(all_candidates)-1} duplicate(s) for dealership_id={dealership_id}")
+    return keeper
