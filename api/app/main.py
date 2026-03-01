@@ -3450,68 +3450,47 @@ async def admin_toggle_mode(request: Request):
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
-    """Super admin dashboard — overview of all dealerships."""
+    """Super admin platform page — all users with summary stats."""
     _require_super_admin(request)
     user = await _user(request, db)
 
-    # All dealerships
-    dealerships = (await db.execute(
-        select(Dealership).order_by(Dealership.created_at.desc())
+    # All users
+    all_users = (await db.execute(
+        select(User).order_by(User.dealership_id.nulls_last(), User.role.asc(), User.display_name.asc())
     )).scalars().all()
 
-    # Current month bounds
-    td = today()
-    mtd_start = td.replace(day=1)
+    # Dealership lookup
+    dealerships = (await db.execute(select(Dealership))).scalars().all()
+    dealer_map = {d.id: d for d in dealerships}
+    for u in all_users:
+        u._dealership = dealer_map.get(u.dealership_id)
 
-    # Build stats per dealership
-    dealer_stats = []
-    for d in dealerships:
-        user_count = (await db.execute(
-            select(func.count()).where(User.dealership_id == d.id)
-        )).scalar() or 0
-        deal_count = (await db.execute(
-            select(func.count()).where(Deal.dealership_id == d.id)
-        )).scalar() or 0
-        deals_mtd = (await db.execute(
-            select(func.count()).where(
-                Deal.dealership_id == d.id, Deal.status == "Delivered",
-                Deal.delivered_date >= mtd_start,
-            )
-        )).scalar() or 0
-        # Last deal activity
-        last_deal_date = (await db.execute(
-            select(Deal.sold_date).where(Deal.dealership_id == d.id)
-            .order_by(Deal.sold_date.desc().nullslast()).limit(1)
-        )).scalar()
-        # GM
-        gm = (await db.execute(
-            select(User).where(User.dealership_id == d.id, User.role == "admin")
-            .order_by(User.id.asc()).limit(1)
-        )).scalar_one_or_none()
-        dealer_stats.append({
-            "dealership": d,
-            "user_count": user_count,
-            "deal_count": deal_count,
-            "deals_mtd": deals_mtd,
-            "last_activity": last_deal_date,
-            "gm": gm,
-        })
+    # Deal counts per user
+    deal_counts_raw = (await db.execute(
+        select(Deal.user_id, func.count(Deal.id).label("cnt")).group_by(Deal.user_id)
+    )).all()
+    deal_counts = {row[0]: row[1] for row in deal_counts_raw}
 
-    # Platform totals
-    total_users = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
+    unaffiliated = [u for u in all_users if u.dealership_id is None]
+    affiliated = [u for u in all_users if u.dealership_id is not None]
+
+    # Summary stats
     total_deals = (await db.execute(select(func.count()).select_from(Deal))).scalar() or 0
-    active_dealerships = sum(1 for ds in dealer_stats if ds["dealership"].is_active and ds["dealership"].subscription_status != "pending")
-    pending_approvals = sum(1 for ds in dealer_stats if ds["dealership"].subscription_status == "pending")
-    deals_mtd_total = sum(ds["deals_mtd"] for ds in dealer_stats)
+    td = today()
+    deals_mtd = (await db.execute(
+        select(func.count()).where(Deal.status == "Delivered", Deal.delivered_date >= td.replace(day=1))
+    )).scalar() or 0
+    active_dealerships = sum(1 for d in dealerships if d.is_active)
 
     return templates.TemplateResponse("admin_dashboard.html", {
         "request": request, "user": user,
-        "dealer_stats": dealer_stats,
-        "total_users": total_users,
+        "affiliated": affiliated, "unaffiliated": unaffiliated,
+        "deal_counts": deal_counts,
+        "dealerships": dealerships, "dealer_map": dealer_map,
+        "total_users": len(all_users),
         "total_deals": total_deals,
+        "deals_mtd": deals_mtd,
         "active_dealerships": active_dealerships,
-        "pending_approvals": pending_approvals,
-        "deals_mtd_total": deals_mtd_total,
         "overdue_reminders": await get_overdue_reminders(db, uid(request)),
     })
 
@@ -3862,42 +3841,9 @@ async def admin_delete_dealership(dealership_id: int, request: Request, db: Asyn
     return RedirectResponse(url="/admin", status_code=303)
 
 
-@app.get("/admin/users", response_class=HTMLResponse)
-async def admin_all_users(request: Request, db: AsyncSession = Depends(get_db)):
-    """All users across the platform — shows unaffiliated users too."""
-    _require_super_admin(request)
-    user = await _user(request, db)
-
-    all_users = (await db.execute(
-        select(User).order_by(User.dealership_id.nulls_last(), User.role.asc(), User.display_name.asc())
-    )).scalars().all()
-
-    # Build dealership lookup
-    dealerships = (await db.execute(select(Dealership))).scalars().all()
-    dealer_map = {d.id: d for d in dealerships}
-
-    # Enrich users with dealership info
-    for u in all_users:
-        u._dealership = dealer_map.get(u.dealership_id)
-
-    # Count deals per user
-    deal_counts_raw = (await db.execute(
-        select(Deal.user_id, func.count(Deal.id).label("cnt"))
-        .group_by(Deal.user_id)
-    )).all()
-    deal_counts = {row[0]: row[1] for row in deal_counts_raw}
-
-    unaffiliated = [u for u in all_users if u.dealership_id is None]
-    affiliated = [u for u in all_users if u.dealership_id is not None]
-
-    return templates.TemplateResponse("admin_users.html", {
-        "request": request, "user": user,
-        "affiliated": affiliated, "unaffiliated": unaffiliated,
-        "deal_counts": deal_counts,
-        "dealerships": dealerships, "dealer_map": dealer_map,
-        "total_users": len(all_users),
-        "overdue_reminders": await get_overdue_reminders(db, uid(request)),
-    })
+@app.get("/admin/users")
+async def admin_all_users_redirect(request: Request):
+    return RedirectResponse(url="/admin", status_code=307)
 
 
 @app.post("/admin/user/{user_id}/assign-dealership")

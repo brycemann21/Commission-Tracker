@@ -2,198 +2,167 @@
 {% block content %}
 
 {# ── Header ── #}
-<div class="flex items-center justify-between mb-5">
-  <div>
-    <span class="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-violet-100 text-violet-700 uppercase mb-1">Platform Admin</span>
-    <h1 class="text-xl font-bold">Dealerships</h1>
-  </div>
-  <button type="button" onclick="document.getElementById('createDealerModal').classList.remove('hidden')"
-          class="text-xs px-3 py-1.5 rounded bg-violet-600 text-white hover:bg-violet-700 transition flex items-center gap-1">
-    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-    New Dealership
-  </button>
+<div class="mb-5">
+  <span class="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-violet-100 text-violet-700 uppercase mb-1">Platform Admin</span>
+  <h1 class="text-xl font-bold">All Users</h1>
+  <div class="text-sm text-slate-500">{{ total_users }} users across {{ active_dealerships }} dealership{{ 's' if active_dealerships != 1 else '' }}</div>
 </div>
 
-{# ── Sub-nav ── #}
-<div class="flex items-center gap-2 mb-5">
-  <a href="/admin" class="text-sm px-3 py-1.5 rounded bg-violet-700 text-white">Dealerships</a>
-  <a href="/admin/users" class="text-sm px-3 py-1.5 rounded text-violet-600 hover:bg-violet-50 transition">All Users</a>
-</div>
-
-{# ── Platform Summary ── #}
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-  <div class="bg-white rounded-lg border border-slate-200 p-4">
-    <div class="text-[11px] text-slate-400 uppercase font-medium">Active Dealerships</div>
-    <div class="text-2xl font-bold mt-1">{{ active_dealerships }}</div>
-  </div>
+{# ── Summary Stats ── #}
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
   <div class="bg-white rounded-lg border border-slate-200 p-4">
     <div class="text-[11px] text-slate-400 uppercase font-medium">Total Users</div>
     <div class="text-2xl font-bold mt-1">{{ total_users }}</div>
   </div>
   <div class="bg-white rounded-lg border border-slate-200 p-4">
-    <div class="text-[11px] text-slate-400 uppercase font-medium">Deals This Month</div>
-    <div class="text-2xl font-bold mt-1">{{ deals_mtd_total }}</div>
+    <div class="text-[11px] text-slate-400 uppercase font-medium">Dealerships</div>
+    <div class="text-2xl font-bold mt-1">{{ active_dealerships }}</div>
   </div>
-  {% if pending_approvals > 0 %}
-  <div class="bg-amber-50 rounded-lg border border-amber-200 p-4">
-    <div class="text-[11px] text-amber-700 uppercase font-medium flex items-center gap-1">
-      <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> Pending Approval
-    </div>
-    <div class="text-2xl font-bold mt-1 text-amber-700">{{ pending_approvals }}</div>
+  <div class="bg-white rounded-lg border border-slate-200 p-4">
+    <div class="text-[11px] text-slate-400 uppercase font-medium">Deals MTD</div>
+    <div class="text-2xl font-bold mt-1">{{ deals_mtd }}</div>
   </div>
-  {% else %}
   <div class="bg-white rounded-lg border border-slate-200 p-4">
     <div class="text-[11px] text-slate-400 uppercase font-medium">Total Deals</div>
     <div class="text-2xl font-bold mt-1">{{ total_deals }}</div>
   </div>
-  {% endif %}
 </div>
 
 {# ── Search ── #}
 <div class="mb-4">
-  <input type="text" id="dealerSearch" placeholder="Search dealerships..." oninput="filterDealers(this.value)"
+  <input type="text" id="userSearch" placeholder="Search users..." oninput="filterUsers(this.value)"
          class="w-full max-w-xs text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-400">
 </div>
 
-{# ── Pending Approval ── #}
-{% set pending = dealer_stats|selectattr('dealership.subscription_status', 'equalto', 'pending')|list %}
-{% if pending|length > 0 %}
-<h2 class="text-lg font-bold mb-3 flex items-center gap-2">
-  <span class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
-  Pending Approval ({{ pending|length }})
-</h2>
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-  {% for ds in pending %}
-  {% set d = ds.dealership %}
-  <div class="dealer-card bg-amber-50 rounded-lg border border-amber-200 p-4" data-name="{{ d.name|lower }}">
-    <div class="flex items-start justify-between mb-2">
-      <div>
-        <div class="font-semibold text-slate-900">{{ d.name }}</div>
-        {% if d.address %}<div class="text-xs text-slate-500 mt-0.5 truncate max-w-[220px]">{{ d.address }}</div>{% endif %}
-      </div>
-      <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 shrink-0">Pending</span>
-    </div>
-    <div class="grid grid-cols-2 gap-2 text-sm mb-3">
-      <div class="bg-white rounded px-2 py-1.5">
-        <div class="text-[10px] text-slate-400 uppercase">Users</div>
-        <div class="font-bold">{{ ds.user_count }}</div>
-      </div>
-      <div class="bg-white rounded px-2 py-1.5">
-        <div class="text-[10px] text-slate-400 uppercase">GM</div>
-        <div class="font-medium text-sm">{{ ds.gm.display_name if ds.gm else '—' }}</div>
-      </div>
-    </div>
-    <div class="flex items-center gap-2">
-      <form method="post" action="/admin/dealership/{{ d.id }}/approve" class="flex-1">{{ csrf_hidden|safe }}
-        <button type="submit" class="w-full text-xs px-3 py-2 rounded bg-emerald-600 text-white hover:bg-emerald-700 transition font-medium">✓ Approve</button>
-      </form>
-      <a href="/admin/dealership/{{ d.id }}" class="text-xs px-3 py-2 rounded border border-slate-200 hover:bg-white transition">View</a>
-      <form method="post" action="/admin/dealership/{{ d.id }}/toggle-active" class="inline">{{ csrf_hidden|safe }}
-        <button type="submit" class="text-xs px-2 py-1 rounded text-rose-600 hover:bg-rose-50 transition">Reject</button>
-      </form>
-    </div>
+{# ── Tabs ── #}
+<div class="flex mb-4 bg-slate-100 rounded-lg p-1 w-fit">
+  <button onclick="showTab('affiliated')" id="tab-affiliated"
+          class="px-4 py-2 text-sm font-medium rounded-md transition bg-white shadow-sm text-slate-900">
+    Active ({{ affiliated|length }})
+  </button>
+  {% if unaffiliated|length > 0 %}
+  <button onclick="showTab('unaffiliated')" id="tab-unaffiliated"
+          class="px-4 py-2 text-sm font-medium rounded-md transition text-slate-500 hover:text-slate-700">
+    Unaffiliated ({{ unaffiliated|length }})
+  </button>
+  {% endif %}
+</div>
+
+{# ── Affiliated Users ── #}
+<div id="panel-affiliated">
+  <div class="bg-white rounded-lg border border-slate-200 overflow-hidden">
+    <table class="min-w-full text-sm">
+      <thead class="bg-slate-900 text-white">
+        <tr>
+          <th class="text-left p-3">Name</th>
+          <th class="text-left p-3">Email</th>
+          <th class="text-left p-3">Dealership</th>
+          <th class="text-left p-3">Role</th>
+          <th class="text-right p-3">Deals</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in affiliated %}
+        <tr class="border-t hover:bg-slate-50 user-row" data-search="{{ (u.display_name or u.username)|lower }} {{ (u.email or '')|lower }} {{ (u._dealership.name if u._dealership else '')|lower }}">
+          <td class="p-3 font-medium">
+            {{ u.display_name or u.username }}
+            {% if u.is_super_admin %}<span class="inline-block px-1 py-0.5 rounded text-[9px] font-bold bg-violet-600 text-white ml-1">SUPER</span>{% endif %}
+            {% if u.is_verified %}<svg class="w-3.5 h-3.5 inline text-emerald-500 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>{% endif %}
+          </td>
+          <td class="p-3 text-slate-500">{{ u.email or '—' }}</td>
+          <td class="p-3">
+            {% if u._dealership %}
+            <span class="text-xs font-medium text-slate-700">{{ u._dealership.name }}</span>
+            {% else %}
+            <span class="text-slate-400">—</span>
+            {% endif %}
+          </td>
+          <td class="p-3">
+            <span class="inline-block px-2 py-0.5 rounded text-[11px] font-semibold
+              {% if u.role == 'admin' %}bg-violet-100 text-violet-800
+              {% elif u.role == 'manager' %}bg-blue-100 text-blue-800
+              {% else %}bg-slate-100 text-slate-700{% endif %}">{{ u.role|capitalize }}</span>
+          </td>
+          <td class="p-3 text-right text-slate-600">{{ deal_counts.get(u.id, 0) }}</td>
+        </tr>
+        {% endfor %}
+        {% if affiliated|length == 0 %}
+        <tr><td class="p-6 text-center text-slate-400" colspan="5">No users yet.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
   </div>
-  {% endfor %}
+</div>
+
+{# ── Unaffiliated Users ── #}
+{% if unaffiliated|length > 0 %}
+<div id="panel-unaffiliated" class="hidden">
+  <div class="bg-white rounded-lg border border-slate-200 overflow-hidden">
+    <table class="min-w-full text-sm">
+      <thead class="bg-slate-900 text-white">
+        <tr>
+          <th class="text-left p-3">Name</th>
+          <th class="text-left p-3">Email</th>
+          <th class="text-right p-3">Deals</th>
+          <th class="text-left p-3">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in unaffiliated %}
+        <tr class="border-t hover:bg-slate-50 user-row" data-search="{{ (u.display_name or u.username)|lower }} {{ (u.email or '')|lower }}">
+          <td class="p-3 font-medium">
+            {{ u.display_name or u.username }}
+            {% if u.is_super_admin %}<span class="inline-block px-1 py-0.5 rounded text-[9px] font-bold bg-violet-600 text-white ml-1">SUPER</span>{% endif %}
+          </td>
+          <td class="p-3 text-slate-500">{{ u.email or '—' }}</td>
+          <td class="p-3 text-right text-slate-600">{{ deal_counts.get(u.id, 0) }}</td>
+          <td class="p-3">
+            <form method="post" action="/admin/user/{{ u.id }}/assign-dealership" class="flex items-center gap-2">
+              {{ csrf_hidden|safe }}
+              <select name="dealership_id" class="text-xs border border-slate-200 rounded px-2 py-1 bg-white">
+                {% for d in dealerships %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}
+              </select>
+              <select name="role" class="text-xs border border-slate-200 rounded px-2 py-1 bg-white">
+                <option value="salesperson">Salesperson</option>
+                <option value="manager">Manager</option>
+                <option value="admin">Admin</option>
+              </select>
+              <button type="submit" class="text-xs px-2 py-1 rounded bg-violet-600 text-white hover:bg-violet-700 transition">Assign</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endif %}
 
-{# ── Active Dealership Cards ── #}
-<div id="dealerGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-  {% for ds in dealer_stats %}
-  {% set d = ds.dealership %}
-  {% if d.subscription_status != 'pending' %}
-  <div class="dealer-card bg-white rounded-lg border {{ 'border-slate-200' if d.is_active else 'border-rose-200 bg-rose-50' }} p-4 hover:shadow-sm transition" data-name="{{ d.name|lower }}">
-    <div class="flex items-start justify-between mb-2">
-      <div class="min-w-0">
-        <a href="/admin/dealership/{{ d.id }}" class="font-semibold text-slate-900 hover:text-violet-700 transition">{{ d.name }}</a>
-        {% if d.address %}<div class="text-xs text-slate-400 mt-0.5 truncate">{{ d.address }}</div>{% endif %}
-      </div>
-      <div class="flex items-center gap-1 shrink-0 ml-2">
-        {% if d.is_active %}
-          <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700">Active</span>
-        {% else %}
-          <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-100 text-rose-700">Inactive</span>
-        {% endif %}
-      </div>
-    </div>
-
-    <div class="grid grid-cols-3 gap-2 text-sm mb-3">
-      <div class="bg-slate-50 rounded px-2 py-1.5">
-        <div class="text-[10px] text-slate-400 uppercase">Users</div>
-        <div class="font-bold">{{ ds.user_count }}</div>
-      </div>
-      <div class="bg-slate-50 rounded px-2 py-1.5">
-        <div class="text-[10px] text-slate-400 uppercase">Deals</div>
-        <div class="font-bold">{{ ds.deal_count }}</div>
-      </div>
-      <div class="bg-slate-50 rounded px-2 py-1.5">
-        <div class="text-[10px] text-slate-400 uppercase">MTD</div>
-        <div class="font-bold">{{ ds.deals_mtd }}</div>
-      </div>
-    </div>
-
-    <div class="flex items-center justify-between">
-      <div class="text-xs text-slate-500">
-        {% if ds.gm %}GM: <span class="font-medium text-slate-700">{{ ds.gm.display_name or ds.gm.username }}</span>{% else %}<span class="text-amber-600">No GM</span>{% endif %}
-        {% if ds.last_activity %}
-          <span class="text-slate-300 mx-1">·</span>
-          <span class="text-slate-400">Last: {{ ds.last_activity.strftime('%-m/%-d') }}</span>
-        {% endif %}
-      </div>
-      <div class="flex items-center gap-1">
-        <a href="/admin/dealership/{{ d.id }}" class="text-xs px-2 py-1 rounded border border-slate-200 hover:bg-slate-50 transition">View</a>
-        <form method="post" action="/admin/dealership/{{ d.id }}/toggle-active" class="inline">{{ csrf_hidden|safe }}
-          <button type="submit" class="text-xs px-2 py-1 rounded {{ 'text-rose-600 hover:bg-rose-50' if d.is_active else 'text-emerald-600 hover:bg-emerald-50' }} transition">{{ 'Deactivate' if d.is_active else 'Activate' }}</button>
-        </form>
-      </div>
-    </div>
-  </div>
-  {% endif %}
-  {% endfor %}
-
-  {% if dealer_stats|length == 0 %}
-  <div class="col-span-full text-center py-12 text-slate-400 bg-white rounded-lg border border-dashed border-slate-200">No dealerships yet.</div>
-  {% endif %}
-</div>
-
-<div id="noResults" class="hidden text-center py-8 text-slate-400 text-sm">No dealerships match your search.</div>
-
-{# ── Create Modal ── #}
-<div id="createDealerModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
-  <div class="flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-bold">Create Dealership</h2>
-        <button onclick="document.getElementById('createDealerModal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
-      </div>
-      <form method="post" action="/admin/dealership/create">{{ csrf_hidden|safe }}
-        <div class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Dealership Name</label>
-            <input type="text" name="name" required placeholder="Toyota of Poughkeepsie" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Slug (optional)</label>
-            <input type="text" name="slug" placeholder="auto-generated" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500">
-          </div>
-        </div>
-        <div class="flex gap-3 mt-6">
-          <button type="submit" class="flex-1 px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 transition">Create</button>
-          <button type="button" onclick="document.getElementById('createDealerModal').classList.add('hidden')" class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">Cancel</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
+<div id="noResults" class="hidden text-center py-8 text-slate-400 text-sm">No users match your search.</div>
 
 <script>
-function filterDealers(q) {
+function showTab(tab) {
+  document.getElementById('panel-affiliated').classList.toggle('hidden', tab !== 'affiliated');
+  var unPanel = document.getElementById('panel-unaffiliated');
+  if (unPanel) unPanel.classList.toggle('hidden', tab !== 'unaffiliated');
+  var tabA = document.getElementById('tab-affiliated');
+  var tabU = document.getElementById('tab-unaffiliated');
+  if (tab === 'affiliated') {
+    tabA.className = 'px-4 py-2 text-sm font-medium rounded-md transition bg-white shadow-sm text-slate-900';
+    if (tabU) tabU.className = 'px-4 py-2 text-sm font-medium rounded-md transition text-slate-500 hover:text-slate-700';
+  } else {
+    if (tabU) tabU.className = 'px-4 py-2 text-sm font-medium rounded-md transition bg-white shadow-sm text-slate-900';
+    tabA.className = 'px-4 py-2 text-sm font-medium rounded-md transition text-slate-500 hover:text-slate-700';
+  }
+}
+
+function filterUsers(q) {
   q = q.toLowerCase().trim();
-  var cards = document.querySelectorAll('.dealer-card');
+  var rows = document.querySelectorAll('.user-row');
   var shown = 0;
-  cards.forEach(function(c) {
-    var match = !q || c.dataset.name.indexOf(q) !== -1;
-    c.style.display = match ? '' : 'none';
+  rows.forEach(function(r) {
+    var match = !q || r.dataset.search.indexOf(q) !== -1;
+    r.style.display = match ? '' : 'none';
     if (match) shown++;
   });
   document.getElementById('noResults').classList.toggle('hidden', shown > 0 || !q);
