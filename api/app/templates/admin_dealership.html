@@ -43,6 +43,13 @@
           {{ 'Deactivate' if dealership.is_active else 'Activate' }}
         </button>
       </form>
+      <form method="post" action="/admin/dealership/{{ dealership.id }}/delete"
+            onsubmit="return confirm('PERMANENTLY DELETE {{ dealership.name }}?\n\nThis will delete all deals, settings, and data.\nUsers will become unaffiliated (not deleted).\n\nThis cannot be undone.')">
+        {{ csrf_hidden|safe }}
+        <button type="submit" class="text-xs px-3 py-1.5 rounded border border-rose-200 text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition">
+          Delete Dealership
+        </button>
+      </form>
     </div>
   </div>
 </div>

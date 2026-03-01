@@ -16,6 +16,12 @@
   </button>
 </div>
 
+{# ── Sub-nav ── #}
+<div class="flex items-center gap-2 mb-5">
+  <a href="/admin" class="text-sm px-3 py-1.5 rounded bg-violet-700 text-white">Dealerships</a>
+  <a href="/admin/users" class="text-sm px-3 py-1.5 rounded text-violet-600 hover:bg-violet-50 transition">All Users</a>
+</div>
+
 {# ── Pending Approval Section ── #}
 {% set pending = dealer_stats|selectattr('dealership.subscription_status', 'equalto', 'pending')|list %}
 {% if pending|length > 0 %}
@@ -132,6 +138,13 @@
           {{ csrf_hidden|safe }}
           <button type="submit" class="text-xs px-2 py-1 rounded {{ 'text-rose-600 hover:bg-rose-50' if d.is_active else 'text-emerald-600 hover:bg-emerald-50' }} transition">
             {{ 'Deactivate' if d.is_active else 'Activate' }}
+          </button>
+        </form>
+        <form method="post" action="/admin/dealership/{{ d.id }}/delete" class="inline"
+              onsubmit="return confirm('PERMANENTLY DELETE {{ d.name }}?\n\nThis will delete all deals, settings, and data for this dealership.\n\nUsers will NOT be deleted — they will become unaffiliated.\n\nThis cannot be undone.')">
+          {{ csrf_hidden|safe }}
+          <button type="submit" class="text-xs px-2 py-1 rounded text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition">
+            Delete
           </button>
         </form>
       </div>

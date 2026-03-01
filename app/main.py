@@ -2863,8 +2863,7 @@ async def team_remove_member(
     user_id: int, request: Request, db: AsyncSession = Depends(get_db),
 ):
     """Remove a team member from the dealership. Admin only.
-    The removed user gets their own personal dealership so they can keep
-    tracking independently — salespeople always own their data."""
+    User keeps their account but is unassigned from the dealership."""
     _require_admin(request)
     if user_id == uid(request):
         return RedirectResponse(url="/team", status_code=303)
@@ -2873,30 +2872,15 @@ async def team_remove_member(
         select(User).where(User.id == user_id, User.dealership_id == d_id)
     )).scalar_one_or_none()
     if target:
-        old_dealership_id = target.dealership_id
-        # Create a personal dealership for the removed user
-        target = await _create_dealership_for_user(
-            db, target,
-            name_hint=target.display_name or target.username,
-        )
-        new_dealership_id = target.dealership_id
-        # Move their deals, goals, and reminders to their new personal dealership
-        # Salespeople own their data
-        if old_dealership_id != new_dealership_id:
-            for tbl_class in (Deal, Goal, Reminder):
-                rows = (await db.execute(
-                    select(tbl_class).where(
-                        tbl_class.user_id == user_id,
-                        tbl_class.dealership_id == old_dealership_id,
-                    )
-                )).scalars().all()
-                for row in rows:
-                    row.dealership_id = new_dealership_id
-        # Reset verification since they're no longer part of the team
+        target.dealership_id = None
+        target.role = "salesperson"
         target.is_verified = False
         target.verified_by = None
         target.verified_at = None
         await db.commit()
+        # Clear their session cache
+        from .auth import _cache_delete_user
+        _cache_delete_user(user_id)
         # Clear their session cache so they pick up the new dealership on next request
         from .auth import _cache_delete_user
         _cache_delete_user(user_id)
@@ -3301,3 +3285,99 @@ async def admin_approve_dealership(dealership_id: int, request: Request, db: Asy
             d.subscription_status = "active"
         await db.commit()
     return RedirectResponse(url="/admin", status_code=303)
+
+
+@app.post("/admin/dealership/{dealership_id}/delete")
+async def admin_delete_dealership(dealership_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Permanently delete a dealership. Users are unassigned (not deleted).
+    Deals, goals, reminders, settings, and invites for this dealership are deleted."""
+    _require_super_admin(request)
+    d = (await db.execute(select(Dealership).where(Dealership.id == dealership_id))).scalar_one_or_none()
+    if not d:
+        return RedirectResponse(url="/admin", status_code=303)
+
+    # Unassign all users from this dealership (they become unaffiliated, not deleted)
+    users_in_dealer = (await db.execute(
+        select(User).where(User.dealership_id == dealership_id)
+    )).scalars().all()
+    for u in users_in_dealer:
+        u.dealership_id = None
+        u.role = "salesperson"
+        u.is_verified = False
+        u.verified_by = None
+        u.verified_at = None
+
+    # Delete all data belonging to this dealership
+    for tbl_class in (Deal, Goal, Reminder, Settings, Invite):
+        rows = (await db.execute(
+            select(tbl_class).where(tbl_class.dealership_id == dealership_id)
+        )).scalars().all()
+        for row in rows:
+            await db.delete(row)
+
+    # Delete the dealership itself
+    await db.delete(d)
+    await db.commit()
+
+    # Clear session cache for affected users
+    from .auth import _cache_delete_user
+    for u in users_in_dealer:
+        _cache_delete_user(u.id)
+
+    logger.info(f"Deleted dealership '{d.name}' (id={dealership_id}), unassigned {len(users_in_dealer)} user(s)")
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+@app.get("/admin/users", response_class=HTMLResponse)
+async def admin_all_users(request: Request, db: AsyncSession = Depends(get_db)):
+    """All users across the platform — shows unaffiliated users too."""
+    _require_super_admin(request)
+    user = await _user(request, db)
+
+    all_users = (await db.execute(
+        select(User).order_by(User.dealership_id.nulls_last(), User.role.asc(), User.display_name.asc())
+    )).scalars().all()
+
+    # Build dealership lookup
+    dealerships = (await db.execute(select(Dealership))).scalars().all()
+    dealer_map = {d.id: d for d in dealerships}
+
+    # Enrich users with dealership info
+    for u in all_users:
+        u._dealership = dealer_map.get(u.dealership_id)
+
+    # Count deals per user
+    deal_counts_raw = (await db.execute(
+        select(Deal.user_id, func.count(Deal.id).label("cnt"))
+        .group_by(Deal.user_id)
+    )).all()
+    deal_counts = {row[0]: row[1] for row in deal_counts_raw}
+
+    unaffiliated = [u for u in all_users if u.dealership_id is None]
+    affiliated = [u for u in all_users if u.dealership_id is not None]
+
+    return templates.TemplateResponse("admin_users.html", {
+        "request": request, "user": user,
+        "affiliated": affiliated, "unaffiliated": unaffiliated,
+        "deal_counts": deal_counts,
+        "dealerships": dealerships, "dealer_map": dealer_map,
+        "total_users": len(all_users),
+        "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+    })
+
+
+@app.post("/admin/user/{user_id}/assign-dealership")
+async def admin_assign_user_to_dealership(
+    user_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    dealership_id: int = Form(...), role: str = Form("salesperson"),
+):
+    """Assign an unaffiliated user to a dealership."""
+    _require_super_admin(request)
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if target and role in ("salesperson", "manager", "admin"):
+        target.dealership_id = dealership_id
+        target.role = role
+        await db.commit()
+        from .auth import _cache_delete_user
+        _cache_delete_user(user_id)
+    return RedirectResponse(url="/admin/users", status_code=303)
