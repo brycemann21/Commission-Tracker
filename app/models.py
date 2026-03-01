@@ -52,9 +52,13 @@ class User(Base):
     # ── Multi-tenancy fields ──
     dealership_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     role: Mapped[str] = mapped_column(String(24), default="salesperson")
-    # Roles: "admin" — created the dealership, manages pay plan, invites users, billing
+    # Roles: "admin" — dealership admin, manages pay plan, invites users
     #        "manager" — can view all salespeople in their dealership
     #        "salesperson" — can only see their own data (default)
+    is_super_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Super admin: platform owner (you) — sits above all dealerships
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Verified: GM has confirmed this person works at the dealership
 
 
 # ════════════════════════════════════════════════

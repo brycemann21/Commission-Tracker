@@ -54,6 +54,22 @@
           Team
         </a>
         {% endif %}
+        {% if request.state.is_super_admin is defined and request.state.is_super_admin %}
+        <form method="post" action="/admin/toggle" class="inline">
+          {% if request.state.admin_mode is defined and request.state.admin_mode %}
+          <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-violet-700 text-white' if path.startswith('/admin') else 'text-violet-600 hover:bg-violet-50' }}" href="/admin">
+            Platform
+          </a>
+          <button type="submit" class="text-[10px] px-2 py-1 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 transition ml-1" title="Switch to salesperson view">
+            Exit Admin
+          </button>
+          {% else %}
+          <button type="submit" class="text-[10px] px-2 py-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 transition" title="Switch to platform admin view">
+            Admin Mode
+          </button>
+          {% endif %}
+        </form>
+        {% endif %}
         <div class="w-px h-5 bg-slate-200 mx-1 hidden sm:block"></div>
         <a class="inline-flex items-center px-3 py-1.5 text-sm rounded border border-slate-200 text-slate-600 hover:bg-slate-50 transition gap-1" href="/import">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>

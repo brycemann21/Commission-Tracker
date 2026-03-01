@@ -81,25 +81,25 @@ def _get_http_client() -> httpx.AsyncClient:
 # Caching (token → user_id) for 30s cuts ~50% of DB round-trips on warm
 # invocations. The risk window is tiny: a revoked session stays valid for
 # at most 30 more seconds, which is acceptable for this use case.
-_SESSION_CACHE: dict[str, tuple[int, int | None, str, float]] = {}
+_SESSION_CACHE: dict[str, tuple[int, int | None, str, bool, float]] = {}
 _SESSION_CACHE_TTL = 30.0  # seconds
 
-def _cache_get(token: str) -> tuple[int, int | None, str] | None:
-    """Returns (user_id, dealership_id, role) or None."""
+def _cache_get(token: str) -> tuple[int, int | None, str, bool] | None:
+    """Returns (user_id, dealership_id, role, is_super_admin) or None."""
     entry = _SESSION_CACHE.get(token)
-    if entry and time.monotonic() < entry[3]:
-        return (entry[0], entry[1], entry[2])
+    if entry and time.monotonic() < entry[4]:
+        return (entry[0], entry[1], entry[2], entry[3])
     if entry:
         del _SESSION_CACHE[token]
     return None
 
-def _cache_set(token: str, user_id: int, dealership_id: int | None = None, role: str = "salesperson") -> None:
+def _cache_set(token: str, user_id: int, dealership_id: int | None = None, role: str = "salesperson", is_super_admin: bool = False) -> None:
     if len(_SESSION_CACHE) > 500:
         cutoff = time.monotonic()
-        expired = [k for k, v in _SESSION_CACHE.items() if v[3] < cutoff]
+        expired = [k for k, v in _SESSION_CACHE.items() if v[4] < cutoff]
         for k in expired:
             del _SESSION_CACHE[k]
-    _SESSION_CACHE[token] = (user_id, dealership_id, role, time.monotonic() + _SESSION_CACHE_TTL)
+    _SESSION_CACHE[token] = (user_id, dealership_id, role, is_super_admin, time.monotonic() + _SESSION_CACHE_TTL)
 
 def _cache_delete(token: str) -> None:
     _SESSION_CACHE.pop(token, None)
@@ -389,8 +389,8 @@ async def create_session(
     return token
 
 
-async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -> tuple[int, int | None, str] | None:
-    """Returns (user_id, dealership_id, role) or None.
+async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -> tuple[int, int | None, str, bool] | None:
+    """Returns (user_id, dealership_id, role, is_super_admin) or None.
     Joins user_sessions with users to get tenancy info in a single query."""
     if not token:
         return None
@@ -401,14 +401,15 @@ async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -
         return cached
 
     row = await _raw_pg_fetchrow(
-        """SELECT s.user_id, u.dealership_id, COALESCE(u.role, 'salesperson') AS role
+        """SELECT s.user_id, u.dealership_id, COALESCE(u.role, 'salesperson') AS role,
+                  COALESCE(u.is_super_admin, false) AS is_super_admin
            FROM user_sessions s
            JOIN users u ON u.id = s.user_id
            WHERE s.token = $1 AND s.expires_at > NOW()""",
         token
     )
     if row is not None:
-        result = (row["user_id"], row["dealership_id"], row["role"])
+        result = (row["user_id"], row["dealership_id"], row["role"], row["is_super_admin"])
         _cache_set(token, *result)
         return result
 
@@ -418,7 +419,8 @@ async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -
         sa_row = (
             await db.execute(
                 sa_text("""
-                    SELECT s.user_id, u.dealership_id, COALESCE(u.role, 'salesperson') AS role
+                    SELECT s.user_id, u.dealership_id, COALESCE(u.role, 'salesperson') AS role,
+                           COALESCE(u.is_super_admin, false) AS is_super_admin
                     FROM user_sessions s
                     JOIN users u ON u.id = s.user_id
                     WHERE s.token = :token AND s.expires_at > :now
@@ -427,7 +429,7 @@ async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -
             )
         ).first()
         if sa_row:
-            result = (sa_row.user_id, sa_row.dealership_id, sa_row.role)
+            result = (sa_row.user_id, sa_row.dealership_id, sa_row.role, sa_row.is_super_admin)
             _cache_set(token, *result)
             return result
 

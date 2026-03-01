@@ -278,10 +278,13 @@ async def auth_middleware(request: Request, call_next):
             dest += f"?{request.url.query}"
         return RedirectResponse(url=f"/login?next={dest}", status_code=303)
 
-    uid_val, dealership_id_val, role_val = session_info
+    uid_val, dealership_id_val, role_val, is_super_admin_val = session_info
     request.state.user_id = uid_val
     request.state.dealership_id = dealership_id_val
     request.state.role = role_val
+    request.state.is_super_admin = is_super_admin_val
+    # Admin mode toggle — super admins can switch between platform view and salesperson view
+    request.state.admin_mode = is_super_admin_val and request.cookies.get("admin_mode") == "1"
     # Set CSRF token on request state for templates
     request.state.csrf_token = request.cookies.get(CSRF_COOKIE, _generate_csrf_token())
     response = await call_next(request)
@@ -303,6 +306,14 @@ def user_dealership_id(request: Request) -> int | None:
 def user_role(request: Request) -> str:
     """Get the current user's role from request state."""
     return getattr(request.state, "role", "salesperson")
+
+def is_super_admin(request: Request) -> bool:
+    """Check if the current user is the platform super admin."""
+    return getattr(request.state, "is_super_admin", False)
+
+def is_admin_mode(request: Request) -> bool:
+    """Check if super admin has the platform admin view toggled on."""
+    return getattr(request.state, "admin_mode", False)
 
 async def _user(request: Request, db: AsyncSession) -> User:
     return (await db.execute(select(User).where(User.id == uid(request)))).scalar_one()
@@ -342,14 +353,23 @@ async def _create_dealership_for_user(db: AsyncSession, user: User, name_hint: s
 
 
 def _require_admin(request: Request):
-    """Raise 403 if the current user is not an admin."""
+    """Raise 403 if the current user is not an admin or super_admin."""
+    if is_super_admin(request):
+        return
     if user_role(request) != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
 
 def _require_admin_or_manager(request: Request):
-    """Raise 403 if the current user is not an admin or manager."""
+    """Raise 403 if the current user is not an admin, manager, or super_admin."""
+    if is_super_admin(request):
+        return
     if user_role(request) not in ("admin", "manager"):
         raise HTTPException(status_code=403, detail="Manager access required")
+
+def _require_super_admin(request: Request):
+    """Raise 403 if the current user is not the platform super admin."""
+    if not is_super_admin(request):
+        raise HTTPException(status_code=403, detail="Platform admin access required")
 
 
 # ─── Startup / Migrations ───
@@ -777,6 +797,31 @@ async def _run_startup_migrations():
                     logger.info(f"Promoted user {first_user} to admin for dealership {row['id']}")
         except Exception as e:
             logger.warning(f"Admin promotion check error: {e}")
+
+        # 8. Super admin + verification columns
+        for col, typ in [
+            ("is_super_admin", "BOOLEAN DEFAULT false"),
+            ("is_verified", "BOOLEAN DEFAULT false"),
+        ]:
+            try:
+                await conn.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typ}")
+            except Exception:
+                pass
+
+        # 9. Set the first ever user (id=1 or lowest id) as super_admin — this is you (the platform owner)
+        # Only runs if no super_admin exists yet
+        try:
+            has_super = await conn.fetchval("SELECT COUNT(*) FROM users WHERE is_super_admin = true")
+            if not has_super or has_super == 0:
+                first_uid = await conn.fetchval("SELECT id FROM users ORDER BY id ASC LIMIT 1")
+                if first_uid:
+                    await conn.execute(
+                        "UPDATE users SET is_super_admin = true, is_verified = true, role = 'admin' WHERE id = $1",
+                        first_uid
+                    )
+                    logger.info(f"Designated user {first_uid} as platform super admin")
+        except Exception as e:
+            logger.warning(f"Super admin setup error: {e}")
     finally:
         # Clean up expired sessions via raw asyncpg (avoids pgBouncer prepared stmt issue)
         try:
@@ -2806,3 +2851,170 @@ async def team_update_dealership(
         dealership.name = name.strip()[:200]
         await db.commit()
     return RedirectResponse(url="/team", status_code=303)
+
+
+# ════════════════════════════════════════════════
+# SUPER ADMIN — Platform Management
+# ════════════════════════════════════════════════
+
+@app.post("/admin/toggle")
+async def admin_toggle_mode(request: Request):
+    """Toggle between platform admin view and salesperson view."""
+    if not is_super_admin(request):
+        return RedirectResponse(url="/", status_code=303)
+    current = request.cookies.get("admin_mode") == "1"
+    resp = RedirectResponse(url="/admin" if not current else "/", status_code=303)
+    resp.set_cookie("admin_mode", "0" if current else "1", httponly=True, samesite="lax", max_age=60*60*24*365)
+    return resp
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
+    """Super admin dashboard — overview of all dealerships."""
+    _require_super_admin(request)
+    user = await _user(request, db)
+
+    # All dealerships with user counts
+    dealerships = (await db.execute(
+        select(Dealership).order_by(Dealership.created_at.desc())
+    )).scalars().all()
+
+    # Build stats per dealership
+    dealer_stats = []
+    for d in dealerships:
+        user_count = (await db.execute(
+            select(func.count()).where(User.dealership_id == d.id)
+        )).scalar() or 0
+        deal_count = (await db.execute(
+            select(func.count()).where(Deal.dealership_id == d.id)
+        )).scalar() or 0
+        # Get the admin/GM for this dealership
+        gm = (await db.execute(
+            select(User).where(User.dealership_id == d.id, User.role == "admin")
+            .order_by(User.id.asc()).limit(1)
+        )).scalar_one_or_none()
+        dealer_stats.append({
+            "dealership": d,
+            "user_count": user_count,
+            "deal_count": deal_count,
+            "gm": gm,
+        })
+
+    # Total platform stats
+    total_users = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
+    total_deals = (await db.execute(select(func.count()).select_from(Deal))).scalar() or 0
+
+    return templates.TemplateResponse("admin_dashboard.html", {
+        "request": request, "user": user,
+        "dealer_stats": dealer_stats,
+        "total_users": total_users,
+        "total_deals": total_deals,
+        "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+    })
+
+
+@app.post("/admin/dealership/create")
+async def admin_create_dealership(
+    request: Request, db: AsyncSession = Depends(get_db),
+    name: str = Form(...), slug: str = Form(""),
+):
+    """Create a new dealership manually."""
+    _require_super_admin(request)
+    import re as _re
+    if not slug.strip():
+        slug = _re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')[:60]
+    # Ensure slug is unique
+    base_slug = slug
+    i = 1
+    while (await db.execute(select(Dealership).where(Dealership.slug == slug))).scalar_one_or_none():
+        slug = f"{base_slug}-{i}"
+        i += 1
+    d = Dealership(name=name.strip(), slug=slug, is_active=True, subscription_status="active")
+    db.add(d)
+    await db.commit()
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+@app.post("/admin/dealership/{dealership_id}/toggle-active")
+async def admin_toggle_dealership(dealership_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Activate/deactivate a dealership."""
+    _require_super_admin(request)
+    d = (await db.execute(select(Dealership).where(Dealership.id == dealership_id))).scalar_one_or_none()
+    if d:
+        d.is_active = not d.is_active
+        await db.commit()
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+@app.post("/admin/dealership/{dealership_id}/assign-gm")
+async def admin_assign_gm(
+    dealership_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    user_id: int = Form(...),
+):
+    """Assign a user as the GM (admin role) of a dealership."""
+    _require_super_admin(request)
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if target:
+        target.dealership_id = dealership_id
+        target.role = "admin"
+        target.is_verified = True
+        await db.commit()
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+@app.post("/admin/user/{user_id}/toggle-super")
+async def admin_toggle_super(user_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Toggle super admin status for a user. Can only be done by existing super admin."""
+    _require_super_admin(request)
+    # Can't remove your own super admin
+    if user_id == uid(request):
+        return RedirectResponse(url="/admin", status_code=303)
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if target:
+        target.is_super_admin = not target.is_super_admin
+        await db.commit()
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+@app.get("/admin/dealership/{dealership_id}", response_class=HTMLResponse)
+async def admin_dealership_detail(dealership_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Drill into a specific dealership — see all users, deals, settings."""
+    _require_super_admin(request)
+    user = await _user(request, db)
+
+    dealership = (await db.execute(
+        select(Dealership).where(Dealership.id == dealership_id)
+    )).scalar_one_or_none()
+    if not dealership:
+        return RedirectResponse(url="/admin", status_code=303)
+
+    members = (await db.execute(
+        select(User).where(User.dealership_id == dealership_id)
+        .order_by(User.role.asc(), User.display_name.asc())
+    )).scalars().all()
+
+    # Recent deals
+    recent_deals = (await db.execute(
+        select(Deal).where(Deal.dealership_id == dealership_id)
+        .order_by(Deal.sold_date.desc().nullslast()).limit(25)
+    )).scalars().all()
+
+    # Stats
+    total_deals = (await db.execute(
+        select(func.count()).where(Deal.dealership_id == dealership_id)
+    )).scalar() or 0
+
+    delivered_mtd = (await db.execute(
+        select(func.count()).where(
+            Deal.dealership_id == dealership_id,
+            Deal.status == "Delivered",
+            Deal.delivered_date >= today().replace(day=1)
+        )
+    )).scalar() or 0
+
+    return templates.TemplateResponse("admin_dealership.html", {
+        "request": request, "user": user, "dealership": dealership,
+        "members": members, "recent_deals": recent_deals,
+        "total_deals": total_deals, "delivered_mtd": delivered_mtd,
+        "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+    })

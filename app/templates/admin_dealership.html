@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="mb-5">
+  <a href="/admin" class="text-sm text-violet-600 hover:text-violet-800 transition flex items-center gap-1 mb-2">
+    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+    All Dealerships
+  </a>
+  <div class="flex items-center justify-between">
+    <div>
+      <div class="flex items-center gap-2">
+        <h1 class="text-xl font-bold">{{ dealership.name }}</h1>
+        {% if dealership.is_active %}
+          <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-700">Active</span>
+        {% else %}
+          <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-100 text-rose-700">Inactive</span>
+        {% endif %}
+      </div>
+      <div class="text-sm text-slate-500">/{{ dealership.slug }} · {{ members|length }} members · {{ total_deals }} total deals · {{ delivered_mtd }} delivered this month</div>
+    </div>
+    <form method="post" action="/admin/dealership/{{ dealership.id }}/toggle-active">
+      {{ csrf_hidden|safe }}
+      <button type="submit" class="text-xs px-3 py-1.5 rounded border {{ 'border-rose-200 text-rose-600 hover:bg-rose-50' if dealership.is_active else 'border-emerald-200 text-emerald-600 hover:bg-emerald-50' }} transition">
+        {{ 'Deactivate' if dealership.is_active else 'Activate' }}
+      </button>
+    </form>
+  </div>
+</div>
+
+{# ── Team Members ── #}
+<h2 class="text-lg font-bold mb-2">Team Members ({{ members|length }})</h2>
+<div class="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
+  <table class="min-w-full text-sm">
+    <thead class="bg-slate-900 text-white">
+      <tr>
+        <th class="text-left p-3">Name</th>
+        <th class="text-left p-3">Email</th>
+        <th class="text-left p-3">Role</th>
+        <th class="text-left p-3">Verified</th>
+        <th class="text-left p-3">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in members %}
+      <tr class="border-t">
+        <td class="p-3 font-medium">{{ m.display_name or m.username }}</td>
+        <td class="p-3 text-slate-500">{{ m.email or '—' }}</td>
+        <td class="p-3">
+          <span class="inline-block px-2 py-0.5 rounded text-[11px] font-semibold
+            {% if m.role == 'admin' %}bg-violet-100 text-violet-800
+            {% elif m.role == 'manager' %}bg-blue-100 text-blue-800
+            {% else %}bg-slate-100 text-slate-700{% endif %}">
+            {{ m.role|capitalize }}
+          </span>
+          {% if m.is_super_admin %}
+            <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-600 text-white ml-1">SUPER</span>
+          {% endif %}
+        </td>
+        <td class="p-3">
+          {% if m.is_verified %}
+            <span class="text-emerald-600">✓ Verified</span>
+          {% else %}
+            <span class="text-amber-500 text-xs">Unverified</span>
+          {% endif %}
+        </td>
+        <td class="p-3">
+          <div class="flex items-center gap-2">
+            <form method="post" action="/admin/dealership/{{ dealership.id }}/assign-gm" class="inline">
+              {{ csrf_hidden|safe }}
+              <input type="hidden" name="user_id" value="{{ m.id }}">
+              {% if m.role != 'admin' %}
+              <button type="submit" class="text-xs px-2 py-1 rounded border border-slate-200 hover:bg-slate-50 transition">Make GM</button>
+              {% endif %}
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+      {% if members|length == 0 %}
+      <tr class="border-t">
+        <td class="p-6 text-center text-slate-400" colspan="5">No members in this dealership.</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{# ── Recent Deals ── #}
+<h2 class="text-lg font-bold mb-2">Recent Deals ({{ total_deals }} total)</h2>
+<div class="bg-white rounded-lg border border-slate-200 overflow-hidden">
+  <table class="min-w-full text-sm">
+    <thead class="bg-slate-50">
+      <tr>
+        <th class="text-left p-3 text-slate-600">Date</th>
+        <th class="text-left p-3 text-slate-600">Salesperson</th>
+        <th class="text-left p-3 text-slate-600">Customer</th>
+        <th class="text-left p-3 text-slate-600">Model</th>
+        <th class="text-left p-3 text-slate-600">Status</th>
+        <th class="text-left p-3 text-slate-600">Commission</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for deal in recent_deals %}
+      <tr class="border-t">
+        <td class="p-3 text-slate-500">{{ deal.sold_date.strftime('%-m/%-d') if deal.sold_date else '—' }}</td>
+        <td class="p-3 text-slate-500">—</td>
+        <td class="p-3 font-medium">{{ deal.customer or '—' }}</td>
+        <td class="p-3">{{ deal.model or '—' }}</td>
+        <td class="p-3">
+          <span class="inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold
+            {% if deal.status == 'Delivered' %}bg-emerald-100 text-emerald-800
+            {% elif deal.status == 'Dead' %}bg-slate-100 text-slate-500
+            {% elif deal.status == 'Scheduled' %}bg-blue-100 text-blue-800
+            {% else %}bg-amber-100 text-amber-800{% endif %}">
+            {{ deal.status }}
+          </span>
+        </td>
+        <td class="p-3 font-medium">${{ "{:,.0f}".format(deal.total_deal_comm or 0) }}</td>
+      </tr>
+      {% endfor %}
+      {% if recent_deals|length == 0 %}
+      <tr class="border-t">
+        <td class="p-6 text-center text-slate-400" colspan="6">No deals yet.</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
