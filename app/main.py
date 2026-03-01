@@ -702,6 +702,13 @@ async def _run_startup_migrations():
                     default_d
                 )
 
+                # Also fix any users who got the dealership but not the admin role
+                # (edge case: columns added with defaults before UPDATE ran)
+                await conn.execute(
+                    "UPDATE users SET role = 'admin' WHERE dealership_id = $1 AND (role IS NULL OR role = 'salesperson')",
+                    default_d
+                )
+
                 # Assign all orphaned data to the default dealership
                 for tbl in ("deals", "settings", "goals", "reminders"):
                     try:
@@ -747,6 +754,29 @@ async def _run_startup_migrations():
         try:
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_reminders_dealership ON reminders(dealership_id, user_id)")
         except Exception: pass
+
+        # 7. Ensure at least one admin exists per dealership
+        # If a dealership has no admins (e.g. migration edge case), promote the first user
+        try:
+            dealerships_without_admin = await conn.fetch("""
+                SELECT d.id FROM dealerships d
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM users u WHERE u.dealership_id = d.id AND u.role = 'admin'
+                )
+            """)
+            for row in dealerships_without_admin:
+                first_user = await conn.fetchval(
+                    "SELECT id FROM users WHERE dealership_id = $1 ORDER BY id ASC LIMIT 1",
+                    row["id"]
+                )
+                if first_user:
+                    await conn.execute(
+                        "UPDATE users SET role = 'admin' WHERE id = $1",
+                        first_user
+                    )
+                    logger.info(f"Promoted user {first_user} to admin for dealership {row['id']}")
+        except Exception as e:
+            logger.warning(f"Admin promotion check error: {e}")
     finally:
         # Clean up expired sessions via raw asyncpg (avoids pgBouncer prepared stmt issue)
         try:
