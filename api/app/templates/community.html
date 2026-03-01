@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="flex items-center justify-between mb-4">
+  <div>
+    <h1 class="text-xl font-bold">Community</h1>
+    <div class="text-sm text-slate-500">Anonymous posts from salespeople everywhere</div>
+  </div>
+  <button type="button" onclick="document.getElementById('newPostModal').classList.remove('hidden')"
+          class="text-xs px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-1">
+    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+    New Post
+  </button>
+</div>
+
+{# ── Filters ── #}
+<form method="get" action="/community" class="flex flex-wrap items-center gap-2 mb-5">
+  <select name="post_type" onchange="this.form.submit()" class="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
+    <option value="">All Types</option>
+    <option value="text" {{ 'selected' if filter_type == 'text' }}>Text</option>
+    <option value="payplan" {{ 'selected' if filter_type == 'payplan' }}>Pay Plans</option>
+    <option value="ytd" {{ 'selected' if filter_type == 'ytd' }}>YTD Numbers</option>
+    <option value="poll" {{ 'selected' if filter_type == 'poll' }}>Polls</option>
+  </select>
+  <select name="brand" onchange="this.form.submit()" class="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
+    <option value="">All Brands</option>
+    {% for b in brands %}
+    <option value="{{ b }}" {{ 'selected' if filter_brand == b }}>{{ b }}</option>
+    {% endfor %}
+  </select>
+  <select name="state" onchange="this.form.submit()" class="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
+    <option value="">All States</option>
+    {% for s in states %}
+    <option value="{{ s }}" {{ 'selected' if filter_state == s }}>{{ s }}</option>
+    {% endfor %}
+  </select>
+  {% if filter_type or filter_brand or filter_state %}
+  <a href="/community" class="text-xs text-slate-500 hover:text-slate-700 underline">Clear</a>
+  {% endif %}
+</form>
+
+{# ── Feed ── #}
+<div class="space-y-4 mb-6">
+  {% for p in posts %}
+  <div class="bg-white rounded-lg border border-slate-200 overflow-hidden">
+    <div class="p-4">
+      {# ── Header ── #}
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          {# Post type badge #}
+          {% if p.post_type == "payplan" %}
+          <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-100 text-violet-700">PAY PLAN</span>
+          {% elif p.post_type == "ytd" %}
+          <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700">YTD</span>
+          {% elif p.post_type == "poll" %}
+          <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">POLL</span>
+          {% endif %}
+          <span class="text-sm font-medium text-slate-700">{{ p._display_name }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-slate-400">{{ p.created_at.strftime('%-m/%-d') }}</span>
+          {% if p.user_id == user.id %}
+          <form method="post" action="/community/{{ p.id }}/delete" class="inline" onsubmit="return confirm('Delete this post?')">
+            {{ csrf_hidden|safe }}
+            <button type="submit" class="text-xs text-slate-400 hover:text-rose-500 transition">✕</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+
+      {# ── Title ── #}
+      {% if p.title %}
+      <h3 class="font-semibold text-slate-900 mb-1">{{ p.title }}</h3>
+      {% endif %}
+
+      {# ── Body (text posts) ── #}
+      {% if p.body and p.post_type == "text" %}
+      <p class="text-sm text-slate-600 whitespace-pre-line">{{ p.body }}</p>
+      {% endif %}
+
+      {# ── Pay Plan Display ── #}
+      {% if p.post_type == "payplan" and p._payload %}
+      {% set pp = p._payload %}
+      <div class="mt-2">
+        {% if p.body %}<p class="text-sm text-slate-600 mb-3">{{ p.body }}</p>{% endif %}
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+          <div class="bg-slate-50 rounded px-2.5 py-2">
+            <div class="text-[10px] text-slate-400 uppercase">Unit (≤$200 disc)</div>
+            <div class="font-bold">${{ "{:,.0f}".format(pp.get('unit_comm_le_200', 0)) }}</div>
+          </div>
+          <div class="bg-slate-50 rounded px-2.5 py-2">
+            <div class="text-[10px] text-slate-400 uppercase">Unit (>$200 disc)</div>
+            <div class="font-bold">${{ "{:,.0f}".format(pp.get('unit_comm_gt_200', 0)) }}</div>
+          </div>
+          <div class="bg-slate-50 rounded px-2.5 py-2">
+            <div class="text-[10px] text-slate-400 uppercase">Hourly Offset</div>
+            <div class="font-bold">${{ "{:,.0f}".format(pp.get('hourly_offset', 0)) }}</div>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 sm:grid-cols-6 gap-2 mt-2 text-sm">
+          {% for key, label in [('permaplate','PermaPl.'),('nitro_fill','Nitro'),('pulse','Pulse'),('finance','Finance'),('warranty','Warranty'),('tire_wheel','Tire/Whl')] %}
+          <div class="bg-slate-50 rounded px-2 py-1.5 text-center">
+            <div class="text-[10px] text-slate-400">{{ label }}</div>
+            <div class="font-bold text-xs">${{ "{:,.0f}".format(pp.get(key, 0)) }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% if pp.get('new_vol_15_16') %}
+        <div class="mt-2">
+          <div class="text-[10px] text-slate-400 uppercase mb-1">Volume Bonuses (New)</div>
+          <div class="flex flex-wrap gap-1.5">
+            {% for key, label in [('new_vol_15_16','15-16'),('new_vol_17_18','17-18'),('new_vol_19_20','19-20'),('new_vol_21_24','21-24'),('new_vol_25_plus','25+')] %}
+            <span class="bg-emerald-50 text-emerald-700 rounded px-2 py-0.5 text-xs">{{ label }}: ${{ "{:,.0f}".format(pp.get(key, 0)) }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        {% if pp.get('quarterly_amount') %}
+        <div class="mt-2 text-xs text-slate-500">
+          Quarterly bonus: ${{ "{:,.0f}".format(pp.get('quarterly_amount', 0)) }} at {{ pp.get('quarterly_threshold', 0) }} units
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {# ── YTD Display ── #}
+      {% if p.post_type == "ytd" and p._payload %}
+      {% set yd = p._payload %}
+      <div class="mt-2">
+        {% if p.body %}<p class="text-sm text-slate-600 mb-3">{{ p.body }}</p>{% endif %}
+        <div class="grid grid-cols-3 gap-3 mb-3">
+          <div class="bg-slate-50 rounded px-2.5 py-2">
+            <div class="text-[10px] text-slate-400 uppercase">YTD Units</div>
+            <div class="text-xl font-bold">{{ yd.get('total_units', 0) }}</div>
+          </div>
+          <div class="bg-slate-50 rounded px-2.5 py-2">
+            <div class="text-[10px] text-slate-400 uppercase">Avg / Month</div>
+            <div class="text-xl font-bold">{{ yd.get('avg_per_month', 0) }}</div>
+          </div>
+          <div class="bg-slate-50 rounded px-2.5 py-2">
+            <div class="text-[10px] text-slate-400 uppercase">New / Used</div>
+            <div class="text-xl font-bold">{{ yd.get('new_count', 0) }} / {{ yd.get('used_count', 0) }}</div>
+          </div>
+        </div>
+        {% if yd.get('months') %}
+        <div class="flex items-end gap-0.5 h-16">
+          {% set months = yd.get('months', []) %}
+          {% set max_m = months|max if months|max > 0 else 1 %}
+          {% for i in range(12) %}
+          <div class="flex-1 flex flex-col items-center justify-end h-full" title="{{ ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i] }}: {{ months[i] if i < months|length else 0 }}">
+            <div class="w-full rounded-t bg-blue-400" style="height:{{ ((months[i] if i < months|length else 0) / max_m * 100) }}%; min-height:{{ '3px' if (months[i] if i < months|length else 0) > 0 else '1px' }}"></div>
+            <div class="text-[9px] text-slate-400 mt-0.5">{{ ['J','F','M','A','M','J','J','A','S','O','N','D'][i] }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {# ── Poll Display ── #}
+      {% if p.post_type == "poll" and p._poll %}
+      {% set poll = p._poll %}
+      <div class="mt-2 space-y-2">
+        {% if p.body %}<p class="text-sm text-slate-600 mb-3">{{ p.body }}</p>{% endif %}
+        {% for opt in poll.options %}
+        {% set pct = (opt.vote_count / poll.total_votes * 100) if poll.total_votes else 0 %}
+        {% if poll.user_voted %}
+        {# Already voted — show results #}
+        <div class="relative rounded-lg overflow-hidden border {{ 'border-emerald-300 bg-emerald-50' if poll.user_voted == opt.id else 'border-slate-200' }}">
+          <div class="absolute inset-y-0 left-0 bg-slate-100 rounded-lg" style="width:{{ pct }}%"></div>
+          <div class="relative px-3 py-2 flex items-center justify-between">
+            <span class="text-sm {{ 'font-semibold' if poll.user_voted == opt.id else '' }}">
+              {{ opt.label }}
+              {% if poll.user_voted == opt.id %}<span class="text-emerald-600 ml-1">✓</span>{% endif %}
+            </span>
+            <span class="text-xs text-slate-500 font-medium">{{ "{:.0f}".format(pct) }}%</span>
+          </div>
+        </div>
+        {% else %}
+        {# Not voted — show clickable options #}
+        <form method="post" action="/community/{{ p.id }}/vote">
+          {{ csrf_hidden|safe }}
+          <input type="hidden" name="option_id" value="{{ opt.id }}">
+          <button type="submit" class="w-full text-left rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 hover:border-slate-300 transition">
+            {{ opt.label }}
+          </button>
+        </form>
+        {% endif %}
+        {% endfor %}
+        <div class="text-xs text-slate-400">{{ poll.total_votes }} vote{{ 's' if poll.total_votes != 1 else '' }}</div>
+      </div>
+      {% endif %}
+    </div>
+
+    {# ── Footer: Upvote ── #}
+    <div class="px-4 py-2 border-t border-slate-100 flex items-center">
+      <form method="post" action="/community/{{ p.id }}/upvote" class="inline">
+        {{ csrf_hidden|safe }}
+        <button type="submit" class="flex items-center gap-1.5 text-sm transition {{ 'text-rose-500 font-medium' if p._upvoted else 'text-slate-400 hover:text-rose-400' }}">
+          {% if p._upvoted %}
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+          {% else %}
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+          {% endif %}
+          <span>{{ p.upvote_count or 0 }}</span>
+        </button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+
+  {% if posts|length == 0 %}
+  <div class="text-center py-16 bg-white rounded-lg border border-dashed border-slate-200">
+    <div class="text-slate-400 mb-2">No posts yet</div>
+    <div class="text-sm text-slate-400">Be the first — share your pay plan, YTD, or start a conversation.</div>
+  </div>
+  {% endif %}
+</div>
+
+{# ── Pagination ── #}
+{% if total > per_page %}
+<div class="flex items-center justify-center gap-2 mb-6">
+  {% if page > 1 %}
+  <a href="/community?page={{ page - 1 }}&post_type={{ filter_type }}&brand={{ filter_brand }}&state={{ filter_state }}"
+     class="text-sm px-3 py-1.5 rounded border border-slate-200 hover:bg-slate-50 transition">← Prev</a>
+  {% endif %}
+  <span class="text-sm text-slate-400">Page {{ page }}</span>
+  {% if page * per_page < total %}
+  <a href="/community?page={{ page + 1 }}&post_type={{ filter_type }}&brand={{ filter_brand }}&state={{ filter_state }}"
+     class="text-sm px-3 py-1.5 rounded border border-slate-200 hover:bg-slate-50 transition">Next →</a>
+  {% endif %}
+</div>
+{% endif %}
+
+
+{# ════════════════════════════════════ #}
+{# ── NEW POST MODAL ── #}
+{# ════════════════════════════════════ #}
+<div id="newPostModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold">New Post</h2>
+        <button onclick="document.getElementById('newPostModal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+      </div>
+
+      <form method="post" action="/community/post" id="newPostForm">
+        {{ csrf_hidden|safe }}
+
+        {# Post type selector #}
+        <div class="grid grid-cols-4 gap-1 bg-slate-100 rounded-lg p-1 mb-4">
+          <button type="button" onclick="setPostType('text')" id="btn-text" class="post-type-btn px-2 py-2 text-xs font-medium rounded-md transition bg-white shadow-sm text-slate-900">Text</button>
+          <button type="button" onclick="setPostType('payplan')" id="btn-payplan" class="post-type-btn px-2 py-2 text-xs font-medium rounded-md transition text-slate-500 hover:text-slate-700">Pay Plan</button>
+          <button type="button" onclick="setPostType('ytd')" id="btn-ytd" class="post-type-btn px-2 py-2 text-xs font-medium rounded-md transition text-slate-500 hover:text-slate-700">YTD</button>
+          <button type="button" onclick="setPostType('poll')" id="btn-poll" class="post-type-btn px-2 py-2 text-xs font-medium rounded-md transition text-slate-500 hover:text-slate-700">Poll</button>
+        </div>
+        <input type="hidden" name="post_type" id="postTypeInput" value="text">
+
+        {# Anonymity #}
+        <div class="mb-4">
+          <label class="block text-xs font-medium text-slate-600 mb-1.5">Show as</label>
+          <select name="anonymity" class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white">
+            {% if my_dealership %}
+            <option value="dealership">{{ my_dealership.name }}</option>
+            <option value="brand" selected>{{ my_dealership.brand or 'Brand' }} Dealership</option>
+            {% endif %}
+            <option value="anonymous">Anonymous Salesperson</option>
+          </select>
+        </div>
+
+        {# Title #}
+        <div class="mb-3">
+          <input type="text" name="title" placeholder="Title (optional)" maxlength="200"
+                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500">
+        </div>
+
+        {# Body — shown for text/payplan/ytd, question text for polls #}
+        <div class="mb-3" id="bodyField">
+          <textarea name="body" rows="3" placeholder="What's on your mind?" maxlength="2000"
+                    class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 resize-none" id="bodyInput"></textarea>
+        </div>
+
+        {# Poll options — only shown for poll type #}
+        <div class="mb-3 hidden" id="pollField">
+          <label class="block text-xs font-medium text-slate-600 mb-1.5">Options (comma-separated, up to 8)</label>
+          <input type="text" name="poll_options" placeholder="e.g. 10-15, 15-20, 20-25, 25+"
+                 class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500">
+        </div>
+
+        {# Auto-pull info #}
+        <div class="hidden mb-3 p-3 bg-violet-50 rounded-lg text-xs text-violet-700" id="autoInfo">
+          Your pay plan will be pulled from your settings automatically. Add a comment above if you want.
+        </div>
+        <div class="hidden mb-3 p-3 bg-blue-50 rounded-lg text-xs text-blue-700" id="ytdInfo">
+          Your YTD numbers will be pulled from your deals automatically. Add a comment above if you want.
+        </div>
+
+        <div class="flex gap-3 mt-4">
+          <button type="submit" class="flex-1 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">Post</button>
+          <button type="button" onclick="document.getElementById('newPostModal').classList.add('hidden')" class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function setPostType(type) {
+  document.getElementById('postTypeInput').value = type;
+  document.querySelectorAll('.post-type-btn').forEach(function(b) {
+    b.className = 'post-type-btn px-2 py-2 text-xs font-medium rounded-md transition text-slate-500 hover:text-slate-700';
+  });
+  document.getElementById('btn-' + type).className = 'post-type-btn px-2 py-2 text-xs font-medium rounded-md transition bg-white shadow-sm text-slate-900';
+
+  document.getElementById('pollField').classList.toggle('hidden', type !== 'poll');
+  document.getElementById('autoInfo').classList.toggle('hidden', type !== 'payplan');
+  document.getElementById('ytdInfo').classList.toggle('hidden', type !== 'ytd');
+
+  var bi = document.getElementById('bodyInput');
+  if (type === 'poll') bi.placeholder = 'Your question...';
+  else if (type === 'payplan') bi.placeholder = 'Any comments about your pay plan? (optional)';
+  else if (type === 'ytd') bi.placeholder = 'Any comments about your numbers? (optional)';
+  else bi.placeholder = "What's on your mind?";
+}
+</script>
+
+{% endblock %}

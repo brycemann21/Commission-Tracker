@@ -31,7 +31,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import select, func, or_, and_, text as sa_text
 
-from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder, Dealership, Invite
+from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder, Dealership, Invite, Post, PostUpvote, PollOption, PollVote
 from .schemas import DealIn
 from .payplan import calc_commission
 from .utils import parse_date, today
@@ -863,6 +863,75 @@ async def _run_startup_migrations():
                     logger.info(f"Designated user {first_uid} as platform super admin")
         except Exception as e:
             logger.warning(f"Super admin setup error: {e}")
+
+        # 10. Community tables
+        for col, typ in [("brand", "VARCHAR(80)"), ("state", "VARCHAR(2)")]:
+            try:
+                await conn.execute(f"ALTER TABLE dealerships ADD COLUMN IF NOT EXISTS {col} {typ}")
+            except Exception:
+                pass
+
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS posts (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    dealership_id INTEGER,
+                    post_type VARCHAR(16) NOT NULL,
+                    anonymity VARCHAR(16) DEFAULT 'brand',
+                    title VARCHAR(200) DEFAULT '',
+                    body TEXT DEFAULT '',
+                    payload TEXT DEFAULT '{}',
+                    upvote_count INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    is_deleted BOOLEAN DEFAULT false
+                )
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_posts_dealership ON posts(dealership_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_posts_type ON posts(post_type)")
+        except Exception:
+            pass
+
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS post_upvotes (
+                    id SERIAL PRIMARY KEY,
+                    post_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(post_id, user_id)
+                )
+            """)
+        except Exception:
+            pass
+
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS poll_options (
+                    id SERIAL PRIMARY KEY,
+                    post_id INTEGER NOT NULL,
+                    label VARCHAR(200) NOT NULL,
+                    vote_count INTEGER DEFAULT 0,
+                    sort_order INTEGER DEFAULT 0
+                )
+            """)
+        except Exception:
+            pass
+
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS poll_votes (
+                    id SERIAL PRIMARY KEY,
+                    post_id INTEGER NOT NULL,
+                    option_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(post_id, user_id)
+                )
+            """)
+        except Exception:
+            pass
     finally:
         # Clean up expired sessions via raw asyncpg (avoids pgBouncer prepared stmt issue)
         try:
@@ -3082,6 +3151,286 @@ async def team_update_dealership(
         dealership.name = name.strip()[:200]
         await db.commit()
     return RedirectResponse(url="/team", status_code=303)
+
+
+# ════════════════════════════════════════════════
+# COMMUNITY — anonymous feed for salespeople
+# ════════════════════════════════════════════════
+
+import json as _json
+
+def _post_display_name(post, dealership_map: dict) -> str:
+    """Compute the display attribution for an anonymous post."""
+    d = dealership_map.get(post.dealership_id)
+    if post.anonymity == "dealership" and d:
+        return d.name
+    elif post.anonymity == "brand" and d and d.brand:
+        return f"{d.brand} Dealership"
+    elif post.anonymity == "brand" and d:
+        # Try to extract brand from dealership name
+        name = d.name or ""
+        for word in ["of", "Of", "OF"]:
+            if f" {word} " in name:
+                return name.split(f" {word} ")[0].strip() + " Dealership"
+        return "A Dealership"
+    return "Anonymous Salesperson"
+
+
+@app.get("/community", response_class=HTMLResponse)
+async def community_feed(
+    request: Request, db: AsyncSession = Depends(get_db),
+    post_type: str = "", brand: str = "", state: str = "", page: int = 1,
+):
+    """Community feed — anonymous posts from salespeople."""
+    user = await _user(request, db)
+    per_page = 20
+    offset = (max(1, page) - 1) * per_page
+
+    # Build query
+    q = select(Post).where(Post.is_deleted == False)
+    if post_type and post_type in ("text", "payplan", "ytd", "poll"):
+        q = q.where(Post.post_type == post_type)
+    if brand:
+        # Join with dealerships to filter by brand
+        brand_ids = (await db.execute(
+            select(Dealership.id).where(Dealership.brand == brand)
+        )).scalars().all()
+        if brand_ids:
+            q = q.where(Post.dealership_id.in_(brand_ids))
+        else:
+            q = q.where(Post.id < 0)  # no results
+    if state:
+        state_ids = (await db.execute(
+            select(Dealership.id).where(Dealership.state == state.upper())
+        )).scalars().all()
+        if state_ids:
+            q = q.where(Post.dealership_id.in_(state_ids))
+        else:
+            q = q.where(Post.id < 0)
+
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar() or 0
+    posts = (await db.execute(
+        q.order_by(Post.created_at.desc()).offset(offset).limit(per_page)
+    )).scalars().all()
+
+    # Enrich posts
+    d_ids = {p.dealership_id for p in posts if p.dealership_id}
+    dealership_map = {}
+    if d_ids:
+        ds = (await db.execute(select(Dealership).where(Dealership.id.in_(d_ids)))).scalars().all()
+        dealership_map = {d.id: d for d in ds}
+
+    # Check which posts current user has upvoted
+    post_ids = [p.id for p in posts]
+    user_upvotes = set()
+    if post_ids:
+        upvoted = (await db.execute(
+            select(PostUpvote.post_id).where(
+                PostUpvote.user_id == uid(request),
+                PostUpvote.post_id.in_(post_ids),
+            )
+        )).scalars().all()
+        user_upvotes = set(upvoted)
+
+    # Get poll options + user votes for poll posts
+    poll_data = {}
+    poll_posts = [p for p in posts if p.post_type == "poll"]
+    if poll_posts:
+        poll_ids = [p.id for p in poll_posts]
+        options = (await db.execute(
+            select(PollOption).where(PollOption.post_id.in_(poll_ids)).order_by(PollOption.sort_order)
+        )).scalars().all()
+        user_poll_votes = (await db.execute(
+            select(PollVote).where(PollVote.user_id == uid(request), PollVote.post_id.in_(poll_ids))
+        )).scalars().all()
+        user_vote_map = {v.post_id: v.option_id for v in user_poll_votes}
+        for p in poll_posts:
+            p_options = [o for o in options if o.post_id == p.id]
+            total_votes = sum(o.vote_count for o in p_options)
+            poll_data[p.id] = {
+                "options": p_options,
+                "total_votes": total_votes,
+                "user_voted": user_vote_map.get(p.id),
+            }
+
+    # Enrich posts with display info
+    for p in posts:
+        p._display_name = _post_display_name(p, dealership_map)
+        p._payload = _json.loads(p.payload) if p.payload and p.payload != "{}" else {}
+        p._upvoted = p.id in user_upvotes
+        p._poll = poll_data.get(p.id)
+
+    # Get filter options
+    brands = (await db.execute(
+        select(Dealership.brand).where(Dealership.brand.isnot(None), Dealership.brand != "")
+        .distinct().order_by(Dealership.brand)
+    )).scalars().all()
+    states = (await db.execute(
+        select(Dealership.state).where(Dealership.state.isnot(None), Dealership.state != "")
+        .distinct().order_by(Dealership.state)
+    )).scalars().all()
+
+    my_dealership = (await db.execute(
+        select(Dealership).where(Dealership.id == user_dealership_id(request))
+    )).scalar_one_or_none() if user_dealership_id(request) else None
+
+    return templates.TemplateResponse("community.html", {
+        "request": request, "user": user, "posts": posts,
+        "brands": brands, "states": states,
+        "filter_type": post_type, "filter_brand": brand, "filter_state": state,
+        "page": page, "total": total, "per_page": per_page,
+        "my_dealership": my_dealership,
+        "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+    })
+
+
+@app.post("/community/post")
+async def community_create_post(
+    request: Request, db: AsyncSession = Depends(get_db),
+    post_type: str = Form("text"),
+    anonymity: str = Form("brand"),
+    title: str = Form(""),
+    body: str = Form(""),
+    poll_options: str = Form(""),  # comma-separated for polls
+):
+    """Create a new community post."""
+    if anonymity not in ("dealership", "brand", "anonymous"):
+        anonymity = "brand"
+    if post_type not in ("text", "payplan", "ytd", "poll"):
+        post_type = "text"
+
+    user = await _user(request, db)
+    d_id = user_dealership_id(request)
+    payload = "{}"
+
+    if post_type == "payplan":
+        # Auto-generate from settings
+        s = await get_or_create_settings(db, uid(request), d_id)
+        payload = _json.dumps({
+            "unit_comm_le_200": s.unit_comm_discount_le_200,
+            "unit_comm_gt_200": s.unit_comm_discount_gt_200,
+            "permaplate": s.permaplate, "nitro_fill": s.nitro_fill,
+            "pulse": s.pulse, "finance": s.finance_non_subvented,
+            "warranty": s.warranty, "tire_wheel": s.tire_wheel,
+            "hourly_offset": s.hourly_rate_ny_offset,
+            "new_vol_15_16": s.new_volume_bonus_15_16,
+            "new_vol_17_18": s.new_volume_bonus_17_18,
+            "new_vol_19_20": s.new_volume_bonus_19_20,
+            "new_vol_21_24": s.new_volume_bonus_21_24,
+            "new_vol_25_plus": s.new_volume_bonus_25_plus,
+            "used_vol_8_10": s.used_volume_bonus_8_10,
+            "used_vol_11_12": s.used_volume_bonus_11_12,
+            "used_vol_13_plus": s.used_volume_bonus_13_plus,
+            "quarterly_threshold": s.quarterly_bonus_threshold_units,
+            "quarterly_amount": s.quarterly_bonus_amount,
+        })
+
+    elif post_type == "ytd":
+        # Auto-generate from deals
+        yr = today().year
+        yr_start = date(yr, 1, 1)
+        yr_end = date(yr + 1, 1, 1)
+        delivered = (await db.execute(
+            select(Deal).where(
+                Deal.user_id == uid(request), Deal.status == "Delivered",
+                Deal.delivered_date >= yr_start, Deal.delivered_date < yr_end,
+            )
+        )).scalars().all()
+        months = [0] * 12
+        for d in delivered:
+            if d.delivered_date:
+                months[d.delivered_date.month - 1] += 1
+        current_month = today().month
+        avg = sum(months[:current_month]) / current_month if current_month else 0
+        payload = _json.dumps({
+            "year": yr,
+            "total_units": len(delivered),
+            "months": months,
+            "avg_per_month": round(avg, 1),
+            "new_count": sum(1 for d in delivered if (d.new_used or "").lower() == "new"),
+            "used_count": sum(1 for d in delivered if (d.new_used or "").lower() == "used"),
+        })
+
+    post = Post(
+        user_id=uid(request),
+        dealership_id=d_id,
+        post_type=post_type,
+        anonymity=anonymity,
+        title=title.strip()[:200],
+        body=body.strip()[:2000],
+        payload=payload,
+    )
+    db.add(post)
+    await db.commit()
+    await db.refresh(post)
+
+    # Add poll options
+    if post_type == "poll" and poll_options.strip():
+        opts = [o.strip() for o in poll_options.split(",") if o.strip()][:8]
+        for i, label in enumerate(opts):
+            db.add(PollOption(post_id=post.id, label=label[:200], sort_order=i))
+        await db.commit()
+
+    return RedirectResponse(url="/community", status_code=303)
+
+
+@app.post("/community/{post_id}/upvote")
+async def community_upvote(post_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Toggle upvote on a post."""
+    existing = (await db.execute(
+        select(PostUpvote).where(PostUpvote.post_id == post_id, PostUpvote.user_id == uid(request))
+    )).scalar_one_or_none()
+
+    post = (await db.execute(select(Post).where(Post.id == post_id))).scalar_one_or_none()
+    if not post:
+        return RedirectResponse(url="/community", status_code=303)
+
+    if existing:
+        await db.delete(existing)
+        post.upvote_count = max(0, (post.upvote_count or 0) - 1)
+    else:
+        db.add(PostUpvote(post_id=post_id, user_id=uid(request)))
+        post.upvote_count = (post.upvote_count or 0) + 1
+    await db.commit()
+    return RedirectResponse(url="/community", status_code=303)
+
+
+@app.post("/community/{post_id}/vote")
+async def community_poll_vote(
+    post_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    option_id: int = Form(...),
+):
+    """Vote on a poll option."""
+    # Check user hasn't already voted
+    existing = (await db.execute(
+        select(PollVote).where(PollVote.post_id == post_id, PollVote.user_id == uid(request))
+    )).scalar_one_or_none()
+    if existing:
+        return RedirectResponse(url="/community", status_code=303)
+
+    option = (await db.execute(
+        select(PollOption).where(PollOption.id == option_id, PollOption.post_id == post_id)
+    )).scalar_one_or_none()
+    if not option:
+        return RedirectResponse(url="/community", status_code=303)
+
+    db.add(PollVote(post_id=post_id, option_id=option_id, user_id=uid(request)))
+    option.vote_count = (option.vote_count or 0) + 1
+    await db.commit()
+    return RedirectResponse(url="/community", status_code=303)
+
+
+@app.post("/community/{post_id}/delete")
+async def community_delete_post(post_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Delete your own post (or super admin can delete any)."""
+    post = (await db.execute(select(Post).where(Post.id == post_id))).scalar_one_or_none()
+    if not post:
+        return RedirectResponse(url="/community", status_code=303)
+    if post.user_id != uid(request) and not is_super_admin(request):
+        return RedirectResponse(url="/community", status_code=303)
+    post.is_deleted = True
+    await db.commit()
+    return RedirectResponse(url="/community", status_code=303)
 
 
 # ════════════════════════════════════════════════

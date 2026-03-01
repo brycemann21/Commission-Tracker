@@ -29,6 +29,9 @@ class Dealership(Base):
     google_place_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     address: Mapped[str | None] = mapped_column(String(300), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # Parsed from name/address for community filtering
+    brand: Mapped[str | None] = mapped_column(String(80), nullable=True)  # e.g. "Toyota", "Honda"
+    state: Mapped[str | None] = mapped_column(String(2), nullable=True)   # e.g. "NY", "CA"
 
     # Subscription fields (Phase 4 — Stripe integration)
     # Placeholder columns so we don't need another migration later
@@ -232,4 +235,57 @@ class Reminder(Base):
     body: Mapped[str] = mapped_column(Text, default="")
     due_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     is_done: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+# ════════════════════════════════════════════════
+# COMMUNITY — anonymous feed for salespeople
+# ════════════════════════════════════════════════
+
+class Post(Base):
+    """A community post — can be text, pay plan share, YTD share, or poll."""
+    __tablename__ = "posts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)          # hidden from UI
+    dealership_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # for filtering
+    post_type: Mapped[str] = mapped_column(String(16), nullable=False)      # text | payplan | ytd | poll
+    # Privacy: "dealership" = show full name, "brand" = show just brand, "anonymous" = hide all
+    anonymity: Mapped[str] = mapped_column(String(16), default="brand")
+    title: Mapped[str] = mapped_column(String(200), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    # Structured data for auto-generated posts (JSON string)
+    # payplan: {"unit_comm_le_200": 190, "permaplate": 40, ...}
+    # ytd: {"units": 47, "months": [25, 22, 0, ...], "avg_per_month": 23.5}
+    payload: Mapped[str] = mapped_column(Text, default="{}")
+    upvote_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class PostUpvote(Base):
+    """One upvote per user per post."""
+    __tablename__ = "post_upvotes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class PollOption(Base):
+    """A single option in a poll post."""
+    __tablename__ = "poll_options"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    label: Mapped[str] = mapped_column(String(200), nullable=False)
+    vote_count: Mapped[int] = mapped_column(Integer, default=0)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class PollVote(Base):
+    """One vote per user per poll."""
+    __tablename__ = "poll_votes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    option_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

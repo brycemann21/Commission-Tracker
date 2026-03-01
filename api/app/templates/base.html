@@ -54,6 +54,9 @@
           Team
         </a>
         {% endif %}
+        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/community') else 'text-slate-600 hover:bg-slate-100' }}" href="/community">
+          Community
+        </a>
         {% if request.state.is_super_admin is defined and request.state.is_super_admin %}
         <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-violet-700 text-white' if path.startswith('/admin') else 'text-violet-600 hover:bg-violet-50' }}" href="/admin">
           Platform
