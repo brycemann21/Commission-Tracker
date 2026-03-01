@@ -1232,15 +1232,14 @@ async def deals_list(
     # Cross-month search: if searching, ignore month filter entirely
     searching_all = bool(search_all == "1" and q and q.strip())
     if not searching_all:
-        carry = ["inbound", "fo"]
         stmt = stmt.where(or_(
             # Sold in the selected month
             and_(Deal.sold_date.is_not(None), Deal.sold_date >= start_sel, Deal.sold_date < end_sel),
             # Delivered in the selected month but sold in a different month (cross-month carryover)
             and_(Deal.delivered_date.is_not(None), Deal.delivered_date >= start_sel, Deal.delivered_date < end_sel,
                  or_(Deal.sold_date.is_(None), Deal.sold_date < start_sel, Deal.sold_date >= end_sel)),
-            # Inbound/FO tags not yet delivered (legacy carryover)
-            and_(func.lower(func.coalesce(Deal.tag, "")).in_(carry), Deal.status != "Delivered"),
+            # Any Pending or Scheduled deal carries over until delivered/dead
+            Deal.status.in_(["Pending", "Scheduled"]),
         ))
     if status and status != "All": stmt = stmt.where(Deal.status == status)
     if paid == "Paid": stmt = stmt.where(Deal.is_paid.is_(True))
