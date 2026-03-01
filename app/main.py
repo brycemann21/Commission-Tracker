@@ -283,6 +283,7 @@ async def auth_middleware(request: Request, call_next):
     request.state.dealership_id = dealership_id_val
     request.state.role = role_val
     request.state.is_super_admin = is_super_admin_val
+
     # Admin mode toggle — super admins can switch between platform view and salesperson view
     request.state.admin_mode = is_super_admin_val and request.cookies.get("admin_mode") == "1"
     # Set CSRF token on request state for templates
@@ -2861,7 +2862,9 @@ async def team_change_role(
 async def team_remove_member(
     user_id: int, request: Request, db: AsyncSession = Depends(get_db),
 ):
-    """Remove a team member from the dealership. Admin only."""
+    """Remove a team member from the dealership. Admin only.
+    The removed user gets their own personal dealership so they can keep
+    tracking independently — salespeople always own their data."""
     _require_admin(request)
     if user_id == uid(request):
         return RedirectResponse(url="/team", status_code=303)
@@ -2870,9 +2873,35 @@ async def team_remove_member(
         select(User).where(User.id == user_id, User.dealership_id == d_id)
     )).scalar_one_or_none()
     if target:
-        target.dealership_id = None
-        target.role = "salesperson"
+        old_dealership_id = target.dealership_id
+        # Create a personal dealership for the removed user
+        target = await _create_dealership_for_user(
+            db, target,
+            name_hint=target.display_name or target.username,
+        )
+        new_dealership_id = target.dealership_id
+        # Move their deals, goals, and reminders to their new personal dealership
+        # Salespeople own their data
+        if old_dealership_id != new_dealership_id:
+            for tbl_class in (Deal, Goal, Reminder):
+                rows = (await db.execute(
+                    select(tbl_class).where(
+                        tbl_class.user_id == user_id,
+                        tbl_class.dealership_id == old_dealership_id,
+                    )
+                )).scalars().all()
+                for row in rows:
+                    row.dealership_id = new_dealership_id
+        # Reset verification since they're no longer part of the team
+        target.is_verified = False
+        target.verified_by = None
+        target.verified_at = None
         await db.commit()
+        # Clear their session cache so they pick up the new dealership on next request
+        from .auth import _cache_delete_user
+        _cache_delete_user(user_id)
+    return RedirectResponse(url="/team", status_code=303)
+    return RedirectResponse(url="/team", status_code=303)
     return RedirectResponse(url="/team", status_code=303)
 
 
