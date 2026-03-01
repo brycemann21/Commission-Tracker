@@ -23,7 +23,7 @@ def _utcnow() -> datetime:
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Form, Depends, UploadFile, File
+from fastapi import FastAPI, Request, Form, Depends, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -31,7 +31,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import select, func, or_, and_, text as sa_text
 
-from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder
+from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder, Dealership, Invite
 from .schemas import DealIn
 from .payplan import calc_commission
 from .utils import parse_date, today
@@ -178,6 +178,16 @@ static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+# Serve service worker from root path so it can control the entire site scope
+@app.get("/sw.js")
+async def service_worker():
+    sw_path = os.path.join(os.path.dirname(__file__), "static", "sw.js")
+    return StreamingResponse(
+        open(sw_path, "rb"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+    )
+
 
 @app.exception_handler(Exception)
 async def _exc(request: Request, exc: Exception):
@@ -200,6 +210,7 @@ async def get_db():
 
 # ─── Auth helpers ───
 PUBLIC_PATHS = {"/login", "/register", "/forgot-password", "/auth/reset-confirm"}
+PUBLIC_PREFIXES = ("/join/",)  # Invite links must be accessible without login
 
 @app.middleware("http")
 async def csrf_middleware(request: Request, call_next):
@@ -241,29 +252,36 @@ async def security_headers(request: Request, call_next):
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
-    if path.startswith("/static"):
+    if path.startswith("/static") or path in ("/sw.js",):
         return await call_next(request)
 
     token = get_session_token(request)
 
     # Session check uses raw asyncpg (no SQLAlchemy, pgBouncer-safe)
-    # Pass None as db — get_user_id_from_session uses raw pg when available
-    uid_val = await get_user_id_from_session(None, token)
+    # Returns (user_id, dealership_id, role) or None
+    session_info = await get_user_id_from_session(None, token)
 
     # For public pages: auto-redirect to dashboard if already logged in
+    is_invite = any(path.startswith(p) for p in PUBLIC_PREFIXES)
     if path in PUBLIC_PATHS:
-        if uid_val is not None:
+        if session_info is not None:
             return RedirectResponse(url="/", status_code=303)
+        return await call_next(request)
+    # Invite links: accessible to anyone — logged-in or not
+    if is_invite:
         return await call_next(request)
 
     # Protected pages
-    if uid_val is None:
+    if session_info is None:
         dest = request.url.path
         if request.url.query:
             dest += f"?{request.url.query}"
         return RedirectResponse(url=f"/login?next={dest}", status_code=303)
 
+    uid_val, dealership_id_val, role_val = session_info
     request.state.user_id = uid_val
+    request.state.dealership_id = dealership_id_val
+    request.state.role = role_val
     # Set CSRF token on request state for templates
     request.state.csrf_token = request.cookies.get(CSRF_COOKIE, _generate_csrf_token())
     response = await call_next(request)
@@ -278,8 +296,60 @@ async def auth_middleware(request: Request, call_next):
 def uid(request: Request) -> int:
     return request.state.user_id
 
+def user_dealership_id(request: Request) -> int | None:
+    """Get the current user's dealership_id from request state."""
+    return getattr(request.state, "dealership_id", None)
+
+def user_role(request: Request) -> str:
+    """Get the current user's role from request state."""
+    return getattr(request.state, "role", "salesperson")
+
 async def _user(request: Request, db: AsyncSession) -> User:
     return (await db.execute(select(User).where(User.id == uid(request)))).scalar_one()
+
+
+async def _create_dealership_for_user(db: AsyncSession, user: User, name_hint: str = "") -> User:
+    """Create a new dealership and make the user its admin.
+    Called during registration when a user signs up without an invite."""
+    import re as _re
+    dealer_name = name_hint or user.display_name or user.username
+    dealer_name = f"{dealer_name}'s Dealership"
+    # Generate a URL-safe slug
+    base_slug = _re.sub(r'[^a-z0-9]+', '-', (user.username or "dealer").lower()).strip('-')[:60]
+    slug = base_slug
+    i = 1
+    while (await db.execute(select(Dealership).where(Dealership.slug == slug))).scalar_one_or_none():
+        slug = f"{base_slug}-{i}"
+        i += 1
+
+    dealership = Dealership(
+        name=dealer_name,
+        slug=slug,
+        subscription_status="free",  # first dealership is free (yours)
+    )
+    db.add(dealership)
+    await db.commit()
+    await db.refresh(dealership)
+
+    # Assign user as admin of this dealership
+    user.dealership_id = dealership.id
+    user.role = "admin"
+    await db.commit()
+    await db.refresh(user)
+
+    logger.info(f"Created dealership '{dealer_name}' (id={dealership.id}) for user {user.id}")
+    return user
+
+
+def _require_admin(request: Request):
+    """Raise 403 if the current user is not an admin."""
+    if user_role(request) != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+def _require_admin_or_manager(request: Request):
+    """Raise 403 if the current user is not an admin or manager."""
+    if user_role(request) not in ("admin", "manager"):
+        raise HTTPException(status_code=403, detail="Manager access required")
 
 
 # ─── Startup / Migrations ───
@@ -545,6 +615,138 @@ async def _run_startup_migrations():
             """)
         except Exception:
             pass
+
+        # ════════════════════════════════════════════════════════════════
+        # PHASE 1 — Multi-tenancy migration
+        # All DDL is idempotent (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS)
+        # ════════════════════════════════════════════════════════════════
+
+        # 1. Create dealerships table
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS dealerships (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(200) NOT NULL,
+                    slug VARCHAR(80) UNIQUE NOT NULL,
+                    timezone VARCHAR(64) DEFAULT 'America/New_York',
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    is_active BOOLEAN DEFAULT true,
+                    stripe_customer_id VARCHAR(128),
+                    stripe_subscription_id VARCHAR(128),
+                    subscription_status VARCHAR(32) DEFAULT 'trialing',
+                    max_users INTEGER DEFAULT 5
+                )
+            """)
+        except Exception:
+            pass
+
+        # 2. Add dealership_id and role to users
+        for col, typ in [
+            ("dealership_id", "INTEGER"),
+            ("role", "VARCHAR(24) DEFAULT 'salesperson'"),
+        ]:
+            try:
+                await conn.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typ}")
+            except Exception:
+                pass
+
+        # 3. Add dealership_id to data tables
+        for tbl in ("deals", "settings", "goals", "reminders"):
+            try:
+                await conn.execute(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS dealership_id INTEGER")
+            except Exception:
+                pass
+
+        # 4. Create invites table
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS invites (
+                    id SERIAL PRIMARY KEY,
+                    token VARCHAR(128) UNIQUE NOT NULL,
+                    dealership_id INTEGER NOT NULL,
+                    email VARCHAR(254),
+                    role VARCHAR(24) DEFAULT 'salesperson',
+                    created_by INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    expires_at TIMESTAMP NOT NULL,
+                    used BOOLEAN DEFAULT false,
+                    used_by INTEGER
+                )
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_invites_token ON invites(token)")
+        except Exception:
+            pass
+
+        # 5. Auto-migrate existing data: if there are users without a dealership,
+        #    create a "default" dealership and assign everything to it.
+        #    This ensures zero downtime — existing data keeps working.
+        try:
+            orphan_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM users WHERE dealership_id IS NULL"
+            )
+            if orphan_count and orphan_count > 0:
+                # Check if a default dealership already exists
+                default_d = await conn.fetchval(
+                    "SELECT id FROM dealerships WHERE slug = 'default' LIMIT 1"
+                )
+                if not default_d:
+                    default_d = await conn.fetchval("""
+                        INSERT INTO dealerships (name, slug, subscription_status)
+                        VALUES ('My Dealership', 'default', 'free')
+                        RETURNING id
+                    """)
+
+                # Assign all orphaned users to the default dealership as admin
+                await conn.execute(
+                    "UPDATE users SET dealership_id = $1, role = 'admin' WHERE dealership_id IS NULL",
+                    default_d
+                )
+
+                # Assign all orphaned data to the default dealership
+                for tbl in ("deals", "settings", "goals", "reminders"):
+                    try:
+                        await conn.execute(
+                            f"UPDATE {tbl} SET dealership_id = $1 WHERE dealership_id IS NULL",
+                            default_d
+                        )
+                    except Exception:
+                        pass
+
+                # Also migrate settings: if settings have user_id but no dealership_id,
+                # copy the dealership_id from the user
+                try:
+                    await conn.execute("""
+                        UPDATE settings s
+                        SET dealership_id = u.dealership_id
+                        FROM users u
+                        WHERE s.user_id = u.id AND s.dealership_id IS NULL AND u.dealership_id IS NOT NULL
+                    """)
+                except Exception:
+                    pass
+
+                logger.info(f"Multi-tenancy migration: assigned {orphan_count} user(s) to dealership {default_d}")
+        except Exception as e:
+            logger.warning(f"Multi-tenancy auto-migration error: {e}")
+
+        # 6. Indexes for multi-tenancy queries
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_dealership ON users(dealership_id)")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_dealership ON deals(dealership_id)")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_dealership_user ON deals(dealership_id, user_id)")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_settings_dealership ON settings(dealership_id)")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_goals_dealership ON goals(dealership_id)")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_reminders_dealership ON reminders(dealership_id, user_id)")
+        except Exception: pass
     finally:
         # Clean up expired sessions via raw asyncpg (avoids pgBouncer prepared stmt issue)
         try:
@@ -725,7 +927,7 @@ async def login_post(
 
         sb_user = result.get("user") or {}
         local_user = await get_or_create_user_from_supabase(db, sb_user)
-        await get_or_create_settings(db, local_user.id)
+        await get_or_create_settings(db, local_user.id, local_user.dealership_id)
         token = await create_session(db, local_user.id, remember_me=remember, request=request)
 
     else:
@@ -803,7 +1005,12 @@ async def register_post(
         local_user = await get_or_create_user_from_supabase(
             db, sb_user, display_name=display_name.strip() or reg_email.split("@")[0]
         )
-        await get_or_create_settings(db, local_user.id)
+
+        # If user doesn't have a dealership yet, create one (new signup)
+        if not local_user.dealership_id:
+            local_user = await _create_dealership_for_user(db, local_user, display_name.strip())
+
+        await get_or_create_settings(db, local_user.id, local_user.dealership_id)
 
         if not session_data:
             # Email confirmation required — show success message
@@ -846,7 +1053,11 @@ async def register_post(
         db.add(user)
         await db.commit()
         await db.refresh(user)
-        await get_or_create_settings(db, user.id)
+
+        # Create a dealership for this new user (they become admin)
+        user = await _create_dealership_for_user(db, user, display_name.strip())
+
+        await get_or_create_settings(db, user.id, user.dealership_id)
         token = await create_session(db, user.id, remember_me=False, request=request)
         resp = RedirectResponse(url="/", status_code=303)
         _set_session_cookie(resp, token, False)
@@ -1102,7 +1313,7 @@ async def dashboard(
 ):
     user_id = uid(request)
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one()
-    s = await get_or_create_settings(db, user_id)
+    s = await get_or_create_settings(db, user_id, user_dealership_id(request))
 
     today_date = today()
 
@@ -1354,11 +1565,11 @@ async def goals_save(request: Request, unit_goal: int = Form(20), commission_goa
     except: m = td.month
     # Use upsert to handle the unique constraint on (user_id, year, month) safely
     await db.execute(sa_text("""
-        INSERT INTO goals (user_id, year, month, unit_goal, commission_goal)
-        VALUES (:uid, :y, :m, :u, :c)
+        INSERT INTO goals (user_id, dealership_id, year, month, unit_goal, commission_goal)
+        VALUES (:uid, :did, :y, :m, :u, :c)
         ON CONFLICT (user_id, year, month)
-        DO UPDATE SET unit_goal=:u, commission_goal=:c
-    """), {"uid": user_id, "y": y, "m": m, "u": unit_goal, "c": commission_goal})
+        DO UPDATE SET unit_goal=:u, commission_goal=:c, dealership_id=COALESCE(goals.dealership_id, :did)
+    """), {"uid": user_id, "did": user_dealership_id(request), "y": y, "m": m, "u": unit_goal, "c": commission_goal})
     await db.commit()
     return RedirectResponse(url=f"/?year={y}&month={m}", status_code=303)
 
@@ -1431,7 +1642,7 @@ async def deals_list(
 @app.get("/deals/new", response_class=HTMLResponse)
 async def deal_new(request: Request, db: AsyncSession = Depends(get_db)):
     user_id = uid(request)
-    settings = await get_or_create_settings(db, user_id)
+    settings = await get_or_create_settings(db, user_id, user_dealership_id(request))
     start_m, end_m = month_bounds(today())
     dels = (await db.execute(select(Deal).where(Deal.user_id == user_id, Deal.status == "Delivered", Deal.delivered_date >= start_m, Deal.delivered_date < end_m))).scalars().all()
     u = len(dels); c = sum((d.total_deal_comm or 0) for d in dels)
@@ -1448,7 +1659,7 @@ async def deal_edit(deal_id: int, request: Request, db: AsyncSession = Depends(g
     user_id = uid(request)
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == user_id))).scalar_one_or_none()
     if not deal: return RedirectResponse(url="/deals", status_code=303)
-    settings = await get_or_create_settings(db, user_id)
+    settings = await get_or_create_settings(db, user_id, user_dealership_id(request))
     embed = request.query_params.get("embed") == "1"
     start_m, end_m = month_bounds(today())
     dels = (await db.execute(select(Deal).where(Deal.user_id == user_id, Deal.status == "Delivered", Deal.delivered_date >= start_m, Deal.delivered_date < end_m))).scalars().all()
@@ -1481,7 +1692,7 @@ async def deal_save(
     next: str | None = Form(None), db: AsyncSession = Depends(get_db),
 ):
     user_id = uid(request)
-    settings = await get_or_create_settings(db, user_id)
+    settings = await get_or_create_settings(db, user_id, user_dealership_id(request))
 
     sold = parse_date(sold_date)
     if sold is None and not deal_id: sold = today()
@@ -1535,7 +1746,7 @@ async def deal_save(
         existing.unit_comm = uc; existing.add_ons = ao; existing.trade_hold_comm = th; existing.total_deal_comm = tot
         existing.commission_override = comm_ov
     else:
-        deal = Deal(**deal_in.model_dump(), user_id=user_id, unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot, commission_override=comm_ov)
+        deal = Deal(**deal_in.model_dump(), user_id=user_id, dealership_id=user_dealership_id(request), unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot, commission_override=comm_ov)
         db.add(deal)
     await db.commit()
     return RedirectResponse(url=(next or "/deals"), status_code=303)
@@ -1563,7 +1774,7 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
     body = await request.json()
     field = body.get("field", "")
     value = body.get("value", "")
-    settings = await get_or_create_settings(db, user_id)
+    settings = await get_or_create_settings(db, user_id, user_dealership_id(request))
 
     ALLOWED = {"notes", "status", "tag", "sold_date", "delivered_date", "scheduled_date",
                "customer", "stock_num", "model", "new_used", "deal_type",
@@ -2010,7 +2221,7 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
     form = await request.form()
     user_id = uid(request)
     user = await _user(request, db)
-    settings = await get_or_create_settings(db, user_id)
+    settings = await get_or_create_settings(db, user_id, user_dealership_id(request))
 
     csv_b64 = form.get("csv_b64", "")
     overrides_json = form.get("overrides_json", "[]")
@@ -2080,6 +2291,7 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
             db.add(Deal(
                 **deal_in.model_dump(),
                 user_id=user_id,
+                dealership_id=user_dealership_id(request),
                 unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot,
                 import_batch_id=import_batch_id,
             ))
@@ -2227,7 +2439,7 @@ async def reminder_save(
         if r:
             r.title = title.strip(); r.body = body.strip(); r.due_date = due
     else:
-        r = Reminder(user_id=user_id, title=title.strip(), body=body.strip(), due_date=due)
+        r = Reminder(user_id=user_id, dealership_id=user_dealership_id(request), title=title.strip(), body=body.strip(), due_date=due)
         db.add(r)
     await db.commit()
     await db.refresh(r)
@@ -2257,9 +2469,10 @@ async def payplan_get(request: Request, db: AsyncSession = Depends(get_db)):
     # Note: fi_pvr and aim_amount are stored on deals for reference/reporting
     # but are not currently used in commission calculation (payplan.py).
     # They can be added to calc_commission() in the future if the pay plan changes.
-    s = await get_or_create_settings(db, uid(request))
+    s = await get_or_create_settings(db, uid(request), user_dealership_id(request))
     user = await _user(request, db)
-    return templates.TemplateResponse("payplan.html", {"request": request, "user": user, "s": s, "overdue_reminders": await get_overdue_reminders(db, uid(request))})
+    is_admin = user_role(request) == "admin"
+    return templates.TemplateResponse("payplan.html", {"request": request, "user": user, "s": s, "is_admin": is_admin, "overdue_reminders": await get_overdue_reminders(db, uid(request))})
 
 @app.post("/payplan")
 async def payplan_post(
@@ -2278,7 +2491,9 @@ async def payplan_post(
     quarterly_bonus_threshold_units: int = Form(...), quarterly_bonus_amount: float = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
-    s = await get_or_create_settings(db, uid(request))
+    # Only admins can change the pay plan — it affects the entire dealership
+    _require_admin(request)
+    s = await get_or_create_settings(db, uid(request), user_dealership_id(request))
     for f in ["unit_comm_discount_le_200","unit_comm_discount_gt_200","permaplate","nitro_fill","pulse",
               "finance_non_subvented","warranty","tire_wheel","hourly_rate_ny_offset",
               "new_volume_bonus_15_16","new_volume_bonus_17_18","new_volume_bonus_19_20",
@@ -2295,3 +2510,269 @@ async def payplan_post(
 async def _sr(): return RedirectResponse(url="/payplan", status_code=307)
 @app.post("/settings")
 async def _sp(): return RedirectResponse(url="/payplan", status_code=303)
+
+
+# ════════════════════════════════════════════════
+# TEAM MANAGEMENT (admin/manager)
+# ════════════════════════════════════════════════
+
+@app.get("/team", response_class=HTMLResponse)
+async def team_page(request: Request, db: AsyncSession = Depends(get_db)):
+    """Team management page — admins can invite/manage users, managers can view the team."""
+    _require_admin_or_manager(request)
+    d_id = user_dealership_id(request)
+    user = await _user(request, db)
+
+    # Get all team members in this dealership
+    team = (await db.execute(
+        select(User).where(User.dealership_id == d_id).order_by(User.role.asc(), User.display_name.asc())
+    )).scalars().all()
+
+    # Get pending (unused) invites
+    invites = (await db.execute(
+        select(Invite).where(Invite.dealership_id == d_id, Invite.used == False)
+        .order_by(Invite.created_at.desc())
+    )).scalars().all()
+
+    # Get dealership info
+    dealership = (await db.execute(
+        select(Dealership).where(Dealership.id == d_id)
+    )).scalar_one_or_none()
+
+    return templates.TemplateResponse("team.html", {
+        "request": request, "user": user, "team": team, "invites": invites,
+        "dealership": dealership, "is_admin": user_role(request) == "admin",
+        "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+    })
+
+
+@app.post("/team/invite")
+async def team_invite(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    email: str = Form(""),
+    role: str = Form("salesperson"),
+):
+    """Create an invite link for a new team member."""
+    _require_admin(request)
+    d_id = user_dealership_id(request)
+    if not d_id:
+        return RedirectResponse(url="/team", status_code=303)
+
+    if role not in ("salesperson", "manager"):
+        role = "salesperson"
+
+    # Check user count limit
+    dealership = (await db.execute(select(Dealership).where(Dealership.id == d_id))).scalar_one_or_none()
+    if dealership:
+        current_count = (await db.execute(
+            select(func.count()).where(User.dealership_id == d_id)
+        )).scalar() or 0
+        if current_count >= dealership.max_users:
+            return RedirectResponse(url="/team?error=limit", status_code=303)
+
+    invite_token = secrets.token_urlsafe(32)
+    invite = Invite(
+        token=invite_token,
+        dealership_id=d_id,
+        email=email.strip().lower() if email.strip() else None,
+        role=role,
+        created_by=uid(request),
+        expires_at=_utcnow() + timedelta(days=7),
+    )
+    db.add(invite)
+    await db.commit()
+
+    return RedirectResponse(url="/team", status_code=303)
+
+
+@app.get("/join/{invite_token}", response_class=HTMLResponse)
+async def join_page(invite_token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Page shown when someone clicks an invite link."""
+    invite = (await db.execute(
+        select(Invite).where(Invite.token == invite_token, Invite.used == False)
+    )).scalar_one_or_none()
+
+    if not invite or invite.expires_at < _utcnow():
+        return HTMLResponse(
+            """<!DOCTYPE html><html><head><title>Invalid Invite</title>
+            <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc}
+            .box{text-align:center;padding:2rem;max-width:400px}h1{font-size:1.5rem;color:#0f172a}
+            p{color:#64748b}a{color:#6366f1;text-decoration:none}</style></head>
+            <body><div class="box"><h1>Invite Expired or Invalid</h1>
+            <p>This invite link is no longer valid. Ask your manager to send a new one.</p>
+            <p style="margin-top:1.5rem"><a href="/login">← Sign In</a></p></div></body></html>""",
+            status_code=404,
+        )
+
+    dealership = (await db.execute(
+        select(Dealership).where(Dealership.id == invite.dealership_id)
+    )).scalar_one_or_none()
+
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": "",
+        "success": f"You've been invited to join {dealership.name if dealership else 'a dealership'}!",
+        "mode": "register",
+        "supabase_enabled": SUPABASE_ENABLED,
+        "next": "/",
+        "invite_token": invite_token,
+    })
+
+
+@app.post("/join/{invite_token}")
+async def join_accept(
+    invite_token: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    email: str = Form(""),
+    username: str = Form(""),
+    display_name: str = Form(""),
+    password: str = Form(...),
+    password2: str = Form(...),
+):
+    """Accept an invite — create account and join the dealership."""
+    invite = (await db.execute(
+        select(Invite).where(Invite.token == invite_token, Invite.used == False)
+    )).scalar_one_or_none()
+
+    if not invite or invite.expires_at < _utcnow():
+        return RedirectResponse(url=f"/join/{invite_token}", status_code=303)
+
+    error_ctx = {
+        "request": request, "mode": "register", "success": "",
+        "supabase_enabled": SUPABASE_ENABLED, "next": "/",
+        "invite_token": invite_token,
+    }
+
+    errors = []
+    if password != password2:
+        errors.append("Passwords don't match.")
+    if len(password) < 6:
+        errors.append("Password must be at least 6 characters.")
+
+    if SUPABASE_ENABLED:
+        reg_email = email.strip().lower()
+        if not reg_email or "@" not in reg_email:
+            errors.append("A valid email address is required.")
+        if errors:
+            return templates.TemplateResponse("login.html", {**error_ctx, "error": " ".join(errors)})
+
+        result = await supabase_sign_up(reg_email, password)
+        if "error" in result:
+            return templates.TemplateResponse("login.html", {**error_ctx, "error": result["error"]})
+
+        sb_user = result.get("user") or {}
+        local_user = await get_or_create_user_from_supabase(
+            db, sb_user, display_name=display_name.strip() or reg_email.split("@")[0]
+        )
+    else:
+        uname = (username or email).strip().lower()
+        if len(uname) < 3:
+            errors.append("Username must be at least 3 characters.")
+        existing = (await db.execute(select(User).where(User.username == uname))).scalar_one_or_none()
+        if existing:
+            errors.append("Username already taken.")
+        if errors:
+            return templates.TemplateResponse("login.html", {**error_ctx, "error": " ".join(errors)})
+
+        pw_hash, pw_salt = hash_password(password)
+        local_user = User(
+            username=uname,
+            display_name=(display_name.strip() or uname),
+            password_hash=pw_hash,
+            password_salt=pw_salt,
+            created_at=_utcnow().isoformat(),
+        )
+        db.add(local_user)
+        await db.commit()
+        await db.refresh(local_user)
+
+    # Assign user to the dealership from the invite
+    local_user.dealership_id = invite.dealership_id
+    local_user.role = invite.role
+
+    # Mark invite as used
+    invite.used = True
+    invite.used_by = local_user.id
+    await db.commit()
+
+    await get_or_create_settings(db, local_user.id, local_user.dealership_id)
+    token = await create_session(db, local_user.id, remember_me=False, request=request)
+    resp = RedirectResponse(url="/", status_code=303)
+    _set_session_cookie(resp, token, False)
+    return resp
+
+
+@app.post("/team/{user_id}/role")
+async def team_change_role(
+    user_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    role: str = Form(...),
+):
+    """Change a team member's role. Admin only."""
+    _require_admin(request)
+    if role not in ("salesperson", "manager", "admin"):
+        return RedirectResponse(url="/team", status_code=303)
+    # Can't change your own role
+    if user_id == uid(request):
+        return RedirectResponse(url="/team", status_code=303)
+    d_id = user_dealership_id(request)
+    target = (await db.execute(
+        select(User).where(User.id == user_id, User.dealership_id == d_id)
+    )).scalar_one_or_none()
+    if target:
+        target.role = role
+        await db.commit()
+    return RedirectResponse(url="/team", status_code=303)
+
+
+@app.post("/team/{user_id}/remove")
+async def team_remove_member(
+    user_id: int, request: Request, db: AsyncSession = Depends(get_db),
+):
+    """Remove a team member from the dealership. Admin only."""
+    _require_admin(request)
+    if user_id == uid(request):
+        return RedirectResponse(url="/team", status_code=303)
+    d_id = user_dealership_id(request)
+    target = (await db.execute(
+        select(User).where(User.id == user_id, User.dealership_id == d_id)
+    )).scalar_one_or_none()
+    if target:
+        target.dealership_id = None
+        target.role = "salesperson"
+        await db.commit()
+    return RedirectResponse(url="/team", status_code=303)
+
+
+@app.post("/team/invite/{invite_id}/cancel")
+async def team_cancel_invite(
+    invite_id: int, request: Request, db: AsyncSession = Depends(get_db),
+):
+    """Cancel a pending invite. Admin only."""
+    _require_admin(request)
+    d_id = user_dealership_id(request)
+    invite = (await db.execute(
+        select(Invite).where(Invite.id == invite_id, Invite.dealership_id == d_id)
+    )).scalar_one_or_none()
+    if invite:
+        await db.delete(invite)
+        await db.commit()
+    return RedirectResponse(url="/team", status_code=303)
+
+
+@app.post("/team/dealership")
+async def team_update_dealership(
+    request: Request, db: AsyncSession = Depends(get_db),
+    name: str = Form(...),
+):
+    """Update dealership name. Admin only."""
+    _require_admin(request)
+    d_id = user_dealership_id(request)
+    dealership = (await db.execute(
+        select(Dealership).where(Dealership.id == d_id)
+    )).scalar_one_or_none()
+    if dealership and name.strip():
+        dealership.name = name.strip()[:200]
+        await db.commit()
+    return RedirectResponse(url="/team", status_code=303)

@@ -111,7 +111,7 @@
 
       <!-- ── CREATE ACCOUNT ── -->
       {% elif mode == "register" %}
-      <form method="POST" action="/register" class="space-y-4">
+      <form method="POST" action="{% if invite_token is defined and invite_token %}/join/{{ invite_token }}{% else %}/register{% endif %}" class="space-y-4">
         {{ csrf_hidden|safe }}
         {% if supabase_enabled %}
         <div>

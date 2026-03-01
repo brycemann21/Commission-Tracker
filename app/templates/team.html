@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="flex items-center justify-between mb-5">
+  <div>
+    <h1 class="text-xl font-bold">Team Management</h1>
+    <div class="text-sm text-slate-500">{{ dealership.name if dealership else 'Your Dealership' }}</div>
+  </div>
+  {% if is_admin %}
+  <div class="flex items-center gap-2">
+    <button type="button" onclick="document.getElementById('renameModal').classList.remove('hidden')"
+            class="text-xs px-3 py-1.5 rounded border border-slate-200 hover:bg-slate-50 transition">
+      Rename Dealership
+    </button>
+    <button type="button" onclick="document.getElementById('inviteModal').classList.remove('hidden')"
+            class="text-xs px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-1">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      Invite Member
+    </button>
+  </div>
+  {% endif %}
+</div>
+
+{# ── Team Members ── #}
+<div class="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
+  <table class="min-w-full text-sm">
+    <thead class="bg-slate-900 text-white">
+      <tr>
+        <th class="text-left p-3">Name</th>
+        <th class="text-left p-3">Email</th>
+        <th class="text-left p-3">Role</th>
+        {% if is_admin %}<th class="text-left p-3">Actions</th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in team %}
+      <tr class="border-t {{ 'bg-blue-50' if m.id == user.id else '' }}">
+        <td class="p-3 font-medium">
+          {{ m.display_name or m.username }}
+          {% if m.id == user.id %}<span class="text-xs text-slate-400 ml-1">(you)</span>{% endif %}
+        </td>
+        <td class="p-3 text-slate-500">{{ m.email or '—' }}</td>
+        <td class="p-3">
+          <span class="inline-block px-2 py-0.5 rounded text-[11px] font-semibold
+            {% if m.role == 'admin' %}bg-violet-100 text-violet-800
+            {% elif m.role == 'manager' %}bg-blue-100 text-blue-800
+            {% else %}bg-slate-100 text-slate-700{% endif %}">
+            {{ m.role|capitalize }}
+          </span>
+        </td>
+        {% if is_admin %}
+        <td class="p-3">
+          {% if m.id != user.id %}
+          <div class="flex items-center gap-2">
+            <form method="post" action="/team/{{ m.id }}/role" class="flex items-center gap-1">
+              {{ csrf_hidden|safe }}
+              <select name="role" class="text-xs border border-slate-200 rounded px-1.5 py-1 bg-white">
+                {% for r in ['salesperson', 'manager', 'admin'] %}
+                <option value="{{ r }}" {% if m.role == r %}selected{% endif %}>{{ r|capitalize }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="text-xs px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 transition">Update</button>
+            </form>
+            <form method="post" action="/team/{{ m.id }}/remove"
+                  onsubmit="return confirm('Remove {{ m.display_name or m.username }} from the dealership?')">
+              {{ csrf_hidden|safe }}
+              <button type="submit" class="text-xs px-2 py-1 rounded text-rose-600 hover:bg-rose-50 transition">Remove</button>
+            </form>
+          </div>
+          {% else %}
+          <span class="text-xs text-slate-400">—</span>
+          {% endif %}
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# ── Pending Invites ── #}
+{% if is_admin %}
+<h2 class="text-lg font-bold mb-2">Pending Invites</h2>
+{% if invites %}
+<div class="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
+  <table class="min-w-full text-sm">
+    <thead class="bg-slate-50">
+      <tr>
+        <th class="text-left p-3 text-slate-600">Email / Link</th>
+        <th class="text-left p-3 text-slate-600">Role</th>
+        <th class="text-left p-3 text-slate-600">Expires</th>
+        <th class="text-left p-3 text-slate-600">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for inv in invites %}
+      <tr class="border-t">
+        <td class="p-3">
+          {% if inv.email %}
+            <span class="text-slate-700">{{ inv.email }}</span>
+          {% endif %}
+          <div class="flex items-center gap-1 mt-1">
+            <input type="text" readonly value="{{ request.base_url }}join/{{ inv.token }}"
+                   class="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded px-2 py-1 w-full max-w-xs"
+                   id="invite-link-{{ inv.id }}">
+            <button type="button" onclick="copyInvite({{ inv.id }})"
+                    class="text-xs px-2 py-1 rounded border border-slate-200 hover:bg-slate-50 transition whitespace-nowrap">
+              Copy
+            </button>
+          </div>
+        </td>
+        <td class="p-3">
+          <span class="inline-block px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-700">
+            {{ inv.role|capitalize }}
+          </span>
+        </td>
+        <td class="p-3 text-xs text-slate-500">
+          {{ inv.expires_at.strftime('%m/%d/%Y') }}
+        </td>
+        <td class="p-3">
+          <form method="post" action="/team/invite/{{ inv.id }}/cancel">
+            {{ csrf_hidden|safe }}
+            <button type="submit" class="text-xs text-rose-600 hover:underline">Cancel</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="text-sm text-slate-400 mb-6 p-4 bg-white rounded-lg border border-slate-200">
+  No pending invites. Use the "Invite Member" button to add salespeople to your dealership.
+</div>
+{% endif %}
+{% endif %}
+
+{# ── Invite Modal ── #}
+{% if is_admin %}
+<div id="inviteModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold">Invite Team Member</h2>
+        <button onclick="document.getElementById('inviteModal').classList.add('hidden')"
+                class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+      </div>
+      <form method="post" action="/team/invite">
+        {{ csrf_hidden|safe }}
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Email (optional)</label>
+            <input type="email" name="email" placeholder="salesperson@email.com"
+                   class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+            <div class="text-xs text-slate-400 mt-1">For your records — the invite link works for anyone</div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Role</label>
+            <select name="role" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+              <option value="salesperson">Salesperson</option>
+              <option value="manager">Manager</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex gap-3 mt-6">
+          <button type="submit"
+                  class="flex-1 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">
+            Create Invite Link
+          </button>
+          <button type="button" onclick="document.getElementById('inviteModal').classList.add('hidden')"
+                  class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{# ── Rename Modal ── #}
+<div id="renameModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold">Rename Dealership</h2>
+        <button onclick="document.getElementById('renameModal').classList.add('hidden')"
+                class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+      </div>
+      <form method="post" action="/team/dealership">
+        {{ csrf_hidden|safe }}
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Dealership Name</label>
+          <input type="text" name="name" value="{{ dealership.name if dealership else '' }}" required
+                 class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+        </div>
+        <div class="flex gap-3 mt-6">
+          <button type="submit"
+                  class="flex-1 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">
+            Save
+          </button>
+          <button type="button" onclick="document.getElementById('renameModal').classList.add('hidden')"
+                  class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<script>
+function copyInvite(id) {
+  const input = document.getElementById('invite-link-' + id);
+  input.select();
+  navigator.clipboard.writeText(input.value).then(function() {
+    const btn = input.nextElementSibling;
+    btn.textContent = 'Copied!';
+    setTimeout(function(){ btn.textContent = 'Copy'; }, 2000);
+  });
+}
+</script>
+
+{% endblock %}

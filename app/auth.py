@@ -81,24 +81,25 @@ def _get_http_client() -> httpx.AsyncClient:
 # Caching (token → user_id) for 30s cuts ~50% of DB round-trips on warm
 # invocations. The risk window is tiny: a revoked session stays valid for
 # at most 30 more seconds, which is acceptable for this use case.
-_SESSION_CACHE: dict[str, tuple[int, float]] = {}
+_SESSION_CACHE: dict[str, tuple[int, int | None, str, float]] = {}
 _SESSION_CACHE_TTL = 30.0  # seconds
 
-def _cache_get(token: str) -> int | None:
+def _cache_get(token: str) -> tuple[int, int | None, str] | None:
+    """Returns (user_id, dealership_id, role) or None."""
     entry = _SESSION_CACHE.get(token)
-    if entry and time.monotonic() < entry[1]:
-        return entry[0]
+    if entry and time.monotonic() < entry[3]:
+        return (entry[0], entry[1], entry[2])
     if entry:
         del _SESSION_CACHE[token]
     return None
 
-def _cache_set(token: str, user_id: int) -> None:
+def _cache_set(token: str, user_id: int, dealership_id: int | None = None, role: str = "salesperson") -> None:
     if len(_SESSION_CACHE) > 500:
         cutoff = time.monotonic()
-        expired = [k for k, v in _SESSION_CACHE.items() if v[1] < cutoff]
+        expired = [k for k, v in _SESSION_CACHE.items() if v[3] < cutoff]
         for k in expired:
             del _SESSION_CACHE[k]
-    _SESSION_CACHE[token] = (user_id, time.monotonic() + _SESSION_CACHE_TTL)
+    _SESSION_CACHE[token] = (user_id, dealership_id, role, time.monotonic() + _SESSION_CACHE_TTL)
 
 def _cache_delete(token: str) -> None:
     _SESSION_CACHE.pop(token, None)
@@ -388,7 +389,9 @@ async def create_session(
     return token
 
 
-async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -> int | None:
+async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -> tuple[int, int | None, str] | None:
+    """Returns (user_id, dealership_id, role) or None.
+    Joins user_sessions with users to get tenancy info in a single query."""
     if not token:
         return None
 
@@ -398,26 +401,35 @@ async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -
         return cached
 
     row = await _raw_pg_fetchrow(
-        "SELECT user_id FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
+        """SELECT s.user_id, u.dealership_id, COALESCE(u.role, 'salesperson') AS role
+           FROM user_sessions s
+           JOIN users u ON u.id = s.user_id
+           WHERE s.token = $1 AND s.expires_at > NOW()""",
         token
     )
     if row is not None:
-        _cache_set(token, row["user_id"])
-        return row["user_id"]
+        result = (row["user_id"], row["dealership_id"], row["role"])
+        _cache_set(token, *result)
+        return result
 
     # Fallback to SQLAlchemy (SQLite or pool unavailable)
     if db is not None:
+        from sqlalchemy import text as sa_text
         sa_row = (
             await db.execute(
-                select(UserSession).where(
-                    UserSession.token == token,
-                    UserSession.expires_at > _utcnow(),
-                )
+                sa_text("""
+                    SELECT s.user_id, u.dealership_id, COALESCE(u.role, 'salesperson') AS role
+                    FROM user_sessions s
+                    JOIN users u ON u.id = s.user_id
+                    WHERE s.token = :token AND s.expires_at > :now
+                """),
+                {"token": token, "now": _utcnow()}
             )
-        ).scalar_one_or_none()
+        ).first()
         if sa_row:
-            _cache_set(token, sa_row.user_id)
-            return sa_row.user_id
+            result = (sa_row.user_id, sa_row.dealership_id, sa_row.role)
+            _cache_set(token, *result)
+            return result
 
     return None
 
@@ -505,26 +517,48 @@ async def get_current_user(request: Request, db: AsyncSession) -> User | None:
 from .models import Settings
 
 
-async def get_or_create_settings(db: AsyncSession, user_id: int) -> Settings:
+async def get_or_create_settings(db: AsyncSession, user_id: int, dealership_id: int | None = None) -> Settings:
+    """Get settings for a dealership. Falls back to user_id lookup for backward compat.
+    
+    Settings are per-dealership (the pay plan is set by the dealer, not individual salespeople).
+    The user_id fallback handles pre-migration data where settings were per-user.
+    """
+    # Primary: look up by dealership_id
+    if dealership_id:
+        s = (
+            await db.execute(select(Settings).where(Settings.dealership_id == dealership_id).limit(1))
+        ).scalar_one_or_none()
+        if s:
+            return s
+
+    # Fallback: look up by user_id (pre-migration data)
     s = (
         await db.execute(select(Settings).where(Settings.user_id == user_id).limit(1))
     ).scalar_one_or_none()
-    if not s:
-        s = Settings(
-            user_id=user_id,
-            unit_comm_discount_le_200=190.0, unit_comm_discount_gt_200=140.0,
-            permaplate=40.0, nitro_fill=40.0, pulse=40.0,
-            finance_non_subvented=40.0, warranty=25.0, tire_wheel=25.0,
-            hourly_rate_ny_offset=15.0,
-            new_volume_bonus_15_16=1000.0, new_volume_bonus_17_18=1200.0,
-            new_volume_bonus_19_20=1500.0, new_volume_bonus_21_24=2000.0,
-            new_volume_bonus_25_plus=2800.0,
-            used_volume_bonus_8_10=350.0, used_volume_bonus_11_12=500.0,
-            used_volume_bonus_13_plus=1000.0,
-            spot_bonus_5_9=50.0, spot_bonus_10_12=80.0, spot_bonus_13_plus=100.0,
-            quarterly_bonus_threshold_units=60, quarterly_bonus_amount=1200.0,
-        )
-        db.add(s)
-        await db.commit()
-        await db.refresh(s)
+    if s:
+        # Backfill dealership_id if missing
+        if dealership_id and not s.dealership_id:
+            s.dealership_id = dealership_id
+            await db.commit()
+        return s
+
+    # Create new settings for this dealership
+    s = Settings(
+        user_id=user_id,
+        dealership_id=dealership_id,
+        unit_comm_discount_le_200=190.0, unit_comm_discount_gt_200=140.0,
+        permaplate=40.0, nitro_fill=40.0, pulse=40.0,
+        finance_non_subvented=40.0, warranty=25.0, tire_wheel=25.0,
+        hourly_rate_ny_offset=15.0,
+        new_volume_bonus_15_16=1000.0, new_volume_bonus_17_18=1200.0,
+        new_volume_bonus_19_20=1500.0, new_volume_bonus_21_24=2000.0,
+        new_volume_bonus_25_plus=2800.0,
+        used_volume_bonus_8_10=350.0, used_volume_bonus_11_12=500.0,
+        used_volume_bonus_13_plus=1000.0,
+        spot_bonus_5_9=50.0, spot_bonus_10_12=80.0, spot_bonus_13_plus=100.0,
+        quarterly_bonus_threshold_units=60, quarterly_bonus_amount=1200.0,
+    )
+    db.add(s)
+    await db.commit()
+    await db.refresh(s)
     return s
