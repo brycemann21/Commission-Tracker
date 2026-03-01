@@ -332,6 +332,9 @@
                 onclick="quickAction(this, '/deals/{{ d.id }}/mark_delivered')"
                 class="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded text-xs font-medium transition">Delivered</button>
               <button type="button"
+                onclick="openSchedModal({{ d.id }}, '{{ d.scheduled_date.isoformat() if d.scheduled_date else '' }}', {{ 'true' if d.on_delivery_board else 'false' }})"
+                class="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded text-xs font-medium transition ml-1">📅 Sched</button>
+              <button type="button"
                 onclick="quickAction(this, '/deals/{{ d.id }}/mark_dead')"
                 class="bg-rose-600 hover:bg-rose-700 text-white px-2.5 py-1 rounded text-xs font-medium transition ml-1">Dead</button>
             </td>
@@ -771,6 +774,89 @@
       w.document.close(); w.focus(); w.print(); w.close();
     });
   })();
+</script>
+
+<!-- ── Schedule / Delivery Board Modal (Dashboard) ───────────────────────── -->
+<div id="dashSchedModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold">Schedule Delivery</h2>
+        <button onclick="closeDashSchedModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Scheduled Delivery Date</label>
+          <input type="date" id="dashSchedDate"
+                 class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+        </div>
+        <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition">
+          <input type="checkbox" id="dashSchedBoard" class="rounded w-4 h-4 text-indigo-600">
+          <div>
+            <div class="text-sm font-medium text-slate-800">Add to Delivery Board</div>
+            <div class="text-xs text-slate-500">Track prep status (gas, inspection, insurance)</div>
+          </div>
+        </label>
+      </div>
+      <div class="flex gap-3 mt-6">
+        <button onclick="saveDashSched()"
+                class="flex-1 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">
+          Save
+        </button>
+        <button onclick="closeDashSchedModal()"
+                class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let _dashSchedDealId = null;
+
+function openSchedModal(dealId, currentDate, onBoard) {
+  _dashSchedDealId = dealId;
+  document.getElementById('dashSchedDate').value = currentDate || '';
+  document.getElementById('dashSchedBoard').checked = onBoard || false;
+  document.getElementById('dashSchedModal').classList.remove('hidden');
+}
+
+function closeDashSchedModal() {
+  document.getElementById('dashSchedModal').classList.add('hidden');
+  _dashSchedDealId = null;
+}
+
+async function saveDashSched() {
+  if (!_dashSchedDealId) return;
+  const date = document.getElementById('dashSchedDate').value;
+  const board = document.getElementById('dashSchedBoard').checked;
+  try {
+    await fetch(`/deals/${_dashSchedDealId}/quick_update`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field: 'status', value: 'Scheduled' }),
+    });
+    if (date) {
+      await fetch(`/deals/${_dashSchedDealId}/quick_update`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field: 'scheduled_date', value: date }),
+      });
+    }
+    if (board) {
+      const form = new FormData();
+      form.append('next', window.location.href);
+      await fetch(`/delivery/${_dashSchedDealId}/push`, { method: 'POST', body: form });
+    }
+    closeDashSchedModal();
+    window.location.reload();
+  } catch(e) {
+    alert('Failed to save. Please try again.');
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeDashSchedModal();
+});
 </script>
 
 {% endblock %}

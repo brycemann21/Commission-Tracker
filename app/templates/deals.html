@@ -222,7 +222,11 @@
         </span>
       </td>
 
-      <td class="p-2 text-right no-label">
+      <td class="p-2 text-right no-label" style="min-width:110px">
+        <a href="/deals/{{ d.id }}/edit"
+           class="text-[11px] px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition whitespace-nowrap inline-block mb-0.5">
+          ✎ Edit
+        </a>
         <button type="button"
           data-paid="{{ '1' if d.is_paid else '0' }}"
           onclick="togglePaid(this, {{ d.id }})"
@@ -231,6 +235,13 @@
           {% else %}bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100{% endif %}">
           {{ "✓ Paid" if d.is_paid else "Pay?" }}
         </button>
+        {% if d.status in ('Pending', 'Scheduled') %}
+        <button type="button"
+          onclick="openScheduleModal({{ d.id }}, '{{ d.scheduled_date.isoformat() if d.scheduled_date else '' }}', {{ 'true' if d.on_delivery_board else 'false' }})"
+          class="text-[11px] px-1.5 py-0.5 rounded border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition whitespace-nowrap mt-0.5 block">
+          📅 Schedule
+        </button>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}
@@ -424,4 +435,113 @@ if (params.get('deleted')) {
 {% if request.query_params.get('embedded') == '1' %}
 <script>try { window.parent.postMessage({ type: 'ct_deal_saved' }, '*'); } catch(e) {}</script>
 {% endif %}
-{% endblock %}
+
+<!-- ── Schedule / Delivery Board Modal ───────────────────────────────────── -->
+<div id="scheduleModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold">Schedule Delivery</h2>
+        <button onclick="closeScheduleModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Scheduled Delivery Date</label>
+          <input type="date" id="schedDateInput"
+                 class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+        </div>
+        <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition">
+          <input type="checkbox" id="schedBoardCheck" class="rounded w-4 h-4 text-indigo-600">
+          <div>
+            <div class="text-sm font-medium text-slate-800">Add to Delivery Board</div>
+            <div class="text-xs text-slate-500">Track prep status (gas, inspection, insurance)</div>
+          </div>
+        </label>
+      </div>
+      <div class="flex gap-3 mt-6">
+        <button onclick="saveSchedule()"
+                class="flex-1 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">
+          Save
+        </button>
+        <button onclick="closeScheduleModal()"
+                class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let _schedDealId = null;
+
+function openScheduleModal(dealId, currentDate, onBoard) {
+  _schedDealId = dealId;
+  document.getElementById('schedDateInput').value = currentDate || '';
+  document.getElementById('schedBoardCheck').checked = onBoard || false;
+  document.getElementById('scheduleModal').classList.remove('hidden');
+}
+
+function closeScheduleModal() {
+  document.getElementById('scheduleModal').classList.add('hidden');
+  _schedDealId = null;
+}
+
+async function saveSchedule() {
+  if (!_schedDealId) return;
+  const date = document.getElementById('schedDateInput').value;
+  const board = document.getElementById('schedBoardCheck').checked;
+
+  try {
+    // Set status to Scheduled + scheduled_date
+    await fetch(`/deals/${_schedDealId}/quick_update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field: 'status', value: 'Scheduled' }),
+    });
+    if (date) {
+      await fetch(`/deals/${_schedDealId}/quick_update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field: 'sold_date', value: date }),
+      });
+    }
+    // Push to delivery board if checked
+    if (board) {
+      const form = new FormData();
+      form.append('next', window.location.href);
+      await fetch(`/delivery/${_schedDealId}/push`, { method: 'POST', body: form });
+    }
+    closeScheduleModal();
+    window.location.reload();
+  } catch(e) {
+    alert('Failed to save. Please try again.');
+  }
+}
+
+// Intercept inline status change → Scheduled to show calendar instead
+const _origStartEdit = window._startEditFn;
+document.addEventListener('click', e => {
+  // handled by the existing inline edit system — we patch the select change
+}, true);
+
+// Patch: when status select changes to "Scheduled", open the modal instead
+document.addEventListener('change', e => {
+  const sel = e.target;
+  if (sel.tagName === 'SELECT' && sel.value === 'Scheduled') {
+    const span = sel.closest('.editable');
+    if (span && span.dataset.field === 'status') {
+      const dealId = parseInt(span.dataset.id);
+      // Cancel the inline edit
+      if (sel._blurHandler) sel.removeEventListener('blur', sel._blurHandler);
+      // Restore original display
+      span.innerHTML = span._orig || span.innerHTML;
+      span.classList.remove('editing');
+      // Open our modal
+      openScheduleModal(dealId, '', false);
+      e.stopPropagation();
+    }
+  }
+}, true);
+</script>
+

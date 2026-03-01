@@ -1420,13 +1420,13 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
     value = body.get("value", "")
     settings = await get_or_create_settings(db, user_id)
 
-    ALLOWED = {"notes", "status", "tag", "sold_date", "delivered_date",
+    ALLOWED = {"notes", "status", "tag", "sold_date", "delivered_date", "scheduled_date",
                "customer", "stock_num", "model", "new_used", "deal_type",
                "business_manager", "commission_override"}
     if field not in ALLOWED:
         return JSONResponse({"ok": False, "error": "Field not allowed"}, status_code=400)
 
-    if field in ("sold_date", "delivered_date"):
+    if field in ("sold_date", "delivered_date", "scheduled_date"):
         setattr(deal, field, parse_date(value) if value else None)
     elif field == "status":
         if value not in ("Pending", "Delivered", "Dead", "Scheduled"):
@@ -1434,6 +1434,8 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
         setattr(deal, field, value)
         if value == "Delivered" and not deal.delivered_date:
             deal.delivered_date = deal.sold_date or today()
+        if value == "Scheduled" and not deal.scheduled_date:
+            deal.scheduled_date = today()
     elif field == "commission_override":
         if value == "" or value is None:
             deal.commission_override = None
