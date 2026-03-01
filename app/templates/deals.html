@@ -19,22 +19,21 @@
   }
 </style>
 
-<!-- ── Schedule Modal — defined FIRST so openScheduleModal() is always available ── -->
+<!-- ─── Schedule Modal ─────────────────────────────────────────────────────── -->
 <div id="scheduleModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
   <div class="flex items-center justify-center min-h-screen p-4">
     <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-bold">Schedule Delivery</h2>
-        <button onclick="closeScheduleModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+        <button onclick="closeSchedModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
       </div>
       <div class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-slate-700 mb-1">Scheduled Delivery Date</label>
-          <input type="date" id="schedDateInput"
-                 class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+          <label class="block text-sm font-medium text-slate-700 mb-1">Delivery Date</label>
+          <input type="date" id="schedDate" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
         </div>
         <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition">
-          <input type="checkbox" id="schedBoardCheck" class="rounded w-4 h-4 text-indigo-600">
+          <input type="checkbox" id="schedBoard" class="rounded w-4 h-4 text-indigo-600">
           <div>
             <div class="text-sm font-medium text-slate-800">Add to Delivery Board</div>
             <div class="text-xs text-slate-500">Track prep status (gas, inspection, insurance)</div>
@@ -42,62 +41,63 @@
         </label>
       </div>
       <div class="flex gap-3 mt-6">
-        <button onclick="saveSchedule()" class="flex-1 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">Save</button>
-        <button onclick="closeScheduleModal()" class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">Cancel</button>
+        <button onclick="saveSchedModal()" class="flex-1 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">Save</button>
+        <button onclick="closeSchedModal()" class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">Cancel</button>
       </div>
     </div>
   </div>
 </div>
 
 <script>
-// Schedule modal — must be defined before inline editor script
-let _schedDealId = null;
+var _schedId = null;
 
-function openScheduleModal(dealId, currentDate, onBoard) {
-  _schedDealId = dealId;
-  document.getElementById('schedDateInput').value = currentDate || '';
-  document.getElementById('schedBoardCheck').checked = onBoard || false;
+function openSchedModal(dealId, date, board) {
+  _schedId = dealId;
+  document.getElementById('schedDate').value = date || new Date().toISOString().split('T')[0];
+  document.getElementById('schedBoard').checked = !!board;
   document.getElementById('scheduleModal').classList.remove('hidden');
-  // Auto-focus the date input
-  setTimeout(() => document.getElementById('schedDateInput').focus(), 50);
+  setTimeout(function(){ document.getElementById('schedDate').focus(); }, 50);
 }
 
-function closeScheduleModal() {
+function closeSchedModal() {
   document.getElementById('scheduleModal').classList.add('hidden');
-  _schedDealId = null;
+  _schedId = null;
 }
 
-async function saveSchedule() {
-  if (!_schedDealId) return;
-  const date = document.getElementById('schedDateInput').value;
-  const board = document.getElementById('schedBoardCheck').checked;
+async function saveSchedModal() {
+  if (!_schedId) return;
+  var date = document.getElementById('schedDate').value;
+  var board = document.getElementById('schedBoard').checked;
   try {
-    await fetch(`/deals/${_schedDealId}/quick_update`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ field: 'status', value: 'Scheduled' }),
+    await fetch('/deals/' + _schedId + '/quick_update', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({field:'status', value:'Scheduled'})
     });
     if (date) {
-      await fetch(`/deals/${_schedDealId}/quick_update`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field: 'scheduled_date', value: date }),
+      await fetch('/deals/' + _schedId + '/quick_update', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({field:'scheduled_date', value:date})
       });
     }
     if (board) {
-      const form = new FormData();
-      form.append('next', window.location.href);
-      await fetch(`/delivery/${_schedDealId}/push`, { method: 'POST', body: form });
+      var f = new FormData();
+      f.append('next', window.location.href);
+      await fetch('/delivery/' + _schedId + '/push', {method:'POST', body:f});
     }
-    closeScheduleModal();
+    closeSchedModal();
     window.location.reload();
   } catch(e) {
     alert('Failed to save. Please try again.');
   }
 }
 
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeScheduleModal(); });
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeSchedModal(); });
+document.getElementById('scheduleModal').addEventListener('click', function(e){
+  if(e.target === document.getElementById('scheduleModal')) closeSchedModal();
+});
 </script>
 
-<!-- ── Filters / header ── -->
+<!-- ─── Filters / header ──────────────────────────────────────────────────── -->
 <div class="flex flex-col md:flex-row md:items-end gap-3 mb-4">
   <div>
     <h1 class="text-xl font-bold">Deals</h1>
@@ -105,7 +105,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSchedul
   </div>
   <form class="md:ml-auto flex flex-wrap gap-2" method="get" action="/deals">
     <div class="flex items-center gap-1 border rounded bg-white">
-      <button type="submit" name="_nav" value="prev" formaction="/deals" class="px-2 py-2 text-slate-500 hover:bg-slate-100 rounded-l transition text-sm">‹</button>
+      <button type="submit" name="_nav" value="prev" class="px-2 py-2 text-slate-500 hover:bg-slate-100 rounded-l transition text-sm">‹</button>
       <select name="month" onchange="this.form.submit()" class="border-0 px-1 py-2 text-sm bg-transparent focus:outline-none">
         {% for mo in range(1,13) %}
           <option value="{{ mo }}" {% if mo == selected_month %}selected{% endif %}>{{ ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][mo] }}</option>
@@ -144,6 +144,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSchedul
   <a href="/deals?q={{ q }}" class="ml-auto text-violet-500 hover:text-violet-700 underline text-xs">Back to {{ selected_month }}/{{ selected_year }}</a>
 </div>
 {% endif %}
+
 <div id="bulkToolbar" class="hidden mb-3 flex flex-wrap items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
   <span id="bulkCount" class="text-sm font-medium text-red-700">0 deals selected</span>
   <button type="submit" onclick="return confirm('Permanently delete selected deals?')" class="px-4 py-1.5 rounded bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition">Delete Selected</button>
@@ -183,7 +184,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSchedul
           {{ d.sold_date.strftime('%-m/%-d') if d.sold_date else '—' }}
         </span>
         {% if d.sold_date and (d.sold_date.month != selected_month or d.sold_date.year != selected_year) %}
-          <span class="ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700" title="Sold {{ d.sold_date.strftime('%-m/%-d') }}, delivered this month">↪ carry</span>
+          <span class="ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">↪ carry</span>
         {% endif %}
       </td>
 
@@ -230,8 +231,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSchedul
       </td>
 
       <td class="p-2" data-label="Status">
-        <span class="editable" data-field="status" data-id="{{ d.id }}" data-type="select"
-              data-value="{{ d.status }}" data-options="Pending|Scheduled|Delivered|Dead">
+        <span class="editable" data-field="status" data-id="{{ d.id }}" data-type="select" data-value="{{ d.status }}" data-options="Pending|Scheduled|Delivered|Dead">
           <span class="inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold
             {% if d.status == 'Delivered' %}bg-emerald-100 text-emerald-800
             {% elif d.status == 'Dead' %}bg-slate-100 text-slate-500
@@ -277,119 +277,31 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSchedul
 </div>
 </form>
 
-<!-- Toast notifications -->
 <div id="saveToast" class="fixed bottom-5 right-5 z-50 hidden px-4 py-2 rounded-lg shadow-lg text-sm font-medium text-white bg-emerald-600">Saved ✓</div>
 <div id="errToast"  class="fixed bottom-5 right-5 z-50 hidden px-4 py-2 rounded-lg shadow-lg text-sm font-medium text-white bg-red-600">Failed to save</div>
 
-<!-- ── Schedule / Delivery Board Modal ───────────────────────────────────── -->
-<div id="scheduleModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
-  <div class="flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-bold">Schedule Delivery</h2>
-        <button onclick="closeScheduleModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
-      </div>
-      <div class="space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-slate-700 mb-1">Scheduled Delivery Date</label>
-          <input type="date" id="schedDateInput"
-                 class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-        </div>
-        <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition">
-          <input type="checkbox" id="schedBoardCheck" class="rounded w-4 h-4 text-indigo-600">
-          <div>
-            <div class="text-sm font-medium text-slate-800">Add to Delivery Board</div>
-            <div class="text-xs text-slate-500">Track prep status (gas, inspection, insurance)</div>
-          </div>
-        </label>
-      </div>
-      <div class="flex gap-3 mt-6">
-        <button onclick="saveSchedule()"
-                class="flex-1 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">
-          Save
-        </button>
-        <button onclick="closeScheduleModal()"
-                class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">
-          Cancel
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<script>
-let _schedDealId = null;
-
-function openScheduleModal(dealId, currentDate, onBoard) {
-  _schedDealId = dealId;
-  // Default to today if no date set
-  document.getElementById('schedDateInput').value = currentDate || new Date().toISOString().split('T')[0];
-  document.getElementById('schedBoardCheck').checked = onBoard || false;
-  document.getElementById('scheduleModal').classList.remove('hidden');
-  setTimeout(() => document.getElementById('schedDateInput').focus(), 50);
-}
-
-function closeScheduleModal() {
-  document.getElementById('scheduleModal').classList.add('hidden');
-  _schedDealId = null;
-}
-
-async function saveSchedule() {
-  if (!_schedDealId) return;
-  const date = document.getElementById('schedDateInput').value;
-  const board = document.getElementById('schedBoardCheck').checked;
-  try {
-    await fetch(`/deals/${_schedDealId}/quick_update`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ field: 'status', value: 'Scheduled' }),
-    });
-    if (date) {
-      await fetch(`/deals/${_schedDealId}/quick_update`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field: 'scheduled_date', value: date }),
-      });
-    }
-    if (board) {
-      const form = new FormData();
-      form.append('next', window.location.href);
-      await fetch(`/delivery/${_schedDealId}/push`, { method: 'POST', body: form });
-    }
-    closeScheduleModal();
-    window.location.reload();
-  } catch(e) {
-    alert('Failed to save. Please try again.');
-  }
-}
-
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeScheduleModal();
-});
-document.getElementById('scheduleModal').addEventListener('click', e => {
-  if (e.target === document.getElementById('scheduleModal')) closeScheduleModal();
-});
-</script>
-
 <script>
 (function () {
-  let activeEl = null;
+  var activeEl = null;
 
-  function toast(id, ms = 1400) {
-    const el = document.getElementById(id);
+  function toast(id, ms) {
+    ms = ms || 1400;
+    var el = document.getElementById(id);
     if (!el) return;
     el.classList.remove('hidden');
     clearTimeout(el._t);
-    el._t = setTimeout(() => el.classList.add('hidden'), ms);
+    el._t = setTimeout(function(){ el.classList.add('hidden'); }, ms);
   }
 
   function fmtDate(iso) {
     if (!iso) return '—';
-    const p = iso.split('-');
-    return p.length === 3 ? `${parseInt(p[1])}/${parseInt(p[2])}` : iso;
+    var p = iso.split('-');
+    return p.length === 3 ? (parseInt(p[1]) + '/' + parseInt(p[2])) : iso;
   }
 
   function fmtStatus(val) {
-    const map = { Delivered:'bg-emerald-100 text-emerald-800', Dead:'bg-slate-100 text-slate-500', Scheduled:'bg-blue-100 text-blue-800', Pending:'bg-amber-100 text-amber-800' };
-    return `<span class="inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold ${map[val]||'bg-slate-100 text-slate-600'}">${val}</span>`;
+    var map = {Delivered:'bg-emerald-100 text-emerald-800', Dead:'bg-slate-100 text-slate-500', Scheduled:'bg-blue-100 text-blue-800', Pending:'bg-amber-100 text-amber-800'};
+    return '<span class="inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold ' + (map[val]||'bg-slate-100 text-slate-600') + '">' + val + '</span>';
   }
 
   function renderValue(field, value) {
@@ -397,35 +309,35 @@ document.getElementById('scheduleModal').addEventListener('click', e => {
     if (field === 'status') return fmtStatus(value);
     if (field === 'commission_override') {
       if (!value && value !== 0) return '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-sm font-semibold bg-white border-slate-200 text-slate-900">—</span>';
-      return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-sm font-semibold bg-white border-slate-200 text-slate-900">$${Number(value).toLocaleString()} <span class="text-[9px] text-amber-500">✎</span></span>`;
+      return '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-sm font-semibold bg-white border-slate-200 text-slate-900">$' + Number(value).toLocaleString() + ' <span class="text-[9px] text-amber-500">✎</span></span>';
     }
     return value || '—';
   }
 
   async function save(span, field, dealId, value) {
     try {
-      const res = await fetch(`/deals/${dealId}/quick_update`, {
+      var res = await fetch('/deals/' + dealId + '/quick_update', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field, value }),
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({field: field, value: value}),
       });
-      const data = await res.json();
+      var data = await res.json();
       if (!data.ok) throw new Error(data.error || 'err');
       span.dataset.value = value;
       span.innerHTML = renderValue(field, value);
       span.classList.add('save-ok');
-      setTimeout(() => span.classList.remove('save-ok'), 700);
+      setTimeout(function(){ span.classList.remove('save-ok'); }, 700);
       toast('saveToast');
       activeEl = null;
-    } catch {
+    } catch(e) {
       span.classList.add('save-err');
-      setTimeout(() => span.classList.remove('save-err'), 700);
+      setTimeout(function(){ span.classList.remove('save-err'); }, 700);
       toast('errToast', 2500);
     }
   }
 
   function cancelEdit(span) {
-    if (!span?._orig) return;
+    if (!span || !span._orig) return;
     span.innerHTML = span._orig;
     span.classList.remove('editing');
     if (activeEl === span) activeEl = null;
@@ -437,16 +349,16 @@ document.getElementById('scheduleModal').addEventListener('click', e => {
     span.classList.add('editing');
     span._orig = span.innerHTML;
 
-    const field = span.dataset.field;
-    const type  = span.dataset.type;
-    const cur   = span.dataset.value ?? '';
-    const id    = span.dataset.id;
-    let input;
+    var field = span.dataset.field;
+    var type  = span.dataset.type;
+    var cur   = span.dataset.value !== undefined ? span.dataset.value : '';
+    var id    = span.dataset.id;
+    var input;
 
     if (type === 'select') {
       input = document.createElement('select');
-      (span.dataset.options || '').split('|').forEach(o => {
-        const opt = document.createElement('option');
+      (span.dataset.options || '').split('|').forEach(function(o) {
+        var opt = document.createElement('option');
         opt.value = o; opt.textContent = o || '—';
         if (o === cur) opt.selected = true;
         input.appendChild(opt);
@@ -461,40 +373,40 @@ document.getElementById('scheduleModal').addEventListener('click', e => {
     span.innerHTML = '';
     span.appendChild(input);
     input.focus();
-    if (type === 'text') try { input.select(); } catch(_) {}
+    if (type === 'text') { try { input.select(); } catch(e) {} }
 
     if (type === 'select') {
-      input.addEventListener('change', () => {
-        // Intercept Scheduled — open calendar modal instead of saving
-        if (field === 'status' && input.value === 'Scheduled') {
+      var committed = false;
+      input.addEventListener('change', function() {
+        var val = input.value;
+        committed = true;
+        // Intercept Scheduled → open calendar modal
+        if (field === 'status' && val === 'Scheduled') {
           cancelEdit(span);
-          openScheduleModal(parseInt(id), '', false);
+          openSchedModal(parseInt(id), '', false);
           return;
         }
-        const val = input.value;
         cancelEdit(span);
         if (val !== cur) save(span, field, id, val);
       });
-      input.addEventListener('blur', () => {
-        // Only cancel if change didn't already handle it
-        if (span.classList.contains('editing')) cancelEdit(span);
+      input.addEventListener('blur', function() {
+        if (!committed) cancelEdit(span);
       });
     } else {
-      const commit = () => {
-        const val = input.value;
+      input.addEventListener('blur', function() {
+        var val = input.value;
         if (val === cur) { cancelEdit(span); return; }
         save(span, field, id, val);
-      };
-      input.addEventListener('blur', commit);
-      input.addEventListener('keydown', e => {
+      });
+      input.addEventListener('keydown', function(e) {
         if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
         if (e.key === 'Escape') { e.preventDefault(); cancelEdit(span); }
       });
     }
   }
 
-  document.addEventListener('click', e => {
-    const span = e.target.closest('.editable');
+  document.addEventListener('click', function(e) {
+    var span = e.target.closest('.editable');
     if (span && !span.classList.contains('editing')) { startEdit(span); return; }
     if (!span && activeEl) cancelEdit(activeEl);
   });
@@ -504,52 +416,53 @@ document.getElementById('scheduleModal').addEventListener('click', e => {
 async function togglePaid(btn, dealId) {
   btn.disabled = true; btn.style.opacity = '0.6';
   try {
-    const res = await fetch(`/deals/${dealId}/toggle_paid`, { method: 'POST', headers: { 'Accept': 'application/json' } });
-    const data = await res.json();
+    var res = await fetch('/deals/' + dealId + '/toggle_paid', {method:'POST', headers:{'Accept':'application/json'}});
+    var data = await res.json();
     if (!data.ok) throw 0;
-    const paid = data.is_paid;
+    var paid = data.is_paid;
     btn.dataset.paid = paid ? '1' : '0';
     btn.textContent = paid ? '✓ Paid' : 'Pay?';
-    btn.className = `text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap ${paid ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`;
-    const commBadge = btn.closest('tr')?.querySelector('[data-field="commission_override"] span');
+    btn.className = 'text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap ' + (paid ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100');
+    var commBadge = btn.closest('tr') && btn.closest('tr').querySelector('[data-field="commission_override"] span');
     if (commBadge) {
       commBadge.className = commBadge.className.replace(/bg-emerald-50 border-emerald-200 text-emerald-800|bg-white border-slate-200 text-slate-900/g, '');
-      commBadge.classList.add(...(paid ? ['bg-emerald-50','border-emerald-200','text-emerald-800'] : ['bg-white','border-slate-200','text-slate-900']));
+      paid ? commBadge.classList.add('bg-emerald-50','border-emerald-200','text-emerald-800') : commBadge.classList.add('bg-white','border-slate-200','text-slate-900');
     }
-  } catch { btn.textContent = 'Error'; }
+  } catch(e) { btn.textContent = 'Error'; }
   finally { btn.disabled = false; btn.style.opacity = ''; }
 }
 
 // Bulk select
-const selectAll = document.getElementById('selectAll');
-const bulkToolbar = document.getElementById('bulkToolbar');
-const bulkCount = document.getElementById('bulkCount');
+var selectAll = document.getElementById('selectAll');
+var bulkToolbar = document.getElementById('bulkToolbar');
+var bulkCount = document.getElementById('bulkCount');
 function updateBulkToolbar() {
-  const checked = document.querySelectorAll('.deal-checkbox:checked');
-  bulkToolbar?.classList.toggle('hidden', !checked.length);
-  if (bulkCount) bulkCount.textContent = `${checked.length} deal${checked.length !== 1 ? 's' : ''} selected`;
+  var checked = document.querySelectorAll('.deal-checkbox:checked');
+  if (bulkToolbar) bulkToolbar.classList.toggle('hidden', !checked.length);
+  if (bulkCount) bulkCount.textContent = checked.length + ' deal' + (checked.length !== 1 ? 's' : '') + ' selected';
   if (selectAll) {
-    const all = document.querySelectorAll('.deal-checkbox');
+    var all = document.querySelectorAll('.deal-checkbox');
     selectAll.checked = all.length > 0 && checked.length === all.length;
     selectAll.indeterminate = checked.length > 0 && checked.length < all.length;
   }
 }
 function clearSelection() {
-  document.querySelectorAll('.deal-checkbox').forEach(cb => cb.checked = false);
+  document.querySelectorAll('.deal-checkbox').forEach(function(cb){ cb.checked = false; });
   if (selectAll) selectAll.checked = false;
-  bulkToolbar?.classList.add('hidden');
+  if (bulkToolbar) bulkToolbar.classList.add('hidden');
 }
-if (selectAll) selectAll.addEventListener('change', () => {
-  document.querySelectorAll('.deal-checkbox').forEach(cb => cb.checked = selectAll.checked);
+if (selectAll) selectAll.addEventListener('change', function() {
+  document.querySelectorAll('.deal-checkbox').forEach(function(cb){ cb.checked = selectAll.checked; });
   updateBulkToolbar();
 });
 
-const params = new URLSearchParams(window.location.search);
+var params = new URLSearchParams(window.location.search);
 if (params.get('deleted')) {
-  const n = document.createElement('div');
+  var n = document.createElement('div');
   n.className = 'mb-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium';
-  n.textContent = `✓ Deleted ${params.get('deleted')} deal(s).`;
-  document.querySelector('h1')?.closest('div')?.parentNode?.prepend(n);
+  n.textContent = '✓ Deleted ' + params.get('deleted') + ' deal(s).';
+  var h = document.querySelector('h1');
+  if (h && h.closest('div') && h.closest('div').parentNode) h.closest('div').parentNode.prepend(n);
 }
 </script>
 
