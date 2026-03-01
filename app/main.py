@@ -462,6 +462,35 @@ async def maybe_cleanup_sessions():
         logger.warning(f"Session cleanup error: {e}")
 
 
+@app.get("/api/cron/cleanup")
+async def cron_cleanup(request: Request):
+    """
+    Called nightly by Vercel Cron (see vercel.json).
+    Cleans up expired sessions and reset tokens.
+    Only accepts requests from Vercel's cron infrastructure.
+    """
+    from fastapi.responses import JSONResponse
+    # Vercel sets this header on cron invocations — reject anything else
+    if request.headers.get("x-vercel-cron") != "1":
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+    try:
+        from .auth import _raw_pg_conn
+        conn = await _raw_pg_conn()
+        if not conn:
+            return JSONResponse({"ok": True, "note": "SQLite — no cleanup needed"})
+        try:
+            r1 = await conn.execute("DELETE FROM user_sessions WHERE expires_at <= NOW()")
+            r2 = await conn.execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
+            deleted = int(r1.split()[-1]) + int(r2.split()[-1])
+        finally:
+            await conn.close()
+        logger.info(f"Cron cleanup: removed {deleted} expired row(s)")
+        return JSONResponse({"ok": True, "deleted": deleted})
+    except Exception as e:
+        logger.error(f"Cron cleanup error: {e}")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 # ─── Utility functions ───
 def month_bounds(d: date):
     start = date(d.year, d.month, 1)
