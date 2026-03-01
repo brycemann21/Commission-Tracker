@@ -275,6 +275,7 @@
 </div>
 
 <form id="pendingBulkForm" method="post" action="/deals/bulk-delete">
+        {{ csrf_hidden }}
   <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
   <div class="overflow-x-auto bg-white rounded-lg border border-slate-200">
     <table class="min-w-full text-sm">
@@ -469,6 +470,7 @@
       </div>
       <div class="p-4 overflow-auto" style="max-height: 75vh;">
         <form id="modalBulkForm" method="post" action="/deals/bulk-delete">
+        {{ csrf_hidden }}
           <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
           <div class="overflow-x-auto bg-white rounded border border-slate-200">
             <table class="min-w-full text-sm">
@@ -531,6 +533,7 @@
         <button type="button" id="closeGoalModal" class="text-slate-500 hover:text-slate-900 text-2xl leading-none">&times;</button>
       </div>
       <form method="post" action="/goals/save" class="p-5">
+        {{ csrf_hidden }}
         <div class="text-sm text-slate-500 mb-4">{{ month_options[selected_month-1].label }} {{ selected_year }}</div>
         <div class="space-y-3">
           <div>

@@ -10,7 +10,9 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
   <title>{{ title or "Commission Tracker" }}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind CSS: version-pinned CDN for production use -->
+  <!-- For maximum performance, compile with: npx tailwindcss -i input.css -o static/tw.css --minify -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <style>
     @media(max-width:640px){.nav-links{display:none}.nav-links.open{display:flex;flex-direction:column;position:absolute;top:100%;left:0;right:0;background:white;border-bottom:1px solid #e2e8f0;padding:8px 16px 12px;gap:4px;z-index:50;box-shadow:0 4px 6px -1px rgb(0 0 0/.1)}.nav-links.open a,.nav-links.open button{padding:10px 12px}.hamburger{display:flex!important}}
     @media(pointer:coarse){button,a,input[type="checkbox"],select{min-height:44px}.touch-row td{padding-top:12px;padding-bottom:12px}}
@@ -183,17 +185,16 @@
 
     window.extendSession = async function() {
       try {
-        // hitting any authenticated endpoint refreshes nothing server-side,
-        // but we can reload the page which resets the session check cycle
-        const res = await fetch('/api/session-status');
+        // Actually extend the session in the database
+        const res = await fetch('/api/session-extend', {method: 'POST'});
         const data = await res.json();
-        if (data.authenticated && data.seconds_remaining > WARN_AT) {
+        if (data.ok && data.seconds_remaining > WARN_AT) {
           document.getElementById('sessionWarning').classList.add('hidden');
           clearInterval(countdownTimer);
           warningShown = false;
         } else {
-          // Session truly expiring — reload to trigger a proper re-auth
-          window.location.reload();
+          // Session truly expired — redirect to login
+          window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
         }
       } catch { window.location.reload(); }
     };

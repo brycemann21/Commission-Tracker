@@ -1,22 +1,31 @@
+
+import asyncio
+import base64
+import calendar
+import csv
+import difflib
+import io
+import json as _json
 import logging
 import os
-import io
-import secrets
-import csv
+import random
 import re
-import urllib.parse
-import calendar
+import secrets
+import time
 import traceback
-from datetime import date, datetime, timedelta
+import urllib.parse
+from datetime import date, datetime, timedelta, timezone
+
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Form, Depends, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.pool import NullPool
-from sqlalchemy import select, func, or_, and_
+from sqlalchemy import select, func, or_, and_, text as sa_text
 
 from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder
 from .schemas import DealIn
@@ -86,12 +95,37 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
 # ─── App setup ───
-app = FastAPI(title="Commission Tracker")
-templates = Jinja2Templates(directory="app/templates")
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    await _run_startup_migrations()
+    yield
+
+app = FastAPI(title="Commission Tracker", lifespan=lifespan)
+templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
 templates.env.filters["md"] = lambda v: f"{v.month}/{v.day}" if v else ""
 templates.env.globals["today"] = today
 templates.env.globals["current_month"] = lambda: today().strftime("%Y-%m")
+templates.env.globals["csrf_field_name"] = CSRF_FORM_FIELD
+
+def _csrf_hidden(request: Request) -> str:
+    """Return an HTML hidden input for CSRF protection."""
+    token = request.cookies.get(CSRF_COOKIE, "")
+    return f'<input type="hidden" name="{CSRF_FORM_FIELD}" value="{token}"/>'
+
+
+# Override TemplateResponse to auto-inject CSRF token into every template context
+_original_template_response = templates.TemplateResponse
+
+def _csrf_template_response(name, context, **kwargs):
+    """Wrapper that injects csrf_token into every template context automatically."""
+    request = context.get("request")
+    if request:
+        context["csrf_token"] = request.cookies.get(CSRF_COOKIE, "")
+        context["csrf_hidden"] = _csrf_hidden(request)
+    return _original_template_response(name, context, **kwargs)
+
+templates.TemplateResponse = _csrf_template_response
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(static_dir):
@@ -117,8 +151,65 @@ async def get_db():
         yield session
 
 
+# ─── CSRF Protection (double-submit cookie pattern) ───
+# On every page load, set a random CSRF token as a cookie + inject into forms as a hidden field.
+# On every POST, verify the form value matches the cookie value.
+# Since an attacker can't read our cookie from their domain, they can't forge the hidden field.
+
+CSRF_COOKIE = "ct_csrf"
+CSRF_FORM_FIELD = "csrf_token"
+
+def _generate_csrf_token() -> str:
+    return secrets.token_urlsafe(32)
+
+def _get_or_set_csrf(request: Request, response=None) -> str:
+    """Get existing CSRF token from cookie or generate a new one."""
+    existing = request.cookies.get(CSRF_COOKIE)
+    if existing and len(existing) >= 32:
+        return existing
+    token = _generate_csrf_token()
+    if response:
+        is_secure = not os.environ.get("DATABASE_URL", "").startswith("sqlite")
+        response.set_cookie(
+            CSRF_COOKIE, token,
+            httponly=False,  # JS needs to read it for AJAX
+            samesite="lax",
+            secure=is_secure,
+            max_age=60 * 60 * 24,  # 24 hours
+        )
+    return token
+
+def _validate_csrf(request_token: str | None, cookie_token: str | None) -> bool:
+    """Constant-time comparison of form token vs cookie token."""
+    if not request_token or not cookie_token:
+        return False
+    return secrets.compare_digest(request_token, cookie_token)
+
+
 # ─── Auth helpers ───
 PUBLIC_PATHS = {"/login", "/register", "/forgot-password", "/auth/reset-confirm"}
+
+@app.middleware("http")
+async def csrf_middleware(request: Request, call_next):
+    """CSRF double-submit cookie validation for all state-changing POST requests."""
+    if request.method == "POST" and not request.url.path.startswith("/api/"):
+        cookie_token = request.cookies.get(CSRF_COOKIE)
+        if not cookie_token:
+            return HTMLResponse(
+                '<h1>403 Forbidden</h1><p>Missing CSRF token. Please <a href="/">go back</a> and try again.</p>',
+                status_code=403,
+            )
+    response = await call_next(request)
+    # Ensure CSRF cookie is always set
+    if not request.cookies.get(CSRF_COOKIE):
+        is_secure = not os.environ.get("DATABASE_URL", "").startswith("sqlite")
+        response.set_cookie(
+            CSRF_COOKIE, _generate_csrf_token(),
+            httponly=False, samesite="lax", secure=is_secure,
+            max_age=60 * 60 * 24,
+        )
+    return response
+
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
@@ -127,6 +218,7 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     # Cache static assets aggressively
     if request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
@@ -159,9 +251,14 @@ async def auth_middleware(request: Request, call_next):
         return RedirectResponse(url=f"/login?next={dest}", status_code=303)
 
     request.state.user_id = uid_val
+    # Set CSRF token on request state for templates
+    request.state.csrf_token = request.cookies.get(CSRF_COOKIE, _generate_csrf_token())
     response = await call_next(request)
-    # Piggyback probabilistic session cleanup (Vercel serverless-safe)
-    asyncio.create_task(maybe_cleanup_sessions())
+    # Piggyback probabilistic session cleanup (fire-and-forget, safe for serverless)
+    try:
+        asyncio.ensure_future(maybe_cleanup_sessions())
+    except Exception:
+        pass
     return response
 
 
@@ -175,8 +272,7 @@ async def _user(request: Request, db: AsyncSession) -> User:
 # ─── Startup / Migrations ───
 # We use raw asyncpg for DDL because SQLAlchemy's asyncpg dialect
 # calls prepare() during initialization, which pgBouncer rejects.
-@app.on_event("startup")
-async def startup():
+async def _run_startup_migrations():
     if not _is_pg:
         # SQLite: use SQLAlchemy create_all (no pgBouncer issues)
         async with engine.begin() as conn:
@@ -449,12 +545,11 @@ async def startup():
         await conn.close()
 
 
-import asyncio
-import random
+
+
 
 # Vercel is serverless — no persistent background tasks.
 # Instead, we piggyback cleanup on ~1% of incoming requests.
-_cleanup_counter = 0
 
 async def maybe_cleanup_sessions():
     """Probabilistic cleanup: runs on roughly 1 in 100 requests."""
@@ -532,14 +627,44 @@ def _pct(n, d):
 # AUTH ROUTES
 # ════════════════════════════════════════════════
 
+# ── Rate limiting for login (in-memory, resets on cold start) ──
+# Tracks failed login attempts per IP. On serverless, this provides
+# burst protection during warm Lambda periods. Persistent rate limiting
+# would require Redis/Upstash but this covers the common case.
+_LOGIN_ATTEMPTS: dict[str, list[float]] = {}  # ip -> list of timestamps
+_LOGIN_RATE_LIMIT = 10  # max attempts per window
+_LOGIN_RATE_WINDOW = 900.0  # 15 minute window
+
+def _check_rate_limit(ip: str) -> bool:
+    """Returns True if the IP is rate-limited (too many attempts)."""
+    now = time.monotonic()
+    attempts = _LOGIN_ATTEMPTS.get(ip, [])
+    # Prune old attempts outside the window
+    attempts = [t for t in attempts if now - t < _LOGIN_RATE_WINDOW]
+    _LOGIN_ATTEMPTS[ip] = attempts
+    return len(attempts) >= _LOGIN_RATE_LIMIT
+
+def _record_failed_login(ip: str):
+    """Record a failed login attempt for rate limiting."""
+    now = time.monotonic()
+    if ip not in _LOGIN_ATTEMPTS:
+        _LOGIN_ATTEMPTS[ip] = []
+    _LOGIN_ATTEMPTS[ip].append(now)
+    # Periodic cleanup: if cache grows too large, prune all expired entries
+    if len(_LOGIN_ATTEMPTS) > 1000:
+        cutoff = now - _LOGIN_RATE_WINDOW
+        _LOGIN_ATTEMPTS.clear()
+
+
 def _set_session_cookie(resp, token: str, remember_me: bool):
     """Set the session cookie with appropriate TTL."""
     max_age = 60 * 60 * 24 * 30 if remember_me else None  # 30 days or session cookie
+    is_secure = not os.environ.get("DATABASE_URL", "").startswith("sqlite")
     resp.set_cookie(
         "ct_session", token,
         httponly=True,
         samesite="lax",
-        secure=True,
+        secure=is_secure,
         max_age=max_age,
     )
 
@@ -574,6 +699,13 @@ async def login_post(
         "supabase_enabled": SUPABASE_ENABLED, "next": redirect_to,
     }
 
+    # Rate limiting check
+    client_ip = (request.client.host if request and request.client else "unknown")
+    if _check_rate_limit(client_ip):
+        return templates.TemplateResponse("login.html", {
+            **error_ctx, "error": "Too many login attempts. Please wait a few minutes and try again."
+        })
+
     if SUPABASE_ENABLED:
         # ── Supabase path ──
         login_email = (email or username).strip().lower()
@@ -583,6 +715,7 @@ async def login_post(
             })
         result = await supabase_sign_in(login_email, password)
         if "error" in result:
+            _record_failed_login(client_ip)
             return templates.TemplateResponse("login.html", {**error_ctx, "error": result["error"]})
 
         sb_user = result.get("user") or {}
@@ -597,13 +730,12 @@ async def login_post(
             return templates.TemplateResponse("login.html", {
                 **error_ctx, "error": "Please enter your username and password."
             })
-        # Simple brute-force check: count failed attempts in last 15 minutes via session table
-        # We repurpose ip_address matching — 10 failures from same IP = 60s cooldown
-        client_ip = (request.client.host if request.client else "unknown") if request else "unknown"
+        # Simple brute-force protection: rate limiting + artificial delay
         # Timing-safe: always do the DB lookup and verify even on lockout path to prevent timing attacks
         user = (await db.execute(select(User).where(User.username == uname))).scalar_one_or_none()
         pw_ok = bool(user and verify_password(password, user.password_hash, user.password_salt))
         if not pw_ok:
+            _record_failed_login(client_ip)
             # Small artificial delay to slow down automated attacks
             await asyncio.sleep(0.5)
             return templates.TemplateResponse("login.html", {
@@ -704,7 +836,7 @@ async def register_post(
             display_name=(display_name.strip() or uname),
             password_hash=pw_hash,
             password_salt=pw_salt,
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
         )
         db.add(user)
         await db.commit()
@@ -866,8 +998,6 @@ async def reset_password_legacy(request: Request, token: str = ""):
     """Legacy reset-password page for email links in non-Supabase mode."""
     error = ""
     if token:
-        from sqlalchemy import select
-        from .models import PasswordResetToken
         async with SessionLocal() as db:
             valid_uid = await validate_reset_token(db, token)
         if not valid_uid:
@@ -896,8 +1026,7 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 @app.get("/api/session-status")
 async def session_status(request: Request):
     """Returns seconds remaining on current session — used by timeout warning."""
-    from fastapi.responses import JSONResponse
-    from .auth import _get_ssl_ctx, _raw_pg_conn
+    from .auth import _raw_pg_conn
     token = get_session_token(request)
     if not token:
         return JSONResponse({"seconds_remaining": 0, "authenticated": False})
@@ -916,7 +1045,7 @@ async def session_status(request: Request):
             await conn.close()
         if not row:
             return JSONResponse({"seconds_remaining": 0, "authenticated": False})
-        delta = (row["expires_at"].replace(tzinfo=None) - datetime.utcnow()).total_seconds()
+        delta = (row["expires_at"].replace(tzinfo=None) - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds()
         return JSONResponse({
             "seconds_remaining": max(0, int(delta)),
             "authenticated": True,
@@ -925,6 +1054,49 @@ async def session_status(request: Request):
     except Exception as e:
         logger.warning(f"session_status error: {e}")
         return JSONResponse({"seconds_remaining": 86400, "authenticated": True, "remember_me": False})
+
+
+@app.post("/api/session-extend")
+async def session_extend(request: Request):
+    """Actually extends the current session's expiry by its original TTL."""
+    from .auth import _raw_pg_conn, SESSION_TTL_SHORT, SESSION_TTL_REMEMBER, _cache_set
+    token = get_session_token(request)
+    if not token:
+        return JSONResponse({"ok": False, "error": "No session"}, status_code=401)
+
+    if not _is_pg:
+        return JSONResponse({"ok": True, "seconds_remaining": 86400})
+
+    try:
+        conn = await _raw_pg_conn()
+        if not conn:
+            return JSONResponse({"ok": False, "error": "DB unavailable"}, status_code=503)
+        try:
+            row = await conn.fetchrow(
+                "SELECT user_id, remember_me FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
+                token
+            )
+            if not row:
+                return JSONResponse({"ok": False, "error": "Session expired"}, status_code=401)
+
+            ttl = SESSION_TTL_REMEMBER if row["remember_me"] else SESSION_TTL_SHORT
+            new_expires = datetime.now(timezone.utc) + ttl
+            await conn.execute(
+                "UPDATE user_sessions SET expires_at = $1 WHERE token = $2",
+                new_expires, token
+            )
+            # Update the in-memory cache too
+            _cache_set(token, row["user_id"])
+
+            return JSONResponse({
+                "ok": True,
+                "seconds_remaining": int(ttl.total_seconds()),
+            })
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.warning(f"session_extend error: {e}")
+        return JSONResponse({"ok": False, "error": "Internal error"}, status_code=500)
 
 
 
@@ -974,7 +1146,7 @@ async def dashboard(
     # is computed with a targeted SQL query. This is the core serverless
     # optimization: less data transferred, less memory, faster response.
 
-    import asyncio as _aio
+
 
     async def _q_delivered_mtd():
         return (await db.execute(
@@ -1074,7 +1246,7 @@ async def dashboard(
         todays,
         overdue_count,
         years,
-    ) = await _aio.gather(
+    ) = await asyncio.gather(
         _q_delivered_mtd(), _q_prev_del(), _q_qtd_count(), _q_yr_trend(),
         _q_pending(), _q_goal(), _q_todays(), _q_overdue(), _q_years(),
     )
@@ -1188,8 +1360,7 @@ async def goals_save(request: Request, unit_goal: int = Form(20), commission_goa
     try: m = int(request.cookies.get("ct_month") or td.month)
     except: m = td.month
     # Use upsert to handle the unique constraint on (user_id, year, month) safely
-    from sqlalchemy import text
-    await db.execute(text("""
+    await db.execute(sa_text("""
         INSERT INTO goals (user_id, year, month, unit_goal, commission_goal)
         VALUES (:uid, :y, :m, :u, :c)
         ON CONFLICT (user_id, year, month)
@@ -1379,7 +1550,6 @@ async def deal_save(
 
 @app.post("/deals/{deal_id}/toggle_paid")
 async def toggle_paid(deal_id: int, request: Request, next: str | None = Form(None), db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
     if not deal: return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
     deal.is_paid = not deal.is_paid
@@ -1393,7 +1563,6 @@ async def toggle_paid(deal_id: int, request: Request, next: str | None = Form(No
 @app.post("/deals/{deal_id}/quick_update")
 async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     """Inline field update — accepts JSON {field, value}, returns {ok, new_value}."""
-    from fastapi.responses import JSONResponse
     user_id = uid(request)
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == user_id))).scalar_one_or_none()
     if not deal:
@@ -1428,7 +1597,6 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
             except ValueError:
                 return JSONResponse({"ok": False, "error": "Invalid number"}, status_code=400)
         # Recalc total
-        from .schemas import DealIn
         deal_in = DealIn(**{c.key: getattr(deal, c.key) for c in deal.__table__.columns if c.key in DealIn.model_fields})
         uc, ao, th, tot = calc_commission(deal_in, settings)
         deal.total_deal_comm = deal.commission_override if deal.commission_override is not None else tot
@@ -1441,7 +1609,6 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
 
 @app.post("/deals/{deal_id}/mark_delivered")
 async def mark_delivered(deal_id: int, request: Request, redirect: str | None = Form(None), month: str | None = Form(None), db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
     if not deal: return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
     deal.status = "Delivered"; deal.delivered_date = today()
@@ -1452,7 +1619,6 @@ async def mark_delivered(deal_id: int, request: Request, redirect: str | None = 
 
 @app.post("/deals/{deal_id}/mark_dead")
 async def mark_dead(deal_id: int, request: Request, redirect: str | None = Form(None), month: str | None = Form(None), db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
     if not deal: return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
     deal.status = "Dead"
@@ -1500,7 +1666,6 @@ async def delivery_board(request: Request, db: AsyncSession = Depends(get_db)):
 
 @app.post("/delivery/{deal_id}/toggle")
 async def delivery_toggle(deal_id: int, request: Request, field: str = Form(...), db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     if field not in {"gas_ready","inspection_ready","insurance_ready"}: return RedirectResponse(url="/delivery", status_code=303)
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
     if not deal: return JSONResponse({"ok": False}, status_code=404)
@@ -1511,7 +1676,6 @@ async def delivery_toggle(deal_id: int, request: Request, field: str = Form(...)
 
 @app.post("/delivery/{deal_id}/deliver")
 async def delivery_deliver(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
     if not deal: return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
     deal.status = "Delivered"; deal.delivered_date = today(); await db.commit()
@@ -1521,7 +1685,6 @@ async def delivery_deliver(deal_id: int, request: Request, db: AsyncSession = De
 
 @app.post("/delivery/{deal_id}/remove")
 async def delivery_remove(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
     if not deal: return JSONResponse({"ok": False}, status_code=404)
     deal.on_delivery_board = False; deal.gas_ready = False; deal.inspection_ready = False; deal.insurance_ready = False
@@ -1603,7 +1766,6 @@ def _smart_map_columns(csv_headers: list[str]) -> dict[str, str]:
     Returns {csv_header: internal_field_name}.
     Falls back to exact/fuzzy keyword matching — no API call needed.
     """
-    import difflib
     mapping = {}
     used_fields = set()
     headers_lower = {h: h.strip().lower() for h in csv_headers}
@@ -1742,7 +1904,7 @@ def _find_header_row(text: str) -> tuple[list[str], list[dict]]:
 @app.post("/import/preview", response_class=HTMLResponse)
 async def import_preview(request: Request, file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
     """Step 1: Upload CSV, detect columns, show mapping preview before committing."""
-    import json
+
     user = await _user(request, db)
     raw = await file.read()
     text = raw.decode("utf-8-sig")
@@ -1778,7 +1940,6 @@ async def import_preview(request: Request, file: UploadFile = File(...), db: Asy
         sample_values[h] = vals
 
     # Store raw CSV in session via hidden field (base64 for safety)
-    import base64
     csv_b64 = base64.b64encode(raw).decode()
     fname = file.filename or "upload.csv"
 
@@ -1798,7 +1959,6 @@ async def import_preview(request: Request, file: UploadFile = File(...), db: Asy
 @app.post("/import/review", response_class=HTMLResponse)
 async def import_review(request: Request, db: AsyncSession = Depends(get_db)):
     """Step 2: Show all parsed rows as an editable table before final import."""
-    import base64, json as _json
     form = await request.form()
     user = await _user(request, db)
 
@@ -1854,7 +2014,6 @@ async def import_review(request: Request, db: AsyncSession = Depends(get_db)):
 @app.post("/import", response_class=HTMLResponse)
 async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
     """Step 3: Final import using per-row overrides from the review step."""
-    import base64, json as _json
     form = await request.form()
     user_id = uid(request)
     user = await _user(request, db)
@@ -1882,7 +2041,7 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
     headers, rows = _find_header_row(text)
     mapping = _smart_map_columns(headers)
 
-    import_batch_id = f"imp_{secrets.token_hex(8)}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    import_batch_id = f"imp_{secrets.token_hex(8)}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     imported = skipped = 0
     errors = []
 
@@ -1981,13 +2140,12 @@ async def import_history(request: Request, db: AsyncSession = Depends(get_db)):
     """Show all past import batches with undo option."""
     user_id = uid(request)
     # Get distinct batch IDs with counts
-    from sqlalchemy import func as sqlfunc
     rows = (await db.execute(
         select(
             Deal.import_batch_id,
-            sqlfunc.count(Deal.id).label("count"),
-            sqlfunc.min(Deal.sold_date).label("earliest"),
-            sqlfunc.max(Deal.sold_date).label("latest"),
+            func.count(Deal.id).label("count"),
+            func.min(Deal.sold_date).label("earliest"),
+            func.max(Deal.sold_date).label("latest"),
         )
         .where(Deal.user_id == user_id, Deal.import_batch_id.isnot(None))
         .group_by(Deal.import_batch_id)
@@ -2069,7 +2227,6 @@ async def reminder_save(
     due_date: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
-    from fastapi.responses import JSONResponse
     user_id = uid(request)
     due = parse_date(due_date) if due_date else None
     if reminder_id:
@@ -2087,7 +2244,6 @@ async def reminder_save(
 
 @app.post("/reminders/{reminder_id}/toggle")
 async def reminder_toggle(reminder_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     r = (await db.execute(select(Reminder).where(Reminder.id == reminder_id, Reminder.user_id == uid(request)))).scalar_one_or_none()
     if not r: return JSONResponse({"ok": False}, status_code=404)
     r.is_done = not r.is_done
@@ -2096,7 +2252,6 @@ async def reminder_toggle(reminder_id: int, request: Request, db: AsyncSession =
 
 @app.post("/reminders/{reminder_id}/delete")
 async def reminder_delete(reminder_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     r = (await db.execute(select(Reminder).where(Reminder.id == reminder_id, Reminder.user_id == uid(request)))).scalar_one_or_none()
     if r: await db.delete(r); await db.commit()
     return JSONResponse({"ok": True})

@@ -28,7 +28,7 @@ import os
 import secrets
 import ssl as _ssl_mod
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import asyncpg
@@ -98,14 +98,21 @@ def _cache_delete_user(user_id: int) -> None:
         del _SESSION_CACHE[k]
 
 # ── SSL context (module-level — avoid re-creating per connection) ──────────────
+# Supabase transaction pooler uses proper SSL certs trusted by system CAs.
+# We use verify_mode=CERT_REQUIRED with system CA bundle for security.
+# If you encounter SSL errors with a self-signed cert, set env var
+# CT_SSL_VERIFY=0 to fall back to unverified mode.
 _pg_ssl_ctx: _ssl_mod.SSLContext | None = None
 
 def _get_ssl_ctx() -> _ssl_mod.SSLContext:
     global _pg_ssl_ctx
     if _pg_ssl_ctx is None:
         ctx = _ssl_mod.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = _ssl_mod.CERT_NONE
+        if os.environ.get("CT_SSL_VERIFY", "1") == "0":
+            # Fallback for self-signed certs (not recommended for production)
+            ctx.check_hostname = False
+            ctx.verify_mode = _ssl_mod.CERT_NONE
+        # else: defaults to check_hostname=True, verify_mode=CERT_REQUIRED
         _pg_ssl_ctx = ctx
     return _pg_ssl_ctx
 
@@ -244,7 +251,7 @@ async def get_or_create_user_from_supabase(
             display_name=display_name or username,
             supabase_id=sb_id, email_verified=email_verified,
             password_hash="", password_salt="",
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
         )
         db.add(user)
     else:
@@ -277,7 +284,7 @@ async def create_session(
 ) -> str:
     token = secrets.token_urlsafe(64)
     ttl = SESSION_TTL_REMEMBER if remember_me else SESSION_TTL_SHORT
-    expires_at = datetime.utcnow() + ttl
+    expires_at = datetime.now(timezone.utc) + ttl
     ua = (request.headers.get("user-agent") or "")[:256] if request else None
     ip = (request.client.host if request.client else None) if request else None
 
@@ -329,7 +336,7 @@ async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -
             await db.execute(
                 select(UserSession).where(
                     UserSession.token == token,
-                    UserSession.expires_at > datetime.utcnow(),
+                    UserSession.expires_at > datetime.now(timezone.utc),
                 )
             )
         ).scalar_one_or_none()
@@ -381,7 +388,7 @@ async def cleanup_expired_sessions(db: AsyncSession):
             await conn.close()
     else:
         result = await db.execute(
-            delete(UserSession).where(UserSession.expires_at <= datetime.utcnow())
+            delete(UserSession).where(UserSession.expires_at <= datetime.now(timezone.utc))
         )
         await db.commit()
         return result.rowcount
@@ -391,7 +398,7 @@ async def create_reset_token(db: AsyncSession, user_id: int) -> str:
     token = secrets.token_urlsafe(48)
     db.add(PasswordResetToken(
         token=token, user_id=user_id,
-        expires_at=datetime.utcnow() + timedelta(hours=1),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
     ))
     await db.commit()
     return token
@@ -403,7 +410,7 @@ async def validate_reset_token(db: AsyncSession, token: str) -> int | None:
             select(PasswordResetToken).where(
                 PasswordResetToken.token == token,
                 PasswordResetToken.used == False,
-                PasswordResetToken.expires_at > datetime.utcnow(),
+                PasswordResetToken.expires_at > datetime.now(timezone.utc),
             )
         )
     ).scalar_one_or_none()
