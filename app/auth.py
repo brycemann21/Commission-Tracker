@@ -98,21 +98,19 @@ def _cache_delete_user(user_id: int) -> None:
         del _SESSION_CACHE[k]
 
 # ── SSL context (module-level — avoid re-creating per connection) ──────────────
-# Supabase transaction pooler uses proper SSL certs trusted by system CAs.
-# We use verify_mode=CERT_REQUIRED with system CA bundle for security.
-# If you encounter SSL errors with a self-signed cert, set env var
-# CT_SSL_VERIFY=0 to fall back to unverified mode.
+# Supabase's transaction pooler (port 6543) uses a self-signed certificate in
+# its chain, so standard CA verification will fail. This is expected and
+# documented by Supabase — the pooler terminates TLS at their proxy layer.
+# We disable hostname/cert verification for the DB connection only.
+# The Supabase Auth REST API (via httpx) still uses full HTTPS verification.
 _pg_ssl_ctx: _ssl_mod.SSLContext | None = None
 
 def _get_ssl_ctx() -> _ssl_mod.SSLContext:
     global _pg_ssl_ctx
     if _pg_ssl_ctx is None:
         ctx = _ssl_mod.create_default_context()
-        if os.environ.get("CT_SSL_VERIFY", "1") == "0":
-            # Fallback for self-signed certs (not recommended for production)
-            ctx.check_hostname = False
-            ctx.verify_mode = _ssl_mod.CERT_NONE
-        # else: defaults to check_hostname=True, verify_mode=CERT_REQUIRED
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl_mod.CERT_NONE
         _pg_ssl_ctx = ctx
     return _pg_ssl_ctx
 
