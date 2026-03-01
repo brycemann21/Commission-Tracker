@@ -1024,7 +1024,7 @@ async def dashboard(
 
     async def _q_pending():
         return (await db.execute(
-            select(Deal).where(Deal.user_id == user_id, Deal.status == "Pending")
+            select(Deal).where(Deal.user_id == user_id, Deal.status.in_(["Pending", "Scheduled"]))
             .order_by(Deal.sold_date.asc().nullslast())
         )).scalars().all()
 
