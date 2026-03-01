@@ -2,76 +2,125 @@
 {% block content %}
 
 <style>
-  @media print {
-    body * { visibility: hidden !important; }
-  }
-
-  .editable {
-    cursor: pointer;
-    border-radius: 4px;
-    padding: 2px 4px;
-    min-width: 28px;
-    display: inline-block;
-    transition: background 0.12s;
-  }
-  .editable:hover { background: #f1f5f9; }
-  .editable.editing { background: transparent; padding: 0; }
-  .editable input, .editable select {
-    border: 1.5px solid #6366f1;
-    border-radius: 4px;
-    padding: 2px 5px;
-    font-size: 0.82rem;
-    background: #fff;
-    outline: none;
-    min-width: 70px;
-    max-width: 160px;
-  }
-  .editable.save-ok { animation: flash-green 0.6s ease; }
-  .editable.save-err { animation: flash-red 0.6s ease; }
-  @keyframes flash-green { 0%,100% { background: transparent; } 50% { background: #dcfce7; } }
-  @keyframes flash-red   { 0%,100% { background: transparent; } 50% { background: #fee2e2; } }
-
-  /* Keep table layout on all screen sizes — horizontal scroll on mobile */
-  .deals-table { table-layout: auto; }
-  @media (max-width: 767px) {
-    .deals-table { font-size: 0.72rem; }
-    .deals-table th, .deals-table td { padding: 4px 5px; }
-    .deals-table .editable { padding: 1px 2px; }
+  @media print { body * { visibility: hidden !important; } }
+  .editable { cursor:pointer; border-radius:4px; padding:2px 4px; min-width:28px; display:inline-block; transition:background 0.12s; }
+  .editable:hover { background:#f1f5f9; }
+  .editable.editing { background:transparent; padding:0; }
+  .editable input, .editable select { border:1.5px solid #6366f1; border-radius:4px; padding:2px 5px; font-size:0.82rem; background:#fff; outline:none; min-width:70px; max-width:160px; }
+  .editable.save-ok { animation:flash-green 0.6s ease; }
+  .editable.save-err { animation:flash-red 0.6s ease; }
+  @keyframes flash-green { 0%,100%{background:transparent} 50%{background:#dcfce7} }
+  @keyframes flash-red   { 0%,100%{background:transparent} 50%{background:#fee2e2} }
+  .deals-table { table-layout:auto; }
+  @media (max-width:767px) {
+    .deals-table { font-size:0.72rem; }
+    .deals-table th, .deals-table td { padding:4px 5px; }
+    .deals-table .editable { padding:1px 2px; }
   }
 </style>
 
+<!-- ── Schedule Modal — defined FIRST so openScheduleModal() is always available ── -->
+<div id="scheduleModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold">Schedule Delivery</h2>
+        <button onclick="closeScheduleModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Scheduled Delivery Date</label>
+          <input type="date" id="schedDateInput"
+                 class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+        </div>
+        <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition">
+          <input type="checkbox" id="schedBoardCheck" class="rounded w-4 h-4 text-indigo-600">
+          <div>
+            <div class="text-sm font-medium text-slate-800">Add to Delivery Board</div>
+            <div class="text-xs text-slate-500">Track prep status (gas, inspection, insurance)</div>
+          </div>
+        </label>
+      </div>
+      <div class="flex gap-3 mt-6">
+        <button onclick="saveSchedule()" class="flex-1 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">Save</button>
+        <button onclick="closeScheduleModal()" class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Schedule modal — must be defined before inline editor script
+let _schedDealId = null;
+
+function openScheduleModal(dealId, currentDate, onBoard) {
+  _schedDealId = dealId;
+  document.getElementById('schedDateInput').value = currentDate || '';
+  document.getElementById('schedBoardCheck').checked = onBoard || false;
+  document.getElementById('scheduleModal').classList.remove('hidden');
+  // Auto-focus the date input
+  setTimeout(() => document.getElementById('schedDateInput').focus(), 50);
+}
+
+function closeScheduleModal() {
+  document.getElementById('scheduleModal').classList.add('hidden');
+  _schedDealId = null;
+}
+
+async function saveSchedule() {
+  if (!_schedDealId) return;
+  const date = document.getElementById('schedDateInput').value;
+  const board = document.getElementById('schedBoardCheck').checked;
+  try {
+    await fetch(`/deals/${_schedDealId}/quick_update`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field: 'status', value: 'Scheduled' }),
+    });
+    if (date) {
+      await fetch(`/deals/${_schedDealId}/quick_update`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field: 'scheduled_date', value: date }),
+      });
+    }
+    if (board) {
+      const form = new FormData();
+      form.append('next', window.location.href);
+      await fetch(`/delivery/${_schedDealId}/push`, { method: 'POST', body: form });
+    }
+    closeScheduleModal();
+    window.location.reload();
+  } catch(e) {
+    alert('Failed to save. Please try again.');
+  }
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeScheduleModal(); });
+</script>
+
+<!-- ── Filters / header ── -->
 <div class="flex flex-col md:flex-row md:items-end gap-3 mb-4">
   <div>
     <h1 class="text-xl font-bold">Deals</h1>
     <div class="text-xs text-slate-500">{{ selected_month }}/{{ selected_year }} · Shows deals sold <em>or</em> delivered this month · <span class="text-violet-600 font-medium">↪ carry</span> = sold prior month, delivered this month · Click any cell to edit inline</div>
   </div>
   <form class="md:ml-auto flex flex-wrap gap-2" method="get" action="/deals">
-    <!-- Month navigator -->
     <div class="flex items-center gap-1 border rounded bg-white">
-      <button type="submit" name="_nav" value="prev"
-              formaction="/deals"
-              class="px-2 py-2 text-slate-500 hover:bg-slate-100 rounded-l transition text-sm">‹</button>
-      <select name="month" onchange="this.form.submit()"
-              class="border-0 px-1 py-2 text-sm bg-transparent focus:outline-none">
+      <button type="submit" name="_nav" value="prev" formaction="/deals" class="px-2 py-2 text-slate-500 hover:bg-slate-100 rounded-l transition text-sm">‹</button>
+      <select name="month" onchange="this.form.submit()" class="border-0 px-1 py-2 text-sm bg-transparent focus:outline-none">
         {% for mo in range(1,13) %}
-          <option value="{{ mo }}" {% if mo == selected_month %}selected{% endif %}>
-            {{ ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][mo] }}
-          </option>
+          <option value="{{ mo }}" {% if mo == selected_month %}selected{% endif %}>{{ ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][mo] }}</option>
         {% endfor %}
       </select>
-      <select name="year" onchange="this.form.submit()"
-              class="border-0 px-1 py-2 text-sm bg-transparent focus:outline-none">
+      <select name="year" onchange="this.form.submit()" class="border-0 px-1 py-2 text-sm bg-transparent focus:outline-none">
         {% for yr in range(selected_year - 2, selected_year + 2) %}
           <option value="{{ yr }}" {% if yr == selected_year %}selected{% endif %}>{{ yr }}</option>
         {% endfor %}
       </select>
-      <button type="submit" name="_nav" value="next"
-              class="px-2 py-2 text-slate-500 hover:bg-slate-100 rounded-r transition text-sm">›</button>
+      <button type="submit" name="_nav" value="next" class="px-2 py-2 text-slate-500 hover:bg-slate-100 rounded-r transition text-sm">›</button>
     </div>
     <input class="border rounded px-3 py-2 text-sm flex-1 min-w-[150px]" name="q" value="{{ q }}" placeholder="Search customer / stock / model" />
     <label class="flex items-center gap-1.5 text-sm text-slate-600 whitespace-nowrap cursor-pointer border rounded px-3 py-2 hover:bg-slate-50 transition">
-      <input type="checkbox" name="search_all" value="1" {% if searching_all %}checked{% endif %} class="rounded">
-      All months
+      <input type="checkbox" name="search_all" value="1" {% if searching_all %}checked{% endif %} class="rounded"> All months
     </label>
     <select class="border rounded px-3 py-2 text-sm" name="status">
       {% for s in ["All","Pending","Scheduled","Delivered","Dead"] %}
@@ -97,10 +146,8 @@
 {% endif %}
 <div id="bulkToolbar" class="hidden mb-3 flex flex-wrap items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
   <span id="bulkCount" class="text-sm font-medium text-red-700">0 deals selected</span>
-  <button type="submit" onclick="return confirm('Permanently delete selected deals?')"
-          class="px-4 py-1.5 rounded bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition">Delete Selected</button>
-  <button type="button" onclick="clearSelection()"
-          class="px-3 py-1.5 rounded border border-red-300 text-red-600 text-sm hover:bg-red-100 transition">Cancel</button>
+  <button type="submit" onclick="return confirm('Permanently delete selected deals?')" class="px-4 py-1.5 rounded bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition">Delete Selected</button>
+  <button type="button" onclick="clearSelection()" class="px-3 py-1.5 rounded border border-red-300 text-red-600 text-sm hover:bg-red-100 transition">Cancel</button>
 </div>
 
 <div class="overflow-x-auto bg-white rounded-lg border border-slate-200">
@@ -132,8 +179,7 @@
       </td>
 
       <td class="p-2 whitespace-nowrap" data-label="Sold">
-        <span class="editable" data-field="sold_date" data-id="{{ d.id }}" data-type="date"
-              data-value="{{ d.sold_date.isoformat() if d.sold_date else '' }}">
+        <span class="editable" data-field="sold_date" data-id="{{ d.id }}" data-type="date" data-value="{{ d.sold_date.isoformat() if d.sold_date else '' }}">
           {{ d.sold_date.strftime('%-m/%-d') if d.sold_date else '—' }}
         </span>
         {% if d.sold_date and (d.sold_date.month != selected_month or d.sold_date.year != selected_year) %}
@@ -142,51 +188,43 @@
       </td>
 
       <td class="p-2 whitespace-nowrap" data-label="Delivered">
-        <span class="editable" data-field="delivered_date" data-id="{{ d.id }}" data-type="date"
-              data-value="{{ d.delivered_date.isoformat() if d.delivered_date else '' }}">
+        <span class="editable" data-field="delivered_date" data-id="{{ d.id }}" data-type="date" data-value="{{ d.delivered_date.isoformat() if d.delivered_date else '' }}">
           {{ d.delivered_date.strftime('%-m/%-d') if d.delivered_date else '—' }}
         </span>
       </td>
 
       <td class="p-2" data-label="Customer">
-        <span class="editable font-medium" data-field="customer" data-id="{{ d.id }}" data-type="text"
-              data-value="{{ d.customer|e }}">{{ d.customer }}</span>
+        <span class="editable font-medium" data-field="customer" data-id="{{ d.id }}" data-type="text" data-value="{{ d.customer|e }}">{{ d.customer }}</span>
       </td>
 
       <td class="p-2" data-label="F&I">
-        <span class="editable" data-field="business_manager" data-id="{{ d.id }}" data-type="select"
-              data-value="{{ d.business_manager or '' }}" data-options="|RGO|KMC|DAB|JGA">
+        <span class="editable" data-field="business_manager" data-id="{{ d.id }}" data-type="select" data-value="{{ d.business_manager or '' }}" data-options="|RGO|KMC|DAB|JGA">
           {{ d.business_manager or '—' }}
         </span>
       </td>
 
       <td class="p-2" data-label="Stock #">
-        <span class="editable" data-field="stock_num" data-id="{{ d.id }}" data-type="text"
-              data-value="{{ d.stock_num|e }}">{{ d.stock_num or '—' }}</span>
+        <span class="editable" data-field="stock_num" data-id="{{ d.id }}" data-type="text" data-value="{{ d.stock_num|e }}">{{ d.stock_num or '—' }}</span>
       </td>
 
       <td class="p-2" data-label="Model">
-        <span class="editable" data-field="model" data-id="{{ d.id }}" data-type="text"
-              data-value="{{ d.model|e }}">{{ d.model or '—' }}</span>
+        <span class="editable" data-field="model" data-id="{{ d.id }}" data-type="text" data-value="{{ d.model|e }}">{{ d.model or '—' }}</span>
       </td>
 
       <td class="p-2" data-label="F/C/L">
-        <span class="editable" data-field="deal_type" data-id="{{ d.id }}" data-type="select"
-              data-value="{{ d.deal_type or '' }}" data-options="|Finance|Cash/Sub-Vented|Lease">
+        <span class="editable" data-field="deal_type" data-id="{{ d.id }}" data-type="select" data-value="{{ d.deal_type or '' }}" data-options="|Finance|Cash/Sub-Vented|Lease">
           {{ d.deal_type or '—' }}
         </span>
       </td>
 
       <td class="p-2" data-label="N/U">
-        <span class="editable" data-field="new_used" data-id="{{ d.id }}" data-type="select"
-              data-value="{{ d.new_used or '' }}" data-options="|New|Used">
+        <span class="editable" data-field="new_used" data-id="{{ d.id }}" data-type="select" data-value="{{ d.new_used or '' }}" data-options="|New|Used">
           {{ d.new_used or '—' }}
         </span>
       </td>
 
       <td class="p-2 max-w-[180px]" data-label="Comments">
-        <span class="editable truncate block" data-field="notes" data-id="{{ d.id }}" data-type="text"
-              data-value="{{ (d.notes or '')|e }}" title="{{ d.notes or '' }}">
+        <span class="editable truncate block" data-field="notes" data-id="{{ d.id }}" data-type="text" data-value="{{ (d.notes or '')|e }}" title="{{ d.notes or '' }}">
           {{ d.notes or '—' }}
         </span>
       </td>
@@ -205,15 +243,13 @@
       </td>
 
       <td class="p-2" data-label="Tag">
-        <span class="editable" data-field="tag" data-id="{{ d.id }}" data-type="select"
-              data-value="{{ d.tag or '' }}" data-options="|Shop|Title|Inbound|FO|SPOT|LOCATE">
+        <span class="editable" data-field="tag" data-id="{{ d.id }}" data-type="select" data-value="{{ d.tag or '' }}" data-options="|Shop|Title|Inbound|FO|SPOT|LOCATE">
           {{ d.tag or '—' }}
         </span>
       </td>
 
       <td class="p-2 text-right whitespace-nowrap" data-label="Commission">
-        <span class="editable" data-field="commission_override" data-id="{{ d.id }}" data-type="number"
-              data-value="{{ d.commission_override if d.commission_override is not none else '' }}">
+        <span class="editable" data-field="commission_override" data-id="{{ d.id }}" data-type="number" data-value="{{ d.commission_override if d.commission_override is not none else '' }}">
           <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-sm font-semibold
             {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-800{% else %}bg-white border-slate-200 text-slate-900{% endif %}">
             ${{ "{:,.0f}".format(d.total_deal_comm or 0) }}
@@ -222,14 +258,9 @@
         </span>
       </td>
 
-      <td class="p-2 text-right no-label" style="min-width:80px">
-        <a href="/deals/{{ d.id }}/edit"
-           class="text-[11px] px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition whitespace-nowrap inline-block mb-0.5">
-          ✎ Edit
-        </a>
-        <button type="button"
-          data-paid="{{ '1' if d.is_paid else '0' }}"
-          onclick="togglePaid(this, {{ d.id }})"
+      <td class="p-2 text-right no-label" style="min-width:70px">
+        <a href="/deals/{{ d.id }}/edit" class="text-[11px] px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition whitespace-nowrap inline-block mb-0.5">✎ Edit</a>
+        <button type="button" data-paid="{{ '1' if d.is_paid else '0' }}" onclick="togglePaid(this, {{ d.id }})"
           class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap
           {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100
           {% else %}bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100{% endif %}">
@@ -250,6 +281,94 @@
 <div id="saveToast" class="fixed bottom-5 right-5 z-50 hidden px-4 py-2 rounded-lg shadow-lg text-sm font-medium text-white bg-emerald-600">Saved ✓</div>
 <div id="errToast"  class="fixed bottom-5 right-5 z-50 hidden px-4 py-2 rounded-lg shadow-lg text-sm font-medium text-white bg-red-600">Failed to save</div>
 
+<!-- ── Schedule / Delivery Board Modal ───────────────────────────────────── -->
+<div id="scheduleModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold">Schedule Delivery</h2>
+        <button onclick="closeScheduleModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Scheduled Delivery Date</label>
+          <input type="date" id="schedDateInput"
+                 class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+        </div>
+        <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition">
+          <input type="checkbox" id="schedBoardCheck" class="rounded w-4 h-4 text-indigo-600">
+          <div>
+            <div class="text-sm font-medium text-slate-800">Add to Delivery Board</div>
+            <div class="text-xs text-slate-500">Track prep status (gas, inspection, insurance)</div>
+          </div>
+        </label>
+      </div>
+      <div class="flex gap-3 mt-6">
+        <button onclick="saveSchedule()"
+                class="flex-1 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">
+          Save
+        </button>
+        <button onclick="closeScheduleModal()"
+                class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let _schedDealId = null;
+
+function openScheduleModal(dealId, currentDate, onBoard) {
+  _schedDealId = dealId;
+  // Default to today if no date set
+  document.getElementById('schedDateInput').value = currentDate || new Date().toISOString().split('T')[0];
+  document.getElementById('schedBoardCheck').checked = onBoard || false;
+  document.getElementById('scheduleModal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('schedDateInput').focus(), 50);
+}
+
+function closeScheduleModal() {
+  document.getElementById('scheduleModal').classList.add('hidden');
+  _schedDealId = null;
+}
+
+async function saveSchedule() {
+  if (!_schedDealId) return;
+  const date = document.getElementById('schedDateInput').value;
+  const board = document.getElementById('schedBoardCheck').checked;
+  try {
+    await fetch(`/deals/${_schedDealId}/quick_update`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field: 'status', value: 'Scheduled' }),
+    });
+    if (date) {
+      await fetch(`/deals/${_schedDealId}/quick_update`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field: 'scheduled_date', value: date }),
+      });
+    }
+    if (board) {
+      const form = new FormData();
+      form.append('next', window.location.href);
+      await fetch(`/delivery/${_schedDealId}/push`, { method: 'POST', body: form });
+    }
+    closeScheduleModal();
+    window.location.reload();
+  } catch(e) {
+    alert('Failed to save. Please try again.');
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeScheduleModal();
+});
+document.getElementById('scheduleModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('scheduleModal')) closeScheduleModal();
+});
+</script>
+
 <script>
 (function () {
   let activeEl = null;
@@ -269,13 +388,8 @@
   }
 
   function fmtStatus(val) {
-    const map = {
-      Delivered: 'bg-emerald-100 text-emerald-800',
-      Dead: 'bg-slate-100 text-slate-500',
-      Scheduled: 'bg-blue-100 text-blue-800',
-      Pending: 'bg-amber-100 text-amber-800',
-    };
-    return `<span class="inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold ${map[val] || 'bg-slate-100 text-slate-600'}">${val}</span>`;
+    const map = { Delivered:'bg-emerald-100 text-emerald-800', Dead:'bg-slate-100 text-slate-500', Scheduled:'bg-blue-100 text-blue-800', Pending:'bg-amber-100 text-amber-800' };
+    return `<span class="inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold ${map[val]||'bg-slate-100 text-slate-600'}">${val}</span>`;
   }
 
   function renderValue(field, value) {
@@ -349,27 +463,32 @@
     input.focus();
     if (type === 'text') try { input.select(); } catch(_) {}
 
-    const commit = () => {
-      const val = input.value;
-      if (val === cur) { cancelEdit(span); return; }
-      save(span, field, id, val);
-    };
-
-    input.addEventListener('blur', commit);
-    input.addEventListener('keydown', e => {
-      if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
-      if (e.key === 'Escape') { e.preventDefault(); cancelEdit(span); }
-    });
     if (type === 'select') {
       input.addEventListener('change', () => {
-        // Intercept "Scheduled" — open calendar modal instead of saving
+        // Intercept Scheduled — open calendar modal instead of saving
         if (field === 'status' && input.value === 'Scheduled') {
-          input.removeEventListener('blur', commit);
           cancelEdit(span);
           openScheduleModal(parseInt(id), '', false);
           return;
         }
-        input.blur();
+        const val = input.value;
+        cancelEdit(span);
+        if (val !== cur) save(span, field, id, val);
+      });
+      input.addEventListener('blur', () => {
+        // Only cancel if change didn't already handle it
+        if (span.classList.contains('editing')) cancelEdit(span);
+      });
+    } else {
+      const commit = () => {
+        const val = input.value;
+        if (val === cur) { cancelEdit(span); return; }
+        save(span, field, id, val);
+      };
+      input.addEventListener('blur', commit);
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { e.preventDefault(); cancelEdit(span); }
       });
     }
   }
@@ -381,7 +500,7 @@
   });
 })();
 
-// Toggle paid — no page reload
+// Toggle paid
 async function togglePaid(btn, dealId) {
   btn.disabled = true; btn.style.opacity = '0.6';
   try {
@@ -392,15 +511,13 @@ async function togglePaid(btn, dealId) {
     btn.dataset.paid = paid ? '1' : '0';
     btn.textContent = paid ? '✓ Paid' : 'Pay?';
     btn.className = `text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap ${paid ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`;
-    // Also update the commission badge color in same row
     const commBadge = btn.closest('tr')?.querySelector('[data-field="commission_override"] span');
     if (commBadge) {
       commBadge.className = commBadge.className.replace(/bg-emerald-50 border-emerald-200 text-emerald-800|bg-white border-slate-200 text-slate-900/g, '');
       commBadge.classList.add(...(paid ? ['bg-emerald-50','border-emerald-200','text-emerald-800'] : ['bg-white','border-slate-200','text-slate-900']));
     }
-  } catch {
-    btn.textContent = 'Error';
-  } finally { btn.disabled = false; btn.style.opacity = ''; }
+  } catch { btn.textContent = 'Error'; }
+  finally { btn.disabled = false; btn.style.opacity = ''; }
 }
 
 // Bulk select
@@ -439,94 +556,5 @@ if (params.get('deleted')) {
 {% if request.query_params.get('embedded') == '1' %}
 <script>try { window.parent.postMessage({ type: 'ct_deal_saved' }, '*'); } catch(e) {}</script>
 {% endif %}
-
-<!-- ── Schedule / Delivery Board Modal ───────────────────────────────────── -->
-<div id="scheduleModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
-  <div class="flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-bold">Schedule Delivery</h2>
-        <button onclick="closeScheduleModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
-      </div>
-      <div class="space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-slate-700 mb-1">Scheduled Delivery Date</label>
-          <input type="date" id="schedDateInput"
-                 class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-        </div>
-        <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition">
-          <input type="checkbox" id="schedBoardCheck" class="rounded w-4 h-4 text-indigo-600">
-          <div>
-            <div class="text-sm font-medium text-slate-800">Add to Delivery Board</div>
-            <div class="text-xs text-slate-500">Track prep status (gas, inspection, insurance)</div>
-          </div>
-        </label>
-      </div>
-      <div class="flex gap-3 mt-6">
-        <button onclick="saveSchedule()"
-                class="flex-1 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">
-          Save
-        </button>
-        <button onclick="closeScheduleModal()"
-                class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">
-          Cancel
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<script>
-let _schedDealId = null;
-
-function openScheduleModal(dealId, currentDate, onBoard) {
-  _schedDealId = dealId;
-  document.getElementById('schedDateInput').value = currentDate || '';
-  document.getElementById('schedBoardCheck').checked = onBoard || false;
-  document.getElementById('scheduleModal').classList.remove('hidden');
-}
-
-function closeScheduleModal() {
-  document.getElementById('scheduleModal').classList.add('hidden');
-  _schedDealId = null;
-}
-
-async function saveSchedule() {
-  if (!_schedDealId) return;
-  const date = document.getElementById('schedDateInput').value;
-  const board = document.getElementById('schedBoardCheck').checked;
-
-  try {
-    // Set status to Scheduled + scheduled_date
-    await fetch(`/deals/${_schedDealId}/quick_update`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ field: 'status', value: 'Scheduled' }),
-    });
-    if (date) {
-      await fetch(`/deals/${_schedDealId}/quick_update`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field: 'sold_date', value: date }),
-      });
-    }
-    // Push to delivery board if checked
-    if (board) {
-      const form = new FormData();
-      form.append('next', window.location.href);
-      await fetch(`/delivery/${_schedDealId}/push`, { method: 'POST', body: form });
-    }
-    closeScheduleModal();
-    window.location.reload();
-  } catch(e) {
-    alert('Failed to save. Please try again.');
-  }
-}
-
-// Intercept inline status change → Scheduled to show calendar instead
-const _origStartEdit = window._startEditFn;
-document.addEventListener('click', e => {
-  // handled by the existing inline edit system — we patch the select change
-}, true);
 
 {% endblock %}
