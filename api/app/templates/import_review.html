@@ -9,6 +9,7 @@
 </style>
 
 <form method="post" action="/import" id="importFinalForm">
+        {{ csrf_hidden|safe }}
   <input type="hidden" name="csv_b64" value="{{ csv_b64 }}">
   <input type="hidden" name="filename" value="{{ filename }}">
   <input type="hidden" name="overrides_json" id="overridesJson" value="{}">

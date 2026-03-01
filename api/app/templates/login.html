@@ -12,7 +12,7 @@
     {% else %}Sign In
     {% endif %} — Commission Tracker
   </title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
 </head>
 <body class="bg-slate-50 min-h-screen flex items-center justify-center p-4">
   <div class="w-full max-w-sm">
@@ -74,6 +74,7 @@
       <!-- ── SIGN IN ── -->
       {% if mode == "login" %}
       <form method="POST" action="/login" class="space-y-4">
+        {{ csrf_hidden|safe }}
         <input type="hidden" name="next" value="{{ next }}"/>
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">
@@ -110,7 +111,8 @@
 
       <!-- ── CREATE ACCOUNT ── -->
       {% elif mode == "register" %}
-      <form method="POST" action="/register" class="space-y-4">
+      <form method="POST" action="{% if invite_token is defined and invite_token %}/join/{{ invite_token }}{% else %}/register{% endif %}" class="space-y-4" id="registerForm">
+        {{ csrf_hidden|safe }}
         {% if supabase_enabled %}
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">Email</label>
@@ -132,6 +134,35 @@
                  class="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none transition"
                  placeholder="John Smith"/>
         </div>
+
+        {# ── Dealership Picker (Deploy 2) — only show for new signups, not invite joins ── #}
+        {% if not (invite_token is defined and invite_token) %}
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Your Dealership</label>
+          <div class="relative">
+            <input type="text" id="dealershipSearch" autocomplete="off"
+                   class="w-full px-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none transition"
+                   placeholder="Search for your dealership..."/>
+            <div id="placesResults" class="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg hidden max-h-48 overflow-y-auto"></div>
+          </div>
+          <input type="hidden" name="dealership_name" id="dealershipName"/>
+          <input type="hidden" name="google_place_id" id="googlePlaceId"/>
+          <input type="hidden" name="dealership_address" id="dealershipAddress"/>
+          <input type="hidden" name="dealership_phone" id="dealershipPhone"/>
+          <!-- Selected dealership display -->
+          <div id="selectedDealer" class="hidden mt-2 p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+            <div class="flex items-start justify-between">
+              <div>
+                <div class="text-sm font-medium text-slate-900" id="selectedDealerName"></div>
+                <div class="text-xs text-slate-500" id="selectedDealerAddr"></div>
+              </div>
+              <button type="button" onclick="clearDealer()" class="text-xs text-slate-400 hover:text-slate-600 ml-2 shrink-0">✕ Clear</button>
+            </div>
+          </div>
+          <div class="text-xs text-slate-400 mt-1">Type your dealership name to search Google Maps, or just type a name if you can't find it</div>
+        </div>
+        {% endif %}
+
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">Password</label>
           <input name="password" type="password" required minlength="6" autocomplete="new-password"
@@ -150,9 +181,99 @@
         </button>
       </form>
 
+      <script>
+      // ── Google Places dealership search (Deploy 2) ──
+      (function() {
+        const searchInput = document.getElementById('dealershipSearch');
+        const resultsDiv = document.getElementById('placesResults');
+        if (!searchInput || !resultsDiv) return;
+
+        let debounceTimer = null;
+
+        searchInput.addEventListener('input', function() {
+          clearTimeout(debounceTimer);
+          const q = this.value.trim();
+          if (q.length < 2) { resultsDiv.classList.add('hidden'); return; }
+
+          debounceTimer = setTimeout(async () => {
+            try {
+              const res = await fetch('/api/places/search?q=' + encodeURIComponent(q + ' dealership'));
+              const places = await res.json();
+              if (!places.length) {
+                // No results — allow manual entry
+                resultsDiv.innerHTML = '<div class="px-3 py-2 text-xs text-slate-400">No results. Your typed name will be used.</div>';
+                resultsDiv.classList.remove('hidden');
+                // Set the manual name
+                document.getElementById('dealershipName').value = searchInput.value.trim();
+                document.getElementById('googlePlaceId').value = '';
+                return;
+              }
+              resultsDiv.innerHTML = places.map(p =>
+                '<button type="button" class="w-full text-left px-3 py-2 hover:bg-slate-50 transition border-b border-slate-100 last:border-0" ' +
+                'onclick="selectPlace(\'' + p.place_id.replace(/'/g, "\\'") + '\',\'' + (p.name||'').replace(/'/g, "\\'") + '\',\'' + (p.description||'').replace(/'/g, "\\'") + '\')">' +
+                '<div class="text-sm font-medium text-slate-900">' + (p.name||'') + '</div>' +
+                '<div class="text-xs text-slate-500 truncate">' + (p.description||'') + '</div>' +
+                '</button>'
+              ).join('');
+              resultsDiv.classList.remove('hidden');
+            } catch(e) {
+              // Silently fail — user can just type a name manually
+              document.getElementById('dealershipName').value = searchInput.value.trim();
+            }
+          }, 300);
+        });
+
+        searchInput.addEventListener('blur', function() {
+          setTimeout(() => {
+            resultsDiv.classList.add('hidden');
+            // If no place selected, use typed text as dealer name
+            if (!document.getElementById('googlePlaceId').value && searchInput.value.trim()) {
+              document.getElementById('dealershipName').value = searchInput.value.trim();
+            }
+          }, 200);
+        });
+      })();
+
+      async function selectPlace(placeId, name, desc) {
+        document.getElementById('googlePlaceId').value = placeId;
+        document.getElementById('dealershipName').value = name;
+        document.getElementById('dealershipSearch').value = name;
+        document.getElementById('placesResults').classList.add('hidden');
+        // Show selected state
+        document.getElementById('selectedDealer').classList.remove('hidden');
+        document.getElementById('selectedDealerName').textContent = name;
+        document.getElementById('selectedDealerAddr').textContent = desc;
+
+        // Fetch details (address, phone)
+        try {
+          const res = await fetch('/api/places/detail?place_id=' + encodeURIComponent(placeId));
+          const d = await res.json();
+          if (d.address) {
+            document.getElementById('dealershipAddress').value = d.address;
+            document.getElementById('selectedDealerAddr').textContent = d.address;
+          }
+          if (d.phone) document.getElementById('dealershipPhone').value = d.phone;
+          if (d.name) {
+            document.getElementById('dealershipName').value = d.name;
+            document.getElementById('selectedDealerName').textContent = d.name;
+          }
+        } catch(e) { /* ok, we have the basics */ }
+      }
+
+      function clearDealer() {
+        document.getElementById('googlePlaceId').value = '';
+        document.getElementById('dealershipName').value = '';
+        document.getElementById('dealershipAddress').value = '';
+        document.getElementById('dealershipPhone').value = '';
+        document.getElementById('dealershipSearch').value = '';
+        document.getElementById('selectedDealer').classList.add('hidden');
+      }
+      </script>
+
       <!-- ── FORGOT PASSWORD ── -->
       {% elif mode == "forgot" %}
       <form method="POST" action="/forgot-password" class="space-y-4">
+        {{ csrf_hidden|safe }}
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">Email address</label>
           <input name="email" type="email" required autocomplete="email"
@@ -195,6 +316,7 @@
         });
       </script>
       <form method="POST" action="/auth/reset-confirm" class="space-y-4">
+        {{ csrf_hidden|safe }}
         <input type="hidden" name="access_token" id="access_token_field" value="{{ access_token | default('') }}"/>
         <input type="hidden" name="token_hash" value="{{ token_hash | default('') }}"/>
         <input type="hidden" name="token" value="{{ token | default('') }}"/>

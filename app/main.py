@@ -319,24 +319,50 @@ async def _user(request: Request, db: AsyncSession) -> User:
     return (await db.execute(select(User).where(User.id == uid(request)))).scalar_one()
 
 
-async def _create_dealership_for_user(db: AsyncSession, user: User, name_hint: str = "") -> User:
+async def _create_dealership_for_user(
+    db: AsyncSession, user: User, name_hint: str = "",
+    google_place_id: str = "", address: str = "", phone: str = "",
+) -> User:
     """Create a new dealership and make the user its admin.
-    Called during registration when a user signs up without an invite."""
+    Called during registration when a user signs up without an invite.
+    New dealerships start as is_active=False (pending super-admin approval)."""
     import re as _re
     dealer_name = name_hint or user.display_name or user.username
-    dealer_name = f"{dealer_name}'s Dealership"
+    if not any(kw in dealer_name.lower() for kw in ("dealer", "motor", "auto", "car", "toyota", "honda", "ford", "chevy", "bmw", "mercedes", "kia", "hyundai", "nissan", "subaru", "mazda")):
+        dealer_name = f"{dealer_name}'s Dealership"
     # Generate a URL-safe slug
-    base_slug = _re.sub(r'[^a-z0-9]+', '-', (user.username or "dealer").lower()).strip('-')[:60]
+    base_slug = _re.sub(r'[^a-z0-9]+', '-', (dealer_name or "dealer").lower()).strip('-')[:60]
     slug = base_slug
     i = 1
     while (await db.execute(select(Dealership).where(Dealership.slug == slug))).scalar_one_or_none():
         slug = f"{base_slug}-{i}"
         i += 1
 
+    # Check if a dealership with this Google Place ID already exists
+    existing_dealer = None
+    if google_place_id:
+        existing_dealer = (await db.execute(
+            select(Dealership).where(Dealership.google_place_id == google_place_id)
+        )).scalar_one_or_none()
+
+    if existing_dealer:
+        # Dealership already exists from Google Places — join it as salesperson (pending verification)
+        user.dealership_id = existing_dealer.id
+        user.role = "salesperson"
+        user.is_verified = False
+        await db.commit()
+        await db.refresh(user)
+        logger.info(f"User {user.id} joined existing dealership '{existing_dealer.name}' (id={existing_dealer.id}) via Google Place ID")
+        return user
+
     dealership = Dealership(
         name=dealer_name,
         slug=slug,
-        subscription_status="free",  # first dealership is free (yours)
+        is_active=False,  # Pending super-admin approval
+        subscription_status="pending",
+        google_place_id=google_place_id or None,
+        address=address or None,
+        phone=phone or None,
     )
     db.add(dealership)
     await db.commit()
@@ -345,10 +371,11 @@ async def _create_dealership_for_user(db: AsyncSession, user: User, name_hint: s
     # Assign user as admin of this dealership
     user.dealership_id = dealership.id
     user.role = "admin"
+    user.is_verified = True  # The creator is auto-verified
     await db.commit()
     await db.refresh(user)
 
-    logger.info(f"Created dealership '{dealer_name}' (id={dealership.id}) for user {user.id}")
+    logger.info(f"Created dealership '{dealer_name}' (id={dealership.id}, active=False) for user {user.id}")
     return user
 
 
@@ -670,6 +697,17 @@ async def _run_startup_migrations():
             except Exception:
                 pass
 
+        # 2b. Add Google Places fields to dealerships (Deploy 2)
+        for col, typ in [
+            ("google_place_id", "VARCHAR(200)"),
+            ("address", "VARCHAR(300)"),
+            ("phone", "VARCHAR(30)"),
+        ]:
+            try:
+                await conn.execute(f"ALTER TABLE dealerships ADD COLUMN IF NOT EXISTS {col} {typ}")
+            except Exception:
+                pass
+
         # 3. Add dealership_id to data tables
         for tbl in ("deals", "settings", "goals", "reminders"):
             try:
@@ -802,6 +840,8 @@ async def _run_startup_migrations():
         for col, typ in [
             ("is_super_admin", "BOOLEAN DEFAULT false"),
             ("is_verified", "BOOLEAN DEFAULT false"),
+            ("verified_by", "INTEGER"),
+            ("verified_at", "TIMESTAMP"),
         ]:
             try:
                 await conn.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typ}")
@@ -1051,6 +1091,10 @@ async def register_post(
     display_name: str = Form(""),
     password: str = Form(...),
     password2: str = Form(...),
+    dealership_name: str = Form(""),
+    google_place_id: str = Form(""),
+    dealership_address: str = Form(""),
+    dealership_phone: str = Form(""),
 ):
     error_ctx = {
         "request": request, "mode": "register", "success": "",
@@ -1083,7 +1127,13 @@ async def register_post(
 
         # If user doesn't have a dealership yet, create one (new signup)
         if not local_user.dealership_id:
-            local_user = await _create_dealership_for_user(db, local_user, display_name.strip())
+            local_user = await _create_dealership_for_user(
+                db, local_user,
+                name_hint=dealership_name.strip() or display_name.strip(),
+                google_place_id=google_place_id.strip(),
+                address=dealership_address.strip(),
+                phone=dealership_phone.strip(),
+            )
 
         await get_or_create_settings(db, local_user.id, local_user.dealership_id)
 
@@ -1130,7 +1180,13 @@ async def register_post(
         await db.refresh(user)
 
         # Create a dealership for this new user (they become admin)
-        user = await _create_dealership_for_user(db, user, display_name.strip())
+        user = await _create_dealership_for_user(
+            db, user,
+            name_hint=dealership_name.strip() or display_name.strip(),
+            google_place_id=google_place_id.strip(),
+            address=dealership_address.strip(),
+            phone=dealership_phone.strip(),
+        )
 
         await get_or_create_settings(db, user.id, user.dealership_id)
         token = await create_session(db, user.id, remember_me=False, request=request)
@@ -2999,6 +3055,11 @@ async def admin_dealership_detail(dealership_id: int, request: Request, db: Asyn
         .order_by(Deal.sold_date.desc().nullslast()).limit(25)
     )).scalars().all()
 
+    # Enrich deals with salesperson names
+    user_map = {m.id: m for m in members}
+    for deal in recent_deals:
+        deal._salesperson = user_map.get(deal.user_id)
+
     # Stats
     total_deals = (await db.execute(
         select(func.count()).where(Deal.dealership_id == dealership_id)
@@ -3012,9 +3073,202 @@ async def admin_dealership_detail(dealership_id: int, request: Request, db: Asyn
         )
     )).scalar() or 0
 
+    # Get pay plan settings for this dealership (Deploy 4)
+    dealership_settings = (await db.execute(
+        select(Settings).where(Settings.dealership_id == dealership_id).limit(1)
+    )).scalar_one_or_none()
+
     return templates.TemplateResponse("admin_dealership.html", {
         "request": request, "user": user, "dealership": dealership,
         "members": members, "recent_deals": recent_deals,
         "total_deals": total_deals, "delivered_mtd": delivered_mtd,
+        "dealership_settings": dealership_settings,
         "overdue_reminders": await get_overdue_reminders(db, uid(request)),
     })
+
+
+# ════════════════════════════════════════════════
+# DEPLOY 2 — Google Places API proxy for dealership search
+# ════════════════════════════════════════════════
+
+GOOGLE_PLACES_API_KEY = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+
+@app.get("/api/places/search")
+async def places_search(request: Request, q: str = ""):
+    """Proxy Google Places Autocomplete for dealership search during registration.
+    Returns JSON list of place predictions."""
+    if not GOOGLE_PLACES_API_KEY or not q.strip():
+        return JSONResponse([])
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(
+                "https://maps.googleapis.com/maps/api/place/autocomplete/json",
+                params={
+                    "input": q.strip(),
+                    "types": "establishment",
+                    "key": GOOGLE_PLACES_API_KEY,
+                },
+            )
+            data = r.json()
+            results = []
+            for p in data.get("predictions", [])[:8]:
+                results.append({
+                    "place_id": p.get("place_id", ""),
+                    "name": p.get("structured_formatting", {}).get("main_text", ""),
+                    "description": p.get("description", ""),
+                })
+            return JSONResponse(results)
+    except Exception as e:
+        logger.warning(f"Places search error: {e}")
+        return JSONResponse([])
+
+
+@app.get("/api/places/detail")
+async def places_detail(request: Request, place_id: str = ""):
+    """Proxy Google Places Detail to get address & phone for a dealership."""
+    if not GOOGLE_PLACES_API_KEY or not place_id.strip():
+        return JSONResponse({})
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(
+                "https://maps.googleapis.com/maps/api/place/details/json",
+                params={
+                    "place_id": place_id,
+                    "fields": "name,formatted_address,formatted_phone_number,place_id",
+                    "key": GOOGLE_PLACES_API_KEY,
+                },
+            )
+            data = r.json()
+            result = data.get("result", {})
+            return JSONResponse({
+                "name": result.get("name", ""),
+                "address": result.get("formatted_address", ""),
+                "phone": result.get("formatted_phone_number", ""),
+                "place_id": result.get("place_id", ""),
+            })
+    except Exception as e:
+        logger.warning(f"Places detail error: {e}")
+        return JSONResponse({})
+
+
+# ════════════════════════════════════════════════
+# DEPLOY 3 — Verification system (GM verifies salespeople)
+# ════════════════════════════════════════════════
+
+@app.post("/team/{user_id}/verify")
+async def team_verify_user(
+    user_id: int, request: Request, db: AsyncSession = Depends(get_db),
+):
+    """Verify a salesperson — confirms they work at the dealership.
+    Admin/manager (GM) only."""
+    _require_admin_or_manager(request)
+    d_id = user_dealership_id(request)
+    target = (await db.execute(
+        select(User).where(User.id == user_id, User.dealership_id == d_id)
+    )).scalar_one_or_none()
+    if target and not target.is_verified:
+        target.is_verified = True
+        target.verified_by = uid(request)
+        target.verified_at = _utcnow()
+        await db.commit()
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True, "is_verified": True})
+    return RedirectResponse(url="/team", status_code=303)
+
+
+@app.post("/team/{user_id}/unverify")
+async def team_unverify_user(
+    user_id: int, request: Request, db: AsyncSession = Depends(get_db),
+):
+    """Remove verification from a user. Admin only."""
+    _require_admin(request)
+    d_id = user_dealership_id(request)
+    target = (await db.execute(
+        select(User).where(User.id == user_id, User.dealership_id == d_id)
+    )).scalar_one_or_none()
+    if target and user_id != uid(request):
+        target.is_verified = False
+        target.verified_by = None
+        target.verified_at = None
+        await db.commit()
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True, "is_verified": False})
+    return RedirectResponse(url="/team", status_code=303)
+
+
+@app.post("/admin/user/{user_id}/verify")
+async def admin_verify_user(user_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Super admin can verify any user."""
+    _require_super_admin(request)
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if target:
+        target.is_verified = not target.is_verified
+        if target.is_verified:
+            target.verified_by = uid(request)
+            target.verified_at = _utcnow()
+        else:
+            target.verified_by = None
+            target.verified_at = None
+        await db.commit()
+    # Redirect back to the dealership detail page
+    if target and target.dealership_id:
+        return RedirectResponse(url=f"/admin/dealership/{target.dealership_id}", status_code=303)
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+# ════════════════════════════════════════════════
+# DEPLOY 4 — Pay plan permissions (admin override)
+# ════════════════════════════════════════════════
+
+@app.post("/admin/dealership/{dealership_id}/payplan")
+async def admin_override_payplan(
+    dealership_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    unit_comm_discount_le_200: float = Form(...), unit_comm_discount_gt_200: float = Form(...),
+    permaplate: float = Form(...), nitro_fill: float = Form(...), pulse: float = Form(...),
+    finance_non_subvented: float = Form(...), warranty: float = Form(...), tire_wheel: float = Form(...),
+    hourly_rate_ny_offset: float = Form(...),
+    new_volume_bonus_15_16: float = Form(...), new_volume_bonus_17_18: float = Form(...),
+    new_volume_bonus_19_20: float = Form(...), new_volume_bonus_21_24: float = Form(...),
+    new_volume_bonus_25_plus: float = Form(...),
+    used_volume_bonus_8_10: float = Form(...), used_volume_bonus_11_12: float = Form(...),
+    used_volume_bonus_13_plus: float = Form(...),
+    spot_bonus_5_9: float = Form(...), spot_bonus_10_12: float = Form(...),
+    spot_bonus_13_plus: float = Form(...),
+    quarterly_bonus_threshold_units: int = Form(...), quarterly_bonus_amount: float = Form(...),
+):
+    """Super admin can override any dealership's pay plan."""
+    _require_super_admin(request)
+    s = (await db.execute(
+        select(Settings).where(Settings.dealership_id == dealership_id).limit(1)
+    )).scalar_one_or_none()
+    if not s:
+        # Create settings for this dealership
+        s = Settings(dealership_id=dealership_id)
+        db.add(s)
+    for f in ["unit_comm_discount_le_200","unit_comm_discount_gt_200","permaplate","nitro_fill","pulse",
+              "finance_non_subvented","warranty","tire_wheel","hourly_rate_ny_offset",
+              "new_volume_bonus_15_16","new_volume_bonus_17_18","new_volume_bonus_19_20",
+              "new_volume_bonus_21_24","new_volume_bonus_25_plus",
+              "used_volume_bonus_8_10","used_volume_bonus_11_12","used_volume_bonus_13_plus",
+              "spot_bonus_5_9","spot_bonus_10_12","spot_bonus_13_plus",
+              "quarterly_bonus_threshold_units","quarterly_bonus_amount"]:
+        setattr(s, f, locals()[f])
+    await db.commit()
+    return RedirectResponse(url=f"/admin/dealership/{dealership_id}", status_code=303)
+
+
+@app.post("/admin/dealership/{dealership_id}/approve")
+async def admin_approve_dealership(dealership_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Approve a pending dealership — set is_active=True and subscription to 'active'."""
+    _require_super_admin(request)
+    d = (await db.execute(select(Dealership).where(Dealership.id == dealership_id))).scalar_one_or_none()
+    if d:
+        d.is_active = True
+        if d.subscription_status == "pending":
+            d.subscription_status = "active"
+        await db.commit()
+    return RedirectResponse(url="/admin", status_code=303)

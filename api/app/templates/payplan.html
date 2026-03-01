@@ -3,11 +3,16 @@
 <div class="flex items-end justify-between gap-3 mb-4">
   <div>
     <h1 class="text-xl font-bold">Pay Plan</h1>
-    <div class="text-sm text-slate-500">Edit your pay plan values. These values drive commission calculations and reports.</div>
+    {% if is_admin is defined and is_admin %}
+    <div class="text-sm text-slate-500">Edit your dealership's pay plan values. These values drive commission calculations for all salespeople.</div>
+    {% else %}
+    <div class="text-sm text-amber-600">View only — only your dealership admin can change the pay plan.</div>
+    {% endif %}
   </div>
 </div>
 
 <form method="post" action="/payplan" class="space-y-6">
+        {{ csrf_hidden|safe }}
 
   <!-- Core per-deal values -->
   <div class="bg-white rounded border border-slate-200 p-4">
@@ -141,10 +146,22 @@
     </div>
   </div>
 
+  {% if is_admin is defined and is_admin %}
   <div class="flex gap-2">
     <button class="px-4 py-2 rounded bg-slate-900 text-white">Save</button>
     <a class="px-4 py-2 rounded border" href="/">Back</a>
   </div>
+  {% else %}
+  <div class="flex gap-2">
+    <a class="px-4 py-2 rounded border" href="/">Back to Dashboard</a>
+  </div>
+  {% endif %}
 
 </form>
+{% if is_admin is not defined or not is_admin %}
+<script>
+  // Disable all inputs for non-admin users (view only)
+  document.querySelectorAll('form[action="/payplan"] input').forEach(function(el){ el.disabled = true; el.classList.add('bg-slate-50', 'text-slate-500'); });
+</script>
+{% endif %}
 {% endblock %}

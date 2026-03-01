@@ -1,24 +1,37 @@
+
+import asyncio
+import base64
+import calendar
+import csv
+import difflib
+import io
+import json as _json
 import logging
 import os
-import io
-import secrets
-import csv
+import random
 import re
-import urllib.parse
-import calendar
+import secrets
+import time
 import traceback
-from datetime import date, datetime, timedelta
+import urllib.parse
+from datetime import date, datetime, timedelta, timezone
 
-from fastapi import FastAPI, Request, Form, Depends, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+
+def _utcnow() -> datetime:
+    """Naive UTC datetime — required by asyncpg for TIMESTAMP (not TIMESTAMPTZ) columns."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request, Form, Depends, UploadFile, File, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.pool import NullPool
-from sqlalchemy import select, func, or_, and_
+from sqlalchemy import select, func, or_, and_, text as sa_text
 
-from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder
+from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder, Dealership, Invite
 from .schemas import DealIn
 from .payplan import calc_commission
 from .utils import parse_date, today
@@ -60,8 +73,6 @@ if db_url.startswith("postgres://"):
 elif db_url.startswith("postgresql://") and "+asyncpg" not in db_url:
     db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-import asyncpg as _asyncpg
-
 connect_args = {}
 _is_pg = "asyncpg" in db_url
 _ssl_ctx = None
@@ -80,22 +91,102 @@ if _is_pg:
 engine = create_async_engine(
     db_url, echo=False, future=True,
     connect_args=connect_args,
-    poolclass=NullPool,
+    pool_size=2,           # Keep 2 warm connections
+    max_overflow=3,        # Allow up to 5 total under burst
+    pool_recycle=120,      # Recycle connections every 2 min (serverless-friendly)
+    pool_pre_ping=True,    # Verify connection is alive before use
 )
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
+# ─── CSRF Protection (double-submit cookie pattern) ───
+# On every page load, set a random CSRF token as a cookie + inject into forms as a hidden field.
+# On every POST, verify the form value matches the cookie value.
+# Since an attacker can't read our cookie from their domain, they can't forge the hidden field.
+
+CSRF_COOKIE = "ct_csrf"
+CSRF_FORM_FIELD = "csrf_token"
+
+def _generate_csrf_token() -> str:
+    return secrets.token_urlsafe(32)
+
+def _get_or_set_csrf(request: Request, response=None) -> str:
+    """Get existing CSRF token from cookie or generate a new one."""
+    existing = request.cookies.get(CSRF_COOKIE)
+    if existing and len(existing) >= 32:
+        return existing
+    token = _generate_csrf_token()
+    if response:
+        is_secure = not os.environ.get("DATABASE_URL", "").startswith("sqlite")
+        response.set_cookie(
+            CSRF_COOKIE, token,
+            httponly=False,  # JS needs to read it for AJAX
+            samesite="lax",
+            secure=is_secure,
+            max_age=60 * 60 * 24,  # 24 hours
+        )
+    return token
+
+def _validate_csrf(request_token: str | None, cookie_token: str | None) -> bool:
+    """Constant-time comparison of form token vs cookie token."""
+    if not request_token or not cookie_token:
+        return False
+    return secrets.compare_digest(request_token, cookie_token)
+
+
 # ─── App setup ───
-app = FastAPI(title="Commission Tracker")
-templates = Jinja2Templates(directory="app/templates")
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    await _run_startup_migrations()
+    yield
+
+app = FastAPI(title="Commission Tracker", lifespan=lifespan)
+
+# ── GZip compression — reduces HTML/JSON payloads by ~70% ──
+from fastapi.middleware.gzip import GZipMiddleware
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
 templates.env.filters["md"] = lambda v: f"{v.month}/{v.day}" if v else ""
 templates.env.globals["today"] = today
 templates.env.globals["current_month"] = lambda: today().strftime("%Y-%m")
+templates.env.globals["csrf_field_name"] = CSRF_FORM_FIELD
+
+def _csrf_hidden(token: str) -> str:
+    """Return an HTML hidden input for CSRF protection."""
+    return f'<input type="hidden" name="{CSRF_FORM_FIELD}" value="{token}"/>'
+
+
+# Override TemplateResponse to auto-inject CSRF token into every template context
+_original_template_response = templates.TemplateResponse
+
+def _csrf_template_response(name, context, **kwargs):
+    """Wrapper that injects csrf_token into every template context automatically."""
+    request = context.get("request")
+    if request:
+        token = request.cookies.get(CSRF_COOKIE) or _generate_csrf_token()
+        context["csrf_token"] = token
+        context["csrf_hidden"] = _csrf_hidden(token)
+        # Store on request.state so the CSRF middleware can set the matching cookie
+        request.state._csrf_generated = token
+    return _original_template_response(name, context, **kwargs)
+
+templates.TemplateResponse = _csrf_template_response
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+# Serve service worker from root path so it can control the entire site scope
+@app.get("/sw.js")
+async def service_worker():
+    sw_path = os.path.join(os.path.dirname(__file__), "static", "sw.js")
+    return StreamingResponse(
+        open(sw_path, "rb"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+    )
 
 
 @app.exception_handler(Exception)
@@ -119,6 +210,30 @@ async def get_db():
 
 # ─── Auth helpers ───
 PUBLIC_PATHS = {"/login", "/register", "/forgot-password", "/auth/reset-confirm"}
+PUBLIC_PREFIXES = ("/join/",)  # Invite links must be accessible without login
+
+@app.middleware("http")
+async def csrf_middleware(request: Request, call_next):
+    """CSRF double-submit cookie validation for all state-changing POST requests."""
+    if request.method == "POST" and not request.url.path.startswith("/api/"):
+        cookie_token = request.cookies.get(CSRF_COOKIE)
+        if not cookie_token:
+            return HTMLResponse(
+                '<h1>403 Forbidden</h1><p>Missing CSRF token. Please <a href="/">go back</a> and try again.</p>',
+                status_code=403,
+            )
+    response = await call_next(request)
+    # Ensure CSRF cookie is always set — use the same token the form used
+    if not request.cookies.get(CSRF_COOKIE):
+        token = getattr(request.state, "_csrf_generated", None) or _generate_csrf_token()
+        is_secure = not os.environ.get("DATABASE_URL", "").startswith("sqlite")
+        response.set_cookie(
+            CSRF_COOKIE, token,
+            httponly=False, samesite="lax", secure=is_secure,
+            max_age=60 * 60 * 24,
+        )
+    return response
+
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
@@ -127,6 +242,7 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     # Cache static assets aggressively
     if request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
@@ -136,47 +252,157 @@ async def security_headers(request: Request, call_next):
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
-    if path.startswith("/static"):
+    if path.startswith("/static") or path in ("/sw.js",):
         return await call_next(request)
 
     token = get_session_token(request)
 
     # Session check uses raw asyncpg (no SQLAlchemy, pgBouncer-safe)
-    # Pass None as db — get_user_id_from_session uses raw pg when available
-    uid_val = await get_user_id_from_session(None, token)
+    # Returns (user_id, dealership_id, role) or None
+    session_info = await get_user_id_from_session(None, token)
 
     # For public pages: auto-redirect to dashboard if already logged in
+    is_invite = any(path.startswith(p) for p in PUBLIC_PREFIXES)
     if path in PUBLIC_PATHS:
-        if uid_val is not None:
+        if session_info is not None:
             return RedirectResponse(url="/", status_code=303)
+        return await call_next(request)
+    # Invite links: accessible to anyone — logged-in or not
+    if is_invite:
         return await call_next(request)
 
     # Protected pages
-    if uid_val is None:
+    if session_info is None:
         dest = request.url.path
         if request.url.query:
             dest += f"?{request.url.query}"
         return RedirectResponse(url=f"/login?next={dest}", status_code=303)
 
+    uid_val, dealership_id_val, role_val, is_super_admin_val = session_info
     request.state.user_id = uid_val
+    request.state.dealership_id = dealership_id_val
+    request.state.role = role_val
+    request.state.is_super_admin = is_super_admin_val
+    # Admin mode toggle — super admins can switch between platform view and salesperson view
+    request.state.admin_mode = is_super_admin_val and request.cookies.get("admin_mode") == "1"
+    # Set CSRF token on request state for templates
+    request.state.csrf_token = request.cookies.get(CSRF_COOKIE, _generate_csrf_token())
     response = await call_next(request)
-    # Piggyback probabilistic session cleanup (Vercel serverless-safe)
-    asyncio.create_task(maybe_cleanup_sessions())
+    # Piggyback probabilistic session cleanup (fire-and-forget, safe for serverless)
+    try:
+        asyncio.ensure_future(maybe_cleanup_sessions())
+    except Exception:
+        pass
     return response
 
 
 def uid(request: Request) -> int:
     return request.state.user_id
 
+def user_dealership_id(request: Request) -> int | None:
+    """Get the current user's dealership_id from request state."""
+    return getattr(request.state, "dealership_id", None)
+
+def user_role(request: Request) -> str:
+    """Get the current user's role from request state."""
+    return getattr(request.state, "role", "salesperson")
+
+def is_super_admin(request: Request) -> bool:
+    """Check if the current user is the platform super admin."""
+    return getattr(request.state, "is_super_admin", False)
+
+def is_admin_mode(request: Request) -> bool:
+    """Check if super admin has the platform admin view toggled on."""
+    return getattr(request.state, "admin_mode", False)
+
 async def _user(request: Request, db: AsyncSession) -> User:
     return (await db.execute(select(User).where(User.id == uid(request)))).scalar_one()
+
+
+async def _create_dealership_for_user(
+    db: AsyncSession, user: User, name_hint: str = "",
+    google_place_id: str = "", address: str = "", phone: str = "",
+) -> User:
+    """Create a new dealership and make the user its admin.
+    Called during registration when a user signs up without an invite.
+    New dealerships start as is_active=False (pending super-admin approval)."""
+    import re as _re
+    dealer_name = name_hint or user.display_name or user.username
+    if not any(kw in dealer_name.lower() for kw in ("dealer", "motor", "auto", "car", "toyota", "honda", "ford", "chevy", "bmw", "mercedes", "kia", "hyundai", "nissan", "subaru", "mazda")):
+        dealer_name = f"{dealer_name}'s Dealership"
+    # Generate a URL-safe slug
+    base_slug = _re.sub(r'[^a-z0-9]+', '-', (dealer_name or "dealer").lower()).strip('-')[:60]
+    slug = base_slug
+    i = 1
+    while (await db.execute(select(Dealership).where(Dealership.slug == slug))).scalar_one_or_none():
+        slug = f"{base_slug}-{i}"
+        i += 1
+
+    # Check if a dealership with this Google Place ID already exists
+    existing_dealer = None
+    if google_place_id:
+        existing_dealer = (await db.execute(
+            select(Dealership).where(Dealership.google_place_id == google_place_id)
+        )).scalar_one_or_none()
+
+    if existing_dealer:
+        # Dealership already exists from Google Places — join it as salesperson (pending verification)
+        user.dealership_id = existing_dealer.id
+        user.role = "salesperson"
+        user.is_verified = False
+        await db.commit()
+        await db.refresh(user)
+        logger.info(f"User {user.id} joined existing dealership '{existing_dealer.name}' (id={existing_dealer.id}) via Google Place ID")
+        return user
+
+    dealership = Dealership(
+        name=dealer_name,
+        slug=slug,
+        is_active=False,  # Pending super-admin approval
+        subscription_status="pending",
+        google_place_id=google_place_id or None,
+        address=address or None,
+        phone=phone or None,
+    )
+    db.add(dealership)
+    await db.commit()
+    await db.refresh(dealership)
+
+    # Assign user as admin of this dealership
+    user.dealership_id = dealership.id
+    user.role = "admin"
+    user.is_verified = True  # The creator is auto-verified
+    await db.commit()
+    await db.refresh(user)
+
+    logger.info(f"Created dealership '{dealer_name}' (id={dealership.id}, active=False) for user {user.id}")
+    return user
+
+
+def _require_admin(request: Request):
+    """Raise 403 if the current user is not an admin or super_admin."""
+    if is_super_admin(request):
+        return
+    if user_role(request) != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+def _require_admin_or_manager(request: Request):
+    """Raise 403 if the current user is not an admin, manager, or super_admin."""
+    if is_super_admin(request):
+        return
+    if user_role(request) not in ("admin", "manager"):
+        raise HTTPException(status_code=403, detail="Manager access required")
+
+def _require_super_admin(request: Request):
+    """Raise 403 if the current user is not the platform super admin."""
+    if not is_super_admin(request):
+        raise HTTPException(status_code=403, detail="Platform admin access required")
 
 
 # ─── Startup / Migrations ───
 # We use raw asyncpg for DDL because SQLAlchemy's asyncpg dialect
 # calls prepare() during initialization, which pgBouncer rejects.
-@app.on_event("startup")
-async def startup():
+async def _run_startup_migrations():
     if not _is_pg:
         # SQLite: use SQLAlchemy create_all (no pgBouncer issues)
         async with engine.begin() as conn:
@@ -187,17 +413,14 @@ async def startup():
         return
 
     # PostgreSQL (Supabase): use raw asyncpg connection for DDL
-    # Parse the DB URL to get asyncpg-compatible DSN
-    raw_dsn = DATABASE_URL.strip()
-    # Strip query params
-    if "?" in raw_dsn:
-        raw_dsn = raw_dsn.split("?")[0]
+    # Acquire a connection from the shared pool (initializes pool on cold start)
+    from .auth import _get_pg_pool, _release_pg_conn
+    pool = await _get_pg_pool()
+    if not pool:
+        logger.error("Failed to create asyncpg pool for migrations")
+        return
 
-    conn = await _asyncpg.connect(
-        dsn=raw_dsn,
-        ssl=_ssl_ctx,
-        statement_cache_size=0,
-    )
+    conn = await pool.acquire()
     try:
         # Rename profiles→users if needed (from previous deploy)
         try:
@@ -439,6 +662,206 @@ async def startup():
             """)
         except Exception:
             pass
+
+        # ════════════════════════════════════════════════════════════════
+        # PHASE 1 — Multi-tenancy migration
+        # All DDL is idempotent (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS)
+        # ════════════════════════════════════════════════════════════════
+
+        # 1. Create dealerships table
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS dealerships (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(200) NOT NULL,
+                    slug VARCHAR(80) UNIQUE NOT NULL,
+                    timezone VARCHAR(64) DEFAULT 'America/New_York',
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    is_active BOOLEAN DEFAULT true,
+                    stripe_customer_id VARCHAR(128),
+                    stripe_subscription_id VARCHAR(128),
+                    subscription_status VARCHAR(32) DEFAULT 'trialing',
+                    max_users INTEGER DEFAULT 5
+                )
+            """)
+        except Exception:
+            pass
+
+        # 2. Add dealership_id and role to users
+        for col, typ in [
+            ("dealership_id", "INTEGER"),
+            ("role", "VARCHAR(24) DEFAULT 'salesperson'"),
+        ]:
+            try:
+                await conn.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typ}")
+            except Exception:
+                pass
+
+        # 2b. Add Google Places fields to dealerships (Deploy 2)
+        for col, typ in [
+            ("google_place_id", "VARCHAR(200)"),
+            ("address", "VARCHAR(300)"),
+            ("phone", "VARCHAR(30)"),
+        ]:
+            try:
+                await conn.execute(f"ALTER TABLE dealerships ADD COLUMN IF NOT EXISTS {col} {typ}")
+            except Exception:
+                pass
+
+        # 3. Add dealership_id to data tables
+        for tbl in ("deals", "settings", "goals", "reminders"):
+            try:
+                await conn.execute(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS dealership_id INTEGER")
+            except Exception:
+                pass
+
+        # 4. Create invites table
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS invites (
+                    id SERIAL PRIMARY KEY,
+                    token VARCHAR(128) UNIQUE NOT NULL,
+                    dealership_id INTEGER NOT NULL,
+                    email VARCHAR(254),
+                    role VARCHAR(24) DEFAULT 'salesperson',
+                    created_by INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    expires_at TIMESTAMP NOT NULL,
+                    used BOOLEAN DEFAULT false,
+                    used_by INTEGER
+                )
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_invites_token ON invites(token)")
+        except Exception:
+            pass
+
+        # 5. Auto-migrate existing data: if there are users without a dealership,
+        #    create a "default" dealership and assign everything to it.
+        #    This ensures zero downtime — existing data keeps working.
+        try:
+            orphan_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM users WHERE dealership_id IS NULL"
+            )
+            if orphan_count and orphan_count > 0:
+                # Check if a default dealership already exists
+                default_d = await conn.fetchval(
+                    "SELECT id FROM dealerships WHERE slug = 'default' LIMIT 1"
+                )
+                if not default_d:
+                    default_d = await conn.fetchval("""
+                        INSERT INTO dealerships (name, slug, subscription_status)
+                        VALUES ('My Dealership', 'default', 'free')
+                        RETURNING id
+                    """)
+
+                # Assign all orphaned users to the default dealership as admin
+                await conn.execute(
+                    "UPDATE users SET dealership_id = $1, role = 'admin' WHERE dealership_id IS NULL",
+                    default_d
+                )
+
+                # Also fix any users who got the dealership but not the admin role
+                # (edge case: columns added with defaults before UPDATE ran)
+                await conn.execute(
+                    "UPDATE users SET role = 'admin' WHERE dealership_id = $1 AND (role IS NULL OR role = 'salesperson')",
+                    default_d
+                )
+
+                # Assign all orphaned data to the default dealership
+                for tbl in ("deals", "settings", "goals", "reminders"):
+                    try:
+                        await conn.execute(
+                            f"UPDATE {tbl} SET dealership_id = $1 WHERE dealership_id IS NULL",
+                            default_d
+                        )
+                    except Exception:
+                        pass
+
+                # Also migrate settings: if settings have user_id but no dealership_id,
+                # copy the dealership_id from the user
+                try:
+                    await conn.execute("""
+                        UPDATE settings s
+                        SET dealership_id = u.dealership_id
+                        FROM users u
+                        WHERE s.user_id = u.id AND s.dealership_id IS NULL AND u.dealership_id IS NOT NULL
+                    """)
+                except Exception:
+                    pass
+
+                logger.info(f"Multi-tenancy migration: assigned {orphan_count} user(s) to dealership {default_d}")
+        except Exception as e:
+            logger.warning(f"Multi-tenancy auto-migration error: {e}")
+
+        # 6. Indexes for multi-tenancy queries
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_dealership ON users(dealership_id)")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_dealership ON deals(dealership_id)")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_dealership_user ON deals(dealership_id, user_id)")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_settings_dealership ON settings(dealership_id)")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_goals_dealership ON goals(dealership_id)")
+        except Exception: pass
+        try:
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_reminders_dealership ON reminders(dealership_id, user_id)")
+        except Exception: pass
+
+        # 7. Ensure at least one admin exists per dealership
+        # If a dealership has no admins (e.g. migration edge case), promote the first user
+        try:
+            dealerships_without_admin = await conn.fetch("""
+                SELECT d.id FROM dealerships d
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM users u WHERE u.dealership_id = d.id AND u.role = 'admin'
+                )
+            """)
+            for row in dealerships_without_admin:
+                first_user = await conn.fetchval(
+                    "SELECT id FROM users WHERE dealership_id = $1 ORDER BY id ASC LIMIT 1",
+                    row["id"]
+                )
+                if first_user:
+                    await conn.execute(
+                        "UPDATE users SET role = 'admin' WHERE id = $1",
+                        first_user
+                    )
+                    logger.info(f"Promoted user {first_user} to admin for dealership {row['id']}")
+        except Exception as e:
+            logger.warning(f"Admin promotion check error: {e}")
+
+        # 8. Super admin + verification columns
+        for col, typ in [
+            ("is_super_admin", "BOOLEAN DEFAULT false"),
+            ("is_verified", "BOOLEAN DEFAULT false"),
+            ("verified_by", "INTEGER"),
+            ("verified_at", "TIMESTAMP"),
+        ]:
+            try:
+                await conn.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {typ}")
+            except Exception:
+                pass
+
+        # 9. Set the first ever user (id=1 or lowest id) as super_admin — this is you (the platform owner)
+        # Only runs if no super_admin exists yet
+        try:
+            has_super = await conn.fetchval("SELECT COUNT(*) FROM users WHERE is_super_admin = true")
+            if not has_super or has_super == 0:
+                first_uid = await conn.fetchval("SELECT id FROM users ORDER BY id ASC LIMIT 1")
+                if first_uid:
+                    await conn.execute(
+                        "UPDATE users SET is_super_admin = true, is_verified = true, role = 'admin' WHERE id = $1",
+                        first_uid
+                    )
+                    logger.info(f"Designated user {first_uid} as platform super admin")
+        except Exception as e:
+            logger.warning(f"Super admin setup error: {e}")
     finally:
         # Clean up expired sessions via raw asyncpg (avoids pgBouncer prepared stmt issue)
         try:
@@ -446,15 +869,14 @@ async def startup():
             await conn.execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
         except Exception as e:
             pass
-        await conn.close()
+        await pool.release(conn)
 
 
-import asyncio
-import random
+
+
 
 # Vercel is serverless — no persistent background tasks.
 # Instead, we piggyback cleanup on ~1% of incoming requests.
-_cleanup_counter = 0
 
 async def maybe_cleanup_sessions():
     """Probabilistic cleanup: runs on roughly 1 in 100 requests."""
@@ -463,14 +885,9 @@ async def maybe_cleanup_sessions():
     if random.randint(1, 100) != 1:
         return
     try:
-        from .auth import _raw_pg_conn
-        conn = await _raw_pg_conn()
-        if conn:
-            try:
-                await conn.execute("DELETE FROM user_sessions WHERE expires_at <= NOW()")
-                await conn.execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
-            finally:
-                await conn.close()
+        from .auth import _raw_pg_execute
+        await _raw_pg_execute("DELETE FROM user_sessions WHERE expires_at <= NOW()")
+        await _raw_pg_execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
     except Exception as e:
         logger.warning(f"Session cleanup error: {e}")
 
@@ -532,14 +949,44 @@ def _pct(n, d):
 # AUTH ROUTES
 # ════════════════════════════════════════════════
 
+# ── Rate limiting for login (in-memory, resets on cold start) ──
+# Tracks failed login attempts per IP. On serverless, this provides
+# burst protection during warm Lambda periods. Persistent rate limiting
+# would require Redis/Upstash but this covers the common case.
+_LOGIN_ATTEMPTS: dict[str, list[float]] = {}  # ip -> list of timestamps
+_LOGIN_RATE_LIMIT = 10  # max attempts per window
+_LOGIN_RATE_WINDOW = 900.0  # 15 minute window
+
+def _check_rate_limit(ip: str) -> bool:
+    """Returns True if the IP is rate-limited (too many attempts)."""
+    now = time.monotonic()
+    attempts = _LOGIN_ATTEMPTS.get(ip, [])
+    # Prune old attempts outside the window
+    attempts = [t for t in attempts if now - t < _LOGIN_RATE_WINDOW]
+    _LOGIN_ATTEMPTS[ip] = attempts
+    return len(attempts) >= _LOGIN_RATE_LIMIT
+
+def _record_failed_login(ip: str):
+    """Record a failed login attempt for rate limiting."""
+    now = time.monotonic()
+    if ip not in _LOGIN_ATTEMPTS:
+        _LOGIN_ATTEMPTS[ip] = []
+    _LOGIN_ATTEMPTS[ip].append(now)
+    # Periodic cleanup: if cache grows too large, prune all expired entries
+    if len(_LOGIN_ATTEMPTS) > 1000:
+        cutoff = now - _LOGIN_RATE_WINDOW
+        _LOGIN_ATTEMPTS.clear()
+
+
 def _set_session_cookie(resp, token: str, remember_me: bool):
     """Set the session cookie with appropriate TTL."""
     max_age = 60 * 60 * 24 * 30 if remember_me else None  # 30 days or session cookie
+    is_secure = not os.environ.get("DATABASE_URL", "").startswith("sqlite")
     resp.set_cookie(
         "ct_session", token,
         httponly=True,
         samesite="lax",
-        secure=True,
+        secure=is_secure,
         max_age=max_age,
     )
 
@@ -574,6 +1021,13 @@ async def login_post(
         "supabase_enabled": SUPABASE_ENABLED, "next": redirect_to,
     }
 
+    # Rate limiting check
+    client_ip = (request.client.host if request and request.client else "unknown")
+    if _check_rate_limit(client_ip):
+        return templates.TemplateResponse("login.html", {
+            **error_ctx, "error": "Too many login attempts. Please wait a few minutes and try again."
+        })
+
     if SUPABASE_ENABLED:
         # ── Supabase path ──
         login_email = (email or username).strip().lower()
@@ -583,11 +1037,12 @@ async def login_post(
             })
         result = await supabase_sign_in(login_email, password)
         if "error" in result:
+            _record_failed_login(client_ip)
             return templates.TemplateResponse("login.html", {**error_ctx, "error": result["error"]})
 
         sb_user = result.get("user") or {}
         local_user = await get_or_create_user_from_supabase(db, sb_user)
-        await get_or_create_settings(db, local_user.id)
+        await get_or_create_settings(db, local_user.id, local_user.dealership_id)
         token = await create_session(db, local_user.id, remember_me=remember, request=request)
 
     else:
@@ -597,13 +1052,12 @@ async def login_post(
             return templates.TemplateResponse("login.html", {
                 **error_ctx, "error": "Please enter your username and password."
             })
-        # Simple brute-force check: count failed attempts in last 15 minutes via session table
-        # We repurpose ip_address matching — 10 failures from same IP = 60s cooldown
-        client_ip = (request.client.host if request.client else "unknown") if request else "unknown"
+        # Simple brute-force protection: rate limiting + artificial delay
         # Timing-safe: always do the DB lookup and verify even on lockout path to prevent timing attacks
         user = (await db.execute(select(User).where(User.username == uname))).scalar_one_or_none()
         pw_ok = bool(user and verify_password(password, user.password_hash, user.password_salt))
         if not pw_ok:
+            _record_failed_login(client_ip)
             # Small artificial delay to slow down automated attacks
             await asyncio.sleep(0.5)
             return templates.TemplateResponse("login.html", {
@@ -637,6 +1091,10 @@ async def register_post(
     display_name: str = Form(""),
     password: str = Form(...),
     password2: str = Form(...),
+    dealership_name: str = Form(""),
+    google_place_id: str = Form(""),
+    dealership_address: str = Form(""),
+    dealership_phone: str = Form(""),
 ):
     error_ctx = {
         "request": request, "mode": "register", "success": "",
@@ -666,7 +1124,18 @@ async def register_post(
         local_user = await get_or_create_user_from_supabase(
             db, sb_user, display_name=display_name.strip() or reg_email.split("@")[0]
         )
-        await get_or_create_settings(db, local_user.id)
+
+        # If user doesn't have a dealership yet, create one (new signup)
+        if not local_user.dealership_id:
+            local_user = await _create_dealership_for_user(
+                db, local_user,
+                name_hint=dealership_name.strip() or display_name.strip(),
+                google_place_id=google_place_id.strip(),
+                address=dealership_address.strip(),
+                phone=dealership_phone.strip(),
+            )
+
+        await get_or_create_settings(db, local_user.id, local_user.dealership_id)
 
         if not session_data:
             # Email confirmation required — show success message
@@ -704,12 +1173,22 @@ async def register_post(
             display_name=(display_name.strip() or uname),
             password_hash=pw_hash,
             password_salt=pw_salt,
-            created_at=datetime.utcnow().isoformat(),
+            created_at=_utcnow().isoformat(),
         )
         db.add(user)
         await db.commit()
         await db.refresh(user)
-        await get_or_create_settings(db, user.id)
+
+        # Create a dealership for this new user (they become admin)
+        user = await _create_dealership_for_user(
+            db, user,
+            name_hint=dealership_name.strip() or display_name.strip(),
+            google_place_id=google_place_id.strip(),
+            address=dealership_address.strip(),
+            phone=dealership_phone.strip(),
+        )
+
+        await get_or_create_settings(db, user.id, user.dealership_id)
         token = await create_session(db, user.id, remember_me=False, request=request)
         resp = RedirectResponse(url="/", status_code=303)
         _set_session_cookie(resp, token, False)
@@ -866,8 +1345,6 @@ async def reset_password_legacy(request: Request, token: str = ""):
     """Legacy reset-password page for email links in non-Supabase mode."""
     error = ""
     if token:
-        from sqlalchemy import select
-        from .models import PasswordResetToken
         async with SessionLocal() as db:
             valid_uid = await validate_reset_token(db, token)
         if not valid_uid:
@@ -896,27 +1373,20 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 @app.get("/api/session-status")
 async def session_status(request: Request):
     """Returns seconds remaining on current session — used by timeout warning."""
-    from fastapi.responses import JSONResponse
-    from .auth import _get_ssl_ctx, _raw_pg_conn
+    from .auth import _raw_pg_fetchrow
     token = get_session_token(request)
     if not token:
         return JSONResponse({"seconds_remaining": 0, "authenticated": False})
     if not _is_pg:
         return JSONResponse({"seconds_remaining": 86400, "authenticated": True, "remember_me": True})
     try:
-        conn = await _raw_pg_conn()
-        if not conn:
-            return JSONResponse({"seconds_remaining": 86400, "authenticated": True, "remember_me": False})
-        try:
-            row = await conn.fetchrow(
-                "SELECT expires_at, remember_me FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
-                token
-            )
-        finally:
-            await conn.close()
+        row = await _raw_pg_fetchrow(
+            "SELECT expires_at, remember_me FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
+            token
+        )
         if not row:
             return JSONResponse({"seconds_remaining": 0, "authenticated": False})
-        delta = (row["expires_at"].replace(tzinfo=None) - datetime.utcnow()).total_seconds()
+        delta = (row["expires_at"] - _utcnow()).total_seconds()
         return JSONResponse({
             "seconds_remaining": max(0, int(delta)),
             "authenticated": True,
@@ -925,6 +1395,43 @@ async def session_status(request: Request):
     except Exception as e:
         logger.warning(f"session_status error: {e}")
         return JSONResponse({"seconds_remaining": 86400, "authenticated": True, "remember_me": False})
+
+
+@app.post("/api/session-extend")
+async def session_extend(request: Request):
+    """Actually extends the current session's expiry by its original TTL."""
+    from .auth import _raw_pg_fetchrow, _raw_pg_execute, SESSION_TTL_SHORT, SESSION_TTL_REMEMBER, _cache_set
+    token = get_session_token(request)
+    if not token:
+        return JSONResponse({"ok": False, "error": "No session"}, status_code=401)
+
+    if not _is_pg:
+        return JSONResponse({"ok": True, "seconds_remaining": 86400})
+
+    try:
+        row = await _raw_pg_fetchrow(
+            "SELECT user_id, remember_me FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
+            token
+        )
+        if not row:
+            return JSONResponse({"ok": False, "error": "Session expired"}, status_code=401)
+
+        ttl = SESSION_TTL_REMEMBER if row["remember_me"] else SESSION_TTL_SHORT
+        new_expires = _utcnow() + ttl
+        await _raw_pg_execute(
+            "UPDATE user_sessions SET expires_at = $1 WHERE token = $2",
+            new_expires, token
+        )
+        # Update the in-memory cache too
+        _cache_set(token, row["user_id"])
+
+        return JSONResponse({
+            "ok": True,
+            "seconds_remaining": int(ttl.total_seconds()),
+        })
+    except Exception as e:
+        logger.warning(f"session_extend error: {e}")
+        return JSONResponse({"ok": False, "error": "Internal error"}, status_code=500)
 
 
 
@@ -937,7 +1444,7 @@ async def dashboard(
 ):
     user_id = uid(request)
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one()
-    s = await get_or_create_settings(db, user_id)
+    s = await get_or_create_settings(db, user_id, user_dealership_id(request))
 
     today_date = today()
 
@@ -974,7 +1481,7 @@ async def dashboard(
     # is computed with a targeted SQL query. This is the core serverless
     # optimization: less data transferred, less memory, faster response.
 
-    import asyncio as _aio
+
 
     async def _q_delivered_mtd():
         return (await db.execute(
@@ -1074,7 +1581,7 @@ async def dashboard(
         todays,
         overdue_count,
         years,
-    ) = await _aio.gather(
+    ) = await asyncio.gather(
         _q_delivered_mtd(), _q_prev_del(), _q_qtd_count(), _q_yr_trend(),
         _q_pending(), _q_goal(), _q_todays(), _q_overdue(), _q_years(),
     )
@@ -1188,13 +1695,12 @@ async def goals_save(request: Request, unit_goal: int = Form(20), commission_goa
     try: m = int(request.cookies.get("ct_month") or td.month)
     except: m = td.month
     # Use upsert to handle the unique constraint on (user_id, year, month) safely
-    from sqlalchemy import text
-    await db.execute(text("""
-        INSERT INTO goals (user_id, year, month, unit_goal, commission_goal)
-        VALUES (:uid, :y, :m, :u, :c)
+    await db.execute(sa_text("""
+        INSERT INTO goals (user_id, dealership_id, year, month, unit_goal, commission_goal)
+        VALUES (:uid, :did, :y, :m, :u, :c)
         ON CONFLICT (user_id, year, month)
-        DO UPDATE SET unit_goal=:u, commission_goal=:c
-    """), {"uid": user_id, "y": y, "m": m, "u": unit_goal, "c": commission_goal})
+        DO UPDATE SET unit_goal=:u, commission_goal=:c, dealership_id=COALESCE(goals.dealership_id, :did)
+    """), {"uid": user_id, "did": user_dealership_id(request), "y": y, "m": m, "u": unit_goal, "c": commission_goal})
     await db.commit()
     return RedirectResponse(url=f"/?year={y}&month={m}", status_code=303)
 
@@ -1267,7 +1773,7 @@ async def deals_list(
 @app.get("/deals/new", response_class=HTMLResponse)
 async def deal_new(request: Request, db: AsyncSession = Depends(get_db)):
     user_id = uid(request)
-    settings = await get_or_create_settings(db, user_id)
+    settings = await get_or_create_settings(db, user_id, user_dealership_id(request))
     start_m, end_m = month_bounds(today())
     dels = (await db.execute(select(Deal).where(Deal.user_id == user_id, Deal.status == "Delivered", Deal.delivered_date >= start_m, Deal.delivered_date < end_m))).scalars().all()
     u = len(dels); c = sum((d.total_deal_comm or 0) for d in dels)
@@ -1284,7 +1790,7 @@ async def deal_edit(deal_id: int, request: Request, db: AsyncSession = Depends(g
     user_id = uid(request)
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == user_id))).scalar_one_or_none()
     if not deal: return RedirectResponse(url="/deals", status_code=303)
-    settings = await get_or_create_settings(db, user_id)
+    settings = await get_or_create_settings(db, user_id, user_dealership_id(request))
     embed = request.query_params.get("embed") == "1"
     start_m, end_m = month_bounds(today())
     dels = (await db.execute(select(Deal).where(Deal.user_id == user_id, Deal.status == "Delivered", Deal.delivered_date >= start_m, Deal.delivered_date < end_m))).scalars().all()
@@ -1317,7 +1823,7 @@ async def deal_save(
     next: str | None = Form(None), db: AsyncSession = Depends(get_db),
 ):
     user_id = uid(request)
-    settings = await get_or_create_settings(db, user_id)
+    settings = await get_or_create_settings(db, user_id, user_dealership_id(request))
 
     sold = parse_date(sold_date)
     if sold is None and not deal_id: sold = today()
@@ -1371,7 +1877,7 @@ async def deal_save(
         existing.unit_comm = uc; existing.add_ons = ao; existing.trade_hold_comm = th; existing.total_deal_comm = tot
         existing.commission_override = comm_ov
     else:
-        deal = Deal(**deal_in.model_dump(), user_id=user_id, unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot, commission_override=comm_ov)
+        deal = Deal(**deal_in.model_dump(), user_id=user_id, dealership_id=user_dealership_id(request), unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot, commission_override=comm_ov)
         db.add(deal)
     await db.commit()
     return RedirectResponse(url=(next or "/deals"), status_code=303)
@@ -1379,7 +1885,6 @@ async def deal_save(
 
 @app.post("/deals/{deal_id}/toggle_paid")
 async def toggle_paid(deal_id: int, request: Request, next: str | None = Form(None), db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
     if not deal: return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
     deal.is_paid = not deal.is_paid
@@ -1393,7 +1898,6 @@ async def toggle_paid(deal_id: int, request: Request, next: str | None = Form(No
 @app.post("/deals/{deal_id}/quick_update")
 async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     """Inline field update — accepts JSON {field, value}, returns {ok, new_value}."""
-    from fastapi.responses import JSONResponse
     user_id = uid(request)
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == user_id))).scalar_one_or_none()
     if not deal:
@@ -1401,7 +1905,7 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
     body = await request.json()
     field = body.get("field", "")
     value = body.get("value", "")
-    settings = await get_or_create_settings(db, user_id)
+    settings = await get_or_create_settings(db, user_id, user_dealership_id(request))
 
     ALLOWED = {"notes", "status", "tag", "sold_date", "delivered_date", "scheduled_date",
                "customer", "stock_num", "model", "new_used", "deal_type",
@@ -1428,7 +1932,6 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
             except ValueError:
                 return JSONResponse({"ok": False, "error": "Invalid number"}, status_code=400)
         # Recalc total
-        from .schemas import DealIn
         deal_in = DealIn(**{c.key: getattr(deal, c.key) for c in deal.__table__.columns if c.key in DealIn.model_fields})
         uc, ao, th, tot = calc_commission(deal_in, settings)
         deal.total_deal_comm = deal.commission_override if deal.commission_override is not None else tot
@@ -1441,10 +1944,11 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
 
 @app.post("/deals/{deal_id}/mark_delivered")
 async def mark_delivered(deal_id: int, request: Request, redirect: str | None = Form(None), month: str | None = Form(None), db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
     if not deal: return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
     deal.status = "Delivered"; deal.delivered_date = today()
+    # Auto-clear from delivery board — delivered deals don't need to stay on it
+    deal.on_delivery_board = False; deal.gas_ready = False; deal.inspection_ready = False; deal.insurance_ready = False
     await db.commit()
     if "application/json" in request.headers.get("accept", ""):
         return JSONResponse({"ok": True, "status": "Delivered", "delivered_date": deal.delivered_date.isoformat()})
@@ -1452,7 +1956,6 @@ async def mark_delivered(deal_id: int, request: Request, redirect: str | None = 
 
 @app.post("/deals/{deal_id}/mark_dead")
 async def mark_dead(deal_id: int, request: Request, redirect: str | None = Form(None), month: str | None = Form(None), db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
     if not deal: return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
     deal.status = "Dead"
@@ -1490,17 +1993,11 @@ async def delivery_board(request: Request, db: AsyncSession = Depends(get_db)):
     )).scalars().all()
     prep = [d for d in board if not (d.gas_ready and d.inspection_ready and d.insurance_ready)]
     ready = [d for d in board if d.gas_ready and d.inspection_ready and d.insurance_ready]
-    week_ago = today() - timedelta(days=7)
-    delivered = (await db.execute(
-        select(Deal).where(Deal.user_id == user_id, Deal.on_delivery_board == True, Deal.status == "Delivered", Deal.delivered_date >= week_ago)
-        .order_by(Deal.delivered_date.desc())
-    )).scalars().all()
     user = await _user(request, db)
-    return templates.TemplateResponse("delivery_board.html", {"request": request, "user": user, "prep": prep, "ready": ready, "delivered": delivered, "total": len(prep)+len(ready), "overdue_reminders": await get_overdue_reminders(db, uid(request))})
+    return templates.TemplateResponse("delivery_board.html", {"request": request, "user": user, "prep": prep, "ready": ready, "total": len(prep)+len(ready), "overdue_reminders": await get_overdue_reminders(db, uid(request))})
 
 @app.post("/delivery/{deal_id}/toggle")
 async def delivery_toggle(deal_id: int, request: Request, field: str = Form(...), db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     if field not in {"gas_ready","inspection_ready","insurance_ready"}: return RedirectResponse(url="/delivery", status_code=303)
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
     if not deal: return JSONResponse({"ok": False}, status_code=404)
@@ -1511,17 +2008,18 @@ async def delivery_toggle(deal_id: int, request: Request, field: str = Form(...)
 
 @app.post("/delivery/{deal_id}/deliver")
 async def delivery_deliver(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
     if not deal: return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
-    deal.status = "Delivered"; deal.delivered_date = today(); await db.commit()
+    deal.status = "Delivered"; deal.delivered_date = today()
+    # Auto-clear from delivery board — no need to keep delivered deals on it
+    deal.on_delivery_board = False; deal.gas_ready = False; deal.inspection_ready = False; deal.insurance_ready = False
+    await db.commit()
     if "application/json" in request.headers.get("accept", ""):
         return JSONResponse({"ok": True})
     return RedirectResponse(url="/delivery", status_code=303)
 
 @app.post("/delivery/{deal_id}/remove")
 async def delivery_remove(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
     if not deal: return JSONResponse({"ok": False}, status_code=404)
     deal.on_delivery_board = False; deal.gas_ready = False; deal.inspection_ready = False; deal.insurance_ready = False
@@ -1603,7 +2101,6 @@ def _smart_map_columns(csv_headers: list[str]) -> dict[str, str]:
     Returns {csv_header: internal_field_name}.
     Falls back to exact/fuzzy keyword matching — no API call needed.
     """
-    import difflib
     mapping = {}
     used_fields = set()
     headers_lower = {h: h.strip().lower() for h in csv_headers}
@@ -1742,7 +2239,7 @@ def _find_header_row(text: str) -> tuple[list[str], list[dict]]:
 @app.post("/import/preview", response_class=HTMLResponse)
 async def import_preview(request: Request, file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
     """Step 1: Upload CSV, detect columns, show mapping preview before committing."""
-    import json
+
     user = await _user(request, db)
     raw = await file.read()
     text = raw.decode("utf-8-sig")
@@ -1778,7 +2275,6 @@ async def import_preview(request: Request, file: UploadFile = File(...), db: Asy
         sample_values[h] = vals
 
     # Store raw CSV in session via hidden field (base64 for safety)
-    import base64
     csv_b64 = base64.b64encode(raw).decode()
     fname = file.filename or "upload.csv"
 
@@ -1798,7 +2294,6 @@ async def import_preview(request: Request, file: UploadFile = File(...), db: Asy
 @app.post("/import/review", response_class=HTMLResponse)
 async def import_review(request: Request, db: AsyncSession = Depends(get_db)):
     """Step 2: Show all parsed rows as an editable table before final import."""
-    import base64, json as _json
     form = await request.form()
     user = await _user(request, db)
 
@@ -1854,11 +2349,10 @@ async def import_review(request: Request, db: AsyncSession = Depends(get_db)):
 @app.post("/import", response_class=HTMLResponse)
 async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
     """Step 3: Final import using per-row overrides from the review step."""
-    import base64, json as _json
     form = await request.form()
     user_id = uid(request)
     user = await _user(request, db)
-    settings = await get_or_create_settings(db, user_id)
+    settings = await get_or_create_settings(db, user_id, user_dealership_id(request))
 
     csv_b64 = form.get("csv_b64", "")
     overrides_json = form.get("overrides_json", "[]")
@@ -1882,7 +2376,7 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
     headers, rows = _find_header_row(text)
     mapping = _smart_map_columns(headers)
 
-    import_batch_id = f"imp_{secrets.token_hex(8)}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    import_batch_id = f"imp_{secrets.token_hex(8)}_{_utcnow().strftime('%Y%m%d%H%M%S')}"
     imported = skipped = 0
     errors = []
 
@@ -1928,6 +2422,7 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
             db.add(Deal(
                 **deal_in.model_dump(),
                 user_id=user_id,
+                dealership_id=user_dealership_id(request),
                 unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot,
                 import_batch_id=import_batch_id,
             ))
@@ -1981,13 +2476,12 @@ async def import_history(request: Request, db: AsyncSession = Depends(get_db)):
     """Show all past import batches with undo option."""
     user_id = uid(request)
     # Get distinct batch IDs with counts
-    from sqlalchemy import func as sqlfunc
     rows = (await db.execute(
         select(
             Deal.import_batch_id,
-            sqlfunc.count(Deal.id).label("count"),
-            sqlfunc.min(Deal.sold_date).label("earliest"),
-            sqlfunc.max(Deal.sold_date).label("latest"),
+            func.count(Deal.id).label("count"),
+            func.min(Deal.sold_date).label("earliest"),
+            func.max(Deal.sold_date).label("latest"),
         )
         .where(Deal.user_id == user_id, Deal.import_batch_id.isnot(None))
         .group_by(Deal.import_batch_id)
@@ -2069,7 +2563,6 @@ async def reminder_save(
     due_date: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
-    from fastapi.responses import JSONResponse
     user_id = uid(request)
     due = parse_date(due_date) if due_date else None
     if reminder_id:
@@ -2077,7 +2570,7 @@ async def reminder_save(
         if r:
             r.title = title.strip(); r.body = body.strip(); r.due_date = due
     else:
-        r = Reminder(user_id=user_id, title=title.strip(), body=body.strip(), due_date=due)
+        r = Reminder(user_id=user_id, dealership_id=user_dealership_id(request), title=title.strip(), body=body.strip(), due_date=due)
         db.add(r)
     await db.commit()
     await db.refresh(r)
@@ -2087,7 +2580,6 @@ async def reminder_save(
 
 @app.post("/reminders/{reminder_id}/toggle")
 async def reminder_toggle(reminder_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     r = (await db.execute(select(Reminder).where(Reminder.id == reminder_id, Reminder.user_id == uid(request)))).scalar_one_or_none()
     if not r: return JSONResponse({"ok": False}, status_code=404)
     r.is_done = not r.is_done
@@ -2096,7 +2588,6 @@ async def reminder_toggle(reminder_id: int, request: Request, db: AsyncSession =
 
 @app.post("/reminders/{reminder_id}/delete")
 async def reminder_delete(reminder_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    from fastapi.responses import JSONResponse
     r = (await db.execute(select(Reminder).where(Reminder.id == reminder_id, Reminder.user_id == uid(request)))).scalar_one_or_none()
     if r: await db.delete(r); await db.commit()
     return JSONResponse({"ok": True})
@@ -2109,9 +2600,10 @@ async def payplan_get(request: Request, db: AsyncSession = Depends(get_db)):
     # Note: fi_pvr and aim_amount are stored on deals for reference/reporting
     # but are not currently used in commission calculation (payplan.py).
     # They can be added to calc_commission() in the future if the pay plan changes.
-    s = await get_or_create_settings(db, uid(request))
+    s = await get_or_create_settings(db, uid(request), user_dealership_id(request))
     user = await _user(request, db)
-    return templates.TemplateResponse("payplan.html", {"request": request, "user": user, "s": s, "overdue_reminders": await get_overdue_reminders(db, uid(request))})
+    is_admin = user_role(request) == "admin"
+    return templates.TemplateResponse("payplan.html", {"request": request, "user": user, "s": s, "is_admin": is_admin, "overdue_reminders": await get_overdue_reminders(db, uid(request))})
 
 @app.post("/payplan")
 async def payplan_post(
@@ -2130,7 +2622,9 @@ async def payplan_post(
     quarterly_bonus_threshold_units: int = Form(...), quarterly_bonus_amount: float = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
-    s = await get_or_create_settings(db, uid(request))
+    # Only admins can change the pay plan — it affects the entire dealership
+    _require_admin(request)
+    s = await get_or_create_settings(db, uid(request), user_dealership_id(request))
     for f in ["unit_comm_discount_le_200","unit_comm_discount_gt_200","permaplate","nitro_fill","pulse",
               "finance_non_subvented","warranty","tire_wheel","hourly_rate_ny_offset",
               "new_volume_bonus_15_16","new_volume_bonus_17_18","new_volume_bonus_19_20",
@@ -2147,3 +2641,634 @@ async def payplan_post(
 async def _sr(): return RedirectResponse(url="/payplan", status_code=307)
 @app.post("/settings")
 async def _sp(): return RedirectResponse(url="/payplan", status_code=303)
+
+
+# ════════════════════════════════════════════════
+# TEAM MANAGEMENT (admin/manager)
+# ════════════════════════════════════════════════
+
+@app.get("/team", response_class=HTMLResponse)
+async def team_page(request: Request, db: AsyncSession = Depends(get_db)):
+    """Team management page — admins can invite/manage users, managers can view the team."""
+    _require_admin_or_manager(request)
+    d_id = user_dealership_id(request)
+    user = await _user(request, db)
+
+    # Get all team members in this dealership
+    team = (await db.execute(
+        select(User).where(User.dealership_id == d_id).order_by(User.role.asc(), User.display_name.asc())
+    )).scalars().all()
+
+    # Get pending (unused) invites
+    invites = (await db.execute(
+        select(Invite).where(Invite.dealership_id == d_id, Invite.used == False)
+        .order_by(Invite.created_at.desc())
+    )).scalars().all()
+
+    # Get dealership info
+    dealership = (await db.execute(
+        select(Dealership).where(Dealership.id == d_id)
+    )).scalar_one_or_none()
+
+    return templates.TemplateResponse("team.html", {
+        "request": request, "user": user, "team": team, "invites": invites,
+        "dealership": dealership, "is_admin": user_role(request) == "admin",
+        "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+    })
+
+
+@app.post("/team/invite")
+async def team_invite(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    email: str = Form(""),
+    role: str = Form("salesperson"),
+):
+    """Create an invite link for a new team member."""
+    _require_admin(request)
+    d_id = user_dealership_id(request)
+    if not d_id:
+        return RedirectResponse(url="/team", status_code=303)
+
+    if role not in ("salesperson", "manager"):
+        role = "salesperson"
+
+    # Check user count limit
+    dealership = (await db.execute(select(Dealership).where(Dealership.id == d_id))).scalar_one_or_none()
+    if dealership:
+        current_count = (await db.execute(
+            select(func.count()).where(User.dealership_id == d_id)
+        )).scalar() or 0
+        if current_count >= dealership.max_users:
+            return RedirectResponse(url="/team?error=limit", status_code=303)
+
+    invite_token = secrets.token_urlsafe(32)
+    invite = Invite(
+        token=invite_token,
+        dealership_id=d_id,
+        email=email.strip().lower() if email.strip() else None,
+        role=role,
+        created_by=uid(request),
+        expires_at=_utcnow() + timedelta(days=7),
+    )
+    db.add(invite)
+    await db.commit()
+
+    return RedirectResponse(url="/team", status_code=303)
+
+
+@app.get("/join/{invite_token}", response_class=HTMLResponse)
+async def join_page(invite_token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Page shown when someone clicks an invite link."""
+    invite = (await db.execute(
+        select(Invite).where(Invite.token == invite_token, Invite.used == False)
+    )).scalar_one_or_none()
+
+    if not invite or invite.expires_at < _utcnow():
+        return HTMLResponse(
+            """<!DOCTYPE html><html><head><title>Invalid Invite</title>
+            <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc}
+            .box{text-align:center;padding:2rem;max-width:400px}h1{font-size:1.5rem;color:#0f172a}
+            p{color:#64748b}a{color:#6366f1;text-decoration:none}</style></head>
+            <body><div class="box"><h1>Invite Expired or Invalid</h1>
+            <p>This invite link is no longer valid. Ask your manager to send a new one.</p>
+            <p style="margin-top:1.5rem"><a href="/login">← Sign In</a></p></div></body></html>""",
+            status_code=404,
+        )
+
+    dealership = (await db.execute(
+        select(Dealership).where(Dealership.id == invite.dealership_id)
+    )).scalar_one_or_none()
+
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": "",
+        "success": f"You've been invited to join {dealership.name if dealership else 'a dealership'}!",
+        "mode": "register",
+        "supabase_enabled": SUPABASE_ENABLED,
+        "next": "/",
+        "invite_token": invite_token,
+    })
+
+
+@app.post("/join/{invite_token}")
+async def join_accept(
+    invite_token: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    email: str = Form(""),
+    username: str = Form(""),
+    display_name: str = Form(""),
+    password: str = Form(...),
+    password2: str = Form(...),
+):
+    """Accept an invite — create account and join the dealership."""
+    invite = (await db.execute(
+        select(Invite).where(Invite.token == invite_token, Invite.used == False)
+    )).scalar_one_or_none()
+
+    if not invite or invite.expires_at < _utcnow():
+        return RedirectResponse(url=f"/join/{invite_token}", status_code=303)
+
+    error_ctx = {
+        "request": request, "mode": "register", "success": "",
+        "supabase_enabled": SUPABASE_ENABLED, "next": "/",
+        "invite_token": invite_token,
+    }
+
+    errors = []
+    if password != password2:
+        errors.append("Passwords don't match.")
+    if len(password) < 6:
+        errors.append("Password must be at least 6 characters.")
+
+    if SUPABASE_ENABLED:
+        reg_email = email.strip().lower()
+        if not reg_email or "@" not in reg_email:
+            errors.append("A valid email address is required.")
+        if errors:
+            return templates.TemplateResponse("login.html", {**error_ctx, "error": " ".join(errors)})
+
+        result = await supabase_sign_up(reg_email, password)
+        if "error" in result:
+            return templates.TemplateResponse("login.html", {**error_ctx, "error": result["error"]})
+
+        sb_user = result.get("user") or {}
+        local_user = await get_or_create_user_from_supabase(
+            db, sb_user, display_name=display_name.strip() or reg_email.split("@")[0]
+        )
+    else:
+        uname = (username or email).strip().lower()
+        if len(uname) < 3:
+            errors.append("Username must be at least 3 characters.")
+        existing = (await db.execute(select(User).where(User.username == uname))).scalar_one_or_none()
+        if existing:
+            errors.append("Username already taken.")
+        if errors:
+            return templates.TemplateResponse("login.html", {**error_ctx, "error": " ".join(errors)})
+
+        pw_hash, pw_salt = hash_password(password)
+        local_user = User(
+            username=uname,
+            display_name=(display_name.strip() or uname),
+            password_hash=pw_hash,
+            password_salt=pw_salt,
+            created_at=_utcnow().isoformat(),
+        )
+        db.add(local_user)
+        await db.commit()
+        await db.refresh(local_user)
+
+    # Assign user to the dealership from the invite
+    local_user.dealership_id = invite.dealership_id
+    local_user.role = invite.role
+
+    # Mark invite as used
+    invite.used = True
+    invite.used_by = local_user.id
+    await db.commit()
+
+    await get_or_create_settings(db, local_user.id, local_user.dealership_id)
+    token = await create_session(db, local_user.id, remember_me=False, request=request)
+    resp = RedirectResponse(url="/", status_code=303)
+    _set_session_cookie(resp, token, False)
+    return resp
+
+
+@app.post("/team/{user_id}/role")
+async def team_change_role(
+    user_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    role: str = Form(...),
+):
+    """Change a team member's role. Admin only."""
+    _require_admin(request)
+    if role not in ("salesperson", "manager", "admin"):
+        return RedirectResponse(url="/team", status_code=303)
+    # Can't change your own role
+    if user_id == uid(request):
+        return RedirectResponse(url="/team", status_code=303)
+    d_id = user_dealership_id(request)
+    target = (await db.execute(
+        select(User).where(User.id == user_id, User.dealership_id == d_id)
+    )).scalar_one_or_none()
+    if target:
+        target.role = role
+        await db.commit()
+    return RedirectResponse(url="/team", status_code=303)
+
+
+@app.post("/team/{user_id}/remove")
+async def team_remove_member(
+    user_id: int, request: Request, db: AsyncSession = Depends(get_db),
+):
+    """Remove a team member from the dealership. Admin only."""
+    _require_admin(request)
+    if user_id == uid(request):
+        return RedirectResponse(url="/team", status_code=303)
+    d_id = user_dealership_id(request)
+    target = (await db.execute(
+        select(User).where(User.id == user_id, User.dealership_id == d_id)
+    )).scalar_one_or_none()
+    if target:
+        target.dealership_id = None
+        target.role = "salesperson"
+        await db.commit()
+    return RedirectResponse(url="/team", status_code=303)
+
+
+@app.post("/team/invite/{invite_id}/cancel")
+async def team_cancel_invite(
+    invite_id: int, request: Request, db: AsyncSession = Depends(get_db),
+):
+    """Cancel a pending invite. Admin only."""
+    _require_admin(request)
+    d_id = user_dealership_id(request)
+    invite = (await db.execute(
+        select(Invite).where(Invite.id == invite_id, Invite.dealership_id == d_id)
+    )).scalar_one_or_none()
+    if invite:
+        await db.delete(invite)
+        await db.commit()
+    return RedirectResponse(url="/team", status_code=303)
+
+
+@app.post("/team/dealership")
+async def team_update_dealership(
+    request: Request, db: AsyncSession = Depends(get_db),
+    name: str = Form(...),
+):
+    """Update dealership name. Admin only."""
+    _require_admin(request)
+    d_id = user_dealership_id(request)
+    dealership = (await db.execute(
+        select(Dealership).where(Dealership.id == d_id)
+    )).scalar_one_or_none()
+    if dealership and name.strip():
+        dealership.name = name.strip()[:200]
+        await db.commit()
+    return RedirectResponse(url="/team", status_code=303)
+
+
+# ════════════════════════════════════════════════
+# SUPER ADMIN — Platform Management
+# ════════════════════════════════════════════════
+
+@app.post("/admin/toggle")
+async def admin_toggle_mode(request: Request):
+    """Toggle between platform admin view and salesperson view."""
+    if not is_super_admin(request):
+        return RedirectResponse(url="/", status_code=303)
+    current = request.cookies.get("admin_mode") == "1"
+    resp = RedirectResponse(url="/admin" if not current else "/", status_code=303)
+    resp.set_cookie("admin_mode", "0" if current else "1", httponly=True, samesite="lax", max_age=60*60*24*365)
+    return resp
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
+    """Super admin dashboard — overview of all dealerships."""
+    _require_super_admin(request)
+    user = await _user(request, db)
+
+    # All dealerships with user counts
+    dealerships = (await db.execute(
+        select(Dealership).order_by(Dealership.created_at.desc())
+    )).scalars().all()
+
+    # Build stats per dealership
+    dealer_stats = []
+    for d in dealerships:
+        user_count = (await db.execute(
+            select(func.count()).where(User.dealership_id == d.id)
+        )).scalar() or 0
+        deal_count = (await db.execute(
+            select(func.count()).where(Deal.dealership_id == d.id)
+        )).scalar() or 0
+        # Get the admin/GM for this dealership
+        gm = (await db.execute(
+            select(User).where(User.dealership_id == d.id, User.role == "admin")
+            .order_by(User.id.asc()).limit(1)
+        )).scalar_one_or_none()
+        dealer_stats.append({
+            "dealership": d,
+            "user_count": user_count,
+            "deal_count": deal_count,
+            "gm": gm,
+        })
+
+    # Total platform stats
+    total_users = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
+    total_deals = (await db.execute(select(func.count()).select_from(Deal))).scalar() or 0
+
+    return templates.TemplateResponse("admin_dashboard.html", {
+        "request": request, "user": user,
+        "dealer_stats": dealer_stats,
+        "total_users": total_users,
+        "total_deals": total_deals,
+        "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+    })
+
+
+@app.post("/admin/dealership/create")
+async def admin_create_dealership(
+    request: Request, db: AsyncSession = Depends(get_db),
+    name: str = Form(...), slug: str = Form(""),
+):
+    """Create a new dealership manually."""
+    _require_super_admin(request)
+    import re as _re
+    if not slug.strip():
+        slug = _re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')[:60]
+    # Ensure slug is unique
+    base_slug = slug
+    i = 1
+    while (await db.execute(select(Dealership).where(Dealership.slug == slug))).scalar_one_or_none():
+        slug = f"{base_slug}-{i}"
+        i += 1
+    d = Dealership(name=name.strip(), slug=slug, is_active=True, subscription_status="active")
+    db.add(d)
+    await db.commit()
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+@app.post("/admin/dealership/{dealership_id}/toggle-active")
+async def admin_toggle_dealership(dealership_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Activate/deactivate a dealership."""
+    _require_super_admin(request)
+    d = (await db.execute(select(Dealership).where(Dealership.id == dealership_id))).scalar_one_or_none()
+    if d:
+        d.is_active = not d.is_active
+        await db.commit()
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+@app.post("/admin/dealership/{dealership_id}/assign-gm")
+async def admin_assign_gm(
+    dealership_id: int, request: Request, db: AsyncSession = Depends(get_db),
+    user_id: int = Form(...),
+):
+    """Assign a user as the GM (admin role) of a dealership."""
+    _require_super_admin(request)
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if target:
+        target.dealership_id = dealership_id
+        target.role = "admin"
+        target.is_verified = True
+        await db.commit()
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+@app.post("/admin/user/{user_id}/toggle-super")
+async def admin_toggle_super(user_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Toggle super admin status for a user. Can only be done by existing super admin."""
+    _require_super_admin(request)
+    # Can't remove your own super admin
+    if user_id == uid(request):
+        return RedirectResponse(url="/admin", status_code=303)
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if target:
+        target.is_super_admin = not target.is_super_admin
+        await db.commit()
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+@app.get("/admin/dealership/{dealership_id}", response_class=HTMLResponse)
+async def admin_dealership_detail(dealership_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Drill into a specific dealership — see all users, deals, settings."""
+    _require_super_admin(request)
+    user = await _user(request, db)
+
+    dealership = (await db.execute(
+        select(Dealership).where(Dealership.id == dealership_id)
+    )).scalar_one_or_none()
+    if not dealership:
+        return RedirectResponse(url="/admin", status_code=303)
+
+    members = (await db.execute(
+        select(User).where(User.dealership_id == dealership_id)
+        .order_by(User.role.asc(), User.display_name.asc())
+    )).scalars().all()
+
+    # Recent deals
+    recent_deals = (await db.execute(
+        select(Deal).where(Deal.dealership_id == dealership_id)
+        .order_by(Deal.sold_date.desc().nullslast()).limit(25)
+    )).scalars().all()
+
+    # Enrich deals with salesperson names
+    user_map = {m.id: m for m in members}
+    for deal in recent_deals:
+        deal._salesperson = user_map.get(deal.user_id)
+
+    # Stats
+    total_deals = (await db.execute(
+        select(func.count()).where(Deal.dealership_id == dealership_id)
+    )).scalar() or 0
+
+    delivered_mtd = (await db.execute(
+        select(func.count()).where(
+            Deal.dealership_id == dealership_id,
+            Deal.status == "Delivered",
+            Deal.delivered_date >= today().replace(day=1)
+        )
+    )).scalar() or 0
+
+    # Get pay plan settings for this dealership (Deploy 4)
+    dealership_settings = (await db.execute(
+        select(Settings).where(Settings.dealership_id == dealership_id).limit(1)
+    )).scalar_one_or_none()
+
+    return templates.TemplateResponse("admin_dealership.html", {
+        "request": request, "user": user, "dealership": dealership,
+        "members": members, "recent_deals": recent_deals,
+        "total_deals": total_deals, "delivered_mtd": delivered_mtd,
+        "dealership_settings": dealership_settings,
+        "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+    })
+
+
+# ════════════════════════════════════════════════
+# DEPLOY 2 — Google Places API proxy for dealership search
+# ════════════════════════════════════════════════
+
+GOOGLE_PLACES_API_KEY = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+
+@app.get("/api/places/search")
+async def places_search(request: Request, q: str = ""):
+    """Proxy Google Places Autocomplete for dealership search during registration.
+    Returns JSON list of place predictions."""
+    if not GOOGLE_PLACES_API_KEY or not q.strip():
+        return JSONResponse([])
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(
+                "https://maps.googleapis.com/maps/api/place/autocomplete/json",
+                params={
+                    "input": q.strip(),
+                    "types": "establishment",
+                    "key": GOOGLE_PLACES_API_KEY,
+                },
+            )
+            data = r.json()
+            results = []
+            for p in data.get("predictions", [])[:8]:
+                results.append({
+                    "place_id": p.get("place_id", ""),
+                    "name": p.get("structured_formatting", {}).get("main_text", ""),
+                    "description": p.get("description", ""),
+                })
+            return JSONResponse(results)
+    except Exception as e:
+        logger.warning(f"Places search error: {e}")
+        return JSONResponse([])
+
+
+@app.get("/api/places/detail")
+async def places_detail(request: Request, place_id: str = ""):
+    """Proxy Google Places Detail to get address & phone for a dealership."""
+    if not GOOGLE_PLACES_API_KEY or not place_id.strip():
+        return JSONResponse({})
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(
+                "https://maps.googleapis.com/maps/api/place/details/json",
+                params={
+                    "place_id": place_id,
+                    "fields": "name,formatted_address,formatted_phone_number,place_id",
+                    "key": GOOGLE_PLACES_API_KEY,
+                },
+            )
+            data = r.json()
+            result = data.get("result", {})
+            return JSONResponse({
+                "name": result.get("name", ""),
+                "address": result.get("formatted_address", ""),
+                "phone": result.get("formatted_phone_number", ""),
+                "place_id": result.get("place_id", ""),
+            })
+    except Exception as e:
+        logger.warning(f"Places detail error: {e}")
+        return JSONResponse({})
+
+
+# ════════════════════════════════════════════════
+# DEPLOY 3 — Verification system (GM verifies salespeople)
+# ════════════════════════════════════════════════
+
+@app.post("/team/{user_id}/verify")
+async def team_verify_user(
+    user_id: int, request: Request, db: AsyncSession = Depends(get_db),
+):
+    """Verify a salesperson — confirms they work at the dealership.
+    Admin/manager (GM) only."""
+    _require_admin_or_manager(request)
+    d_id = user_dealership_id(request)
+    target = (await db.execute(
+        select(User).where(User.id == user_id, User.dealership_id == d_id)
+    )).scalar_one_or_none()
+    if target and not target.is_verified:
+        target.is_verified = True
+        target.verified_by = uid(request)
+        target.verified_at = _utcnow()
+        await db.commit()
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True, "is_verified": True})
+    return RedirectResponse(url="/team", status_code=303)
+
+
+@app.post("/team/{user_id}/unverify")
+async def team_unverify_user(
+    user_id: int, request: Request, db: AsyncSession = Depends(get_db),
+):
+    """Remove verification from a user. Admin only."""
+    _require_admin(request)
+    d_id = user_dealership_id(request)
+    target = (await db.execute(
+        select(User).where(User.id == user_id, User.dealership_id == d_id)
+    )).scalar_one_or_none()
+    if target and user_id != uid(request):
+        target.is_verified = False
+        target.verified_by = None
+        target.verified_at = None
+        await db.commit()
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True, "is_verified": False})
+    return RedirectResponse(url="/team", status_code=303)
+
+
+@app.post("/admin/user/{user_id}/verify")
+async def admin_verify_user(user_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Super admin can verify any user."""
+    _require_super_admin(request)
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if target:
+        target.is_verified = not target.is_verified
+        if target.is_verified:
+            target.verified_by = uid(request)
+            target.verified_at = _utcnow()
+        else:
+            target.verified_by = None
+            target.verified_at = None
+        await db.commit()
+    # Redirect back to the dealership detail page
+    if target and target.dealership_id:
+        return RedirectResponse(url=f"/admin/dealership/{target.dealership_id}", status_code=303)
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+# ════════════════════════════════════════════════
+# DEPLOY 4 — Pay plan permissions (admin override)
+# ════════════════════════════════════════════════
+
+@app.post("/admin/dealership/{dealership_id}/payplan")
+async def admin_override_payplan(
+    dealership_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    unit_comm_discount_le_200: float = Form(...), unit_comm_discount_gt_200: float = Form(...),
+    permaplate: float = Form(...), nitro_fill: float = Form(...), pulse: float = Form(...),
+    finance_non_subvented: float = Form(...), warranty: float = Form(...), tire_wheel: float = Form(...),
+    hourly_rate_ny_offset: float = Form(...),
+    new_volume_bonus_15_16: float = Form(...), new_volume_bonus_17_18: float = Form(...),
+    new_volume_bonus_19_20: float = Form(...), new_volume_bonus_21_24: float = Form(...),
+    new_volume_bonus_25_plus: float = Form(...),
+    used_volume_bonus_8_10: float = Form(...), used_volume_bonus_11_12: float = Form(...),
+    used_volume_bonus_13_plus: float = Form(...),
+    spot_bonus_5_9: float = Form(...), spot_bonus_10_12: float = Form(...),
+    spot_bonus_13_plus: float = Form(...),
+    quarterly_bonus_threshold_units: int = Form(...), quarterly_bonus_amount: float = Form(...),
+):
+    """Super admin can override any dealership's pay plan."""
+    _require_super_admin(request)
+    s = (await db.execute(
+        select(Settings).where(Settings.dealership_id == dealership_id).limit(1)
+    )).scalar_one_or_none()
+    if not s:
+        # Create settings for this dealership
+        s = Settings(dealership_id=dealership_id)
+        db.add(s)
+    for f in ["unit_comm_discount_le_200","unit_comm_discount_gt_200","permaplate","nitro_fill","pulse",
+              "finance_non_subvented","warranty","tire_wheel","hourly_rate_ny_offset",
+              "new_volume_bonus_15_16","new_volume_bonus_17_18","new_volume_bonus_19_20",
+              "new_volume_bonus_21_24","new_volume_bonus_25_plus",
+              "used_volume_bonus_8_10","used_volume_bonus_11_12","used_volume_bonus_13_plus",
+              "spot_bonus_5_9","spot_bonus_10_12","spot_bonus_13_plus",
+              "quarterly_bonus_threshold_units","quarterly_bonus_amount"]:
+        setattr(s, f, locals()[f])
+    await db.commit()
+    return RedirectResponse(url=f"/admin/dealership/{dealership_id}", status_code=303)
+
+
+@app.post("/admin/dealership/{dealership_id}/approve")
+async def admin_approve_dealership(dealership_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Approve a pending dealership — set is_active=True and subscription to 'active'."""
+    _require_super_admin(request)
+    d = (await db.execute(select(Dealership).where(Dealership.id == dealership_id))).scalar_one_or_none()
+    if d:
+        d.is_active = True
+        if d.subscription_status == "pending":
+            d.subscription_status = "active"
+        await db.commit()
+    return RedirectResponse(url="/admin", status_code=303)

@@ -4,13 +4,19 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
-  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
-  <meta name="theme-color" content="#ffffff"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="theme-color" content="#0f172a"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <link rel="manifest" href="/static/manifest.json"/>
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png"/>
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png"/>
   <!-- Resource hints: resolve CDN DNS before the browser needs the file -->
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
   <title>{{ title or "Commission Tracker" }}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind CSS: version-pinned CDN for production use -->
+  <!-- For maximum performance, compile with: npx tailwindcss -i input.css -o static/tw.css --minify -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <style>
     @media(max-width:640px){.nav-links{display:none}.nav-links.open{display:flex;flex-direction:column;position:absolute;top:100%;left:0;right:0;background:white;border-bottom:1px solid #e2e8f0;padding:8px 16px 12px;gap:4px;z-index:50;box-shadow:0 4px 6px -1px rgb(0 0 0/.1)}.nav-links.open a,.nav-links.open button{padding:10px 12px}.hamburger{display:flex!important}}
     @media(pointer:coarse){button,a,input[type="checkbox"],select{min-height:44px}.touch-row td{padding-top:12px;padding-bottom:12px}}
@@ -43,6 +49,27 @@
           <span class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{{ overdue_reminders }}</span>
           {%- endif %}
         </a>
+        {% if request.state.role is defined and request.state.role in ('admin', 'manager') %}
+        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/team') else 'text-slate-600 hover:bg-slate-100' }}" href="/team">
+          Team
+        </a>
+        {% endif %}
+        {% if request.state.is_super_admin is defined and request.state.is_super_admin %}
+        <form method="post" action="/admin/toggle" class="inline">
+          {% if request.state.admin_mode is defined and request.state.admin_mode %}
+          <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-violet-700 text-white' if path.startswith('/admin') else 'text-violet-600 hover:bg-violet-50' }}" href="/admin">
+            Platform
+          </a>
+          <button type="submit" class="text-[10px] px-2 py-1 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 transition ml-1" title="Switch to salesperson view">
+            Exit Admin
+          </button>
+          {% else %}
+          <button type="submit" class="text-[10px] px-2 py-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 transition" title="Switch to platform admin view">
+            Admin Mode
+          </button>
+          {% endif %}
+        </form>
+        {% endif %}
         <div class="w-px h-5 bg-slate-200 mx-1 hidden sm:block"></div>
         <a class="inline-flex items-center px-3 py-1.5 text-sm rounded border border-slate-200 text-slate-600 hover:bg-slate-50 transition gap-1" href="/import">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
@@ -183,17 +210,16 @@
 
     window.extendSession = async function() {
       try {
-        // hitting any authenticated endpoint refreshes nothing server-side,
-        // but we can reload the page which resets the session check cycle
-        const res = await fetch('/api/session-status');
+        // Actually extend the session in the database
+        const res = await fetch('/api/session-extend', {method: 'POST'});
         const data = await res.json();
-        if (data.authenticated && data.seconds_remaining > WARN_AT) {
+        if (data.ok && data.seconds_remaining > WARN_AT) {
           document.getElementById('sessionWarning').classList.add('hidden');
           clearInterval(countdownTimer);
           warningShown = false;
         } else {
-          // Session truly expiring — reload to trigger a proper re-auth
-          window.location.reload();
+          // Session truly expired — redirect to login
+          window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
         }
       } catch { window.location.reload(); }
     };
@@ -225,5 +251,12 @@
   <main class="{{ 'p-4' if (embed|default(false)) else 'max-w-6xl mx-auto px-4 py-6' }}">
     {% block content %}{% endblock %}
   </main>
+
+  <script>
+  // Register PWA service worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+  }
+  </script>
 </body>
 </html>

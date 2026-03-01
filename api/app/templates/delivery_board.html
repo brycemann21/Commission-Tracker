@@ -8,7 +8,7 @@
   </div>
 </div>
 
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4" style="min-height: 400px;">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4" style="min-height: 400px;">
 
   {# ── PREP Column ── #}
   <div>
@@ -98,7 +98,7 @@
     </div>
     <div class="space-y-3">
       {% for d in ready %}
-        <div class="bg-emerald-50 rounded-lg border-l-4 border-l-emerald-500 border border-emerald-200 p-4 shadow-sm">
+        <div data-deal="{{ d.id }}" class="bg-emerald-50 rounded-lg border-l-4 border-l-emerald-500 border border-emerald-200 p-4 shadow-sm">
           <div class="flex items-start justify-between mb-2">
             <div>
               <div class="font-semibold text-slate-900">{{ d.customer }}</div>
@@ -151,35 +151,6 @@
       {% if ready|length == 0 %}
         <div class="text-center py-8 text-sm text-slate-400 border-2 border-dashed border-emerald-200 rounded-lg">
           No vehicles ready yet
-        </div>
-      {% endif %}
-    </div>
-  </div>
-
-  {# ── DELIVERED Column ── #}
-  <div>
-    <div class="flex items-center gap-2 mb-3">
-      <div class="w-3 h-3 rounded-full bg-slate-400"></div>
-      <div class="text-sm font-bold text-slate-700 uppercase tracking-wide">Delivered</div>
-      <div class="text-xs text-slate-400 ml-1">({{ delivered|length }})</div>
-    </div>
-    <div class="space-y-3">
-      {% for d in delivered %}
-        <div class="bg-slate-50 rounded-lg border border-slate-200 p-4 opacity-75">
-          <div class="font-semibold text-slate-700">{{ d.customer }}</div>
-          <div class="text-xs text-slate-400 mt-0.5">#{{ d.stock_num }}{% if d.model %} · {{ d.model }}{% endif %}</div>
-          {% if d.delivered_date %}
-            <div class="text-xs text-slate-400 mt-2 flex items-center gap-1">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-              Delivered {{ d.delivered_date.strftime('%m/%d') }}
-            </div>
-          {% endif %}
-        </div>
-      {% endfor %}
-
-      {% if delivered|length == 0 %}
-        <div class="text-center py-8 text-sm text-slate-400 border-2 border-dashed border-slate-200 rounded-lg">
-          Recently delivered will show here
         </div>
       {% endif %}
     </div>

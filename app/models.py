@@ -25,6 +25,11 @@ class Dealership(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Google Places integration (Deploy 2)
+    google_place_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
     # Subscription fields (Phase 4 — Stripe integration)
     # Placeholder columns so we don't need another migration later
     stripe_customer_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -59,6 +64,8 @@ class User(Base):
     # Super admin: platform owner (you) — sits above all dealerships
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     # Verified: GM has confirmed this person works at the dealership
+    verified_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 # ════════════════════════════════════════════════
