@@ -1605,6 +1605,8 @@ async def mark_delivered(deal_id: int, request: Request, redirect: str | None = 
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
     if not deal: return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
     deal.status = "Delivered"; deal.delivered_date = today()
+    # Auto-clear from delivery board — delivered deals don't need to stay on it
+    deal.on_delivery_board = False; deal.gas_ready = False; deal.inspection_ready = False; deal.insurance_ready = False
     await db.commit()
     if "application/json" in request.headers.get("accept", ""):
         return JSONResponse({"ok": True, "status": "Delivered", "delivered_date": deal.delivered_date.isoformat()})
@@ -1649,13 +1651,8 @@ async def delivery_board(request: Request, db: AsyncSession = Depends(get_db)):
     )).scalars().all()
     prep = [d for d in board if not (d.gas_ready and d.inspection_ready and d.insurance_ready)]
     ready = [d for d in board if d.gas_ready and d.inspection_ready and d.insurance_ready]
-    week_ago = today() - timedelta(days=7)
-    delivered = (await db.execute(
-        select(Deal).where(Deal.user_id == user_id, Deal.on_delivery_board == True, Deal.status == "Delivered", Deal.delivered_date >= week_ago)
-        .order_by(Deal.delivered_date.desc())
-    )).scalars().all()
     user = await _user(request, db)
-    return templates.TemplateResponse("delivery_board.html", {"request": request, "user": user, "prep": prep, "ready": ready, "delivered": delivered, "total": len(prep)+len(ready), "overdue_reminders": await get_overdue_reminders(db, uid(request))})
+    return templates.TemplateResponse("delivery_board.html", {"request": request, "user": user, "prep": prep, "ready": ready, "total": len(prep)+len(ready), "overdue_reminders": await get_overdue_reminders(db, uid(request))})
 
 @app.post("/delivery/{deal_id}/toggle")
 async def delivery_toggle(deal_id: int, request: Request, field: str = Form(...), db: AsyncSession = Depends(get_db)):
@@ -1671,7 +1668,10 @@ async def delivery_toggle(deal_id: int, request: Request, field: str = Form(...)
 async def delivery_deliver(deal_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     deal = (await db.execute(select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request)))).scalar_one_or_none()
     if not deal: return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
-    deal.status = "Delivered"; deal.delivered_date = today(); await db.commit()
+    deal.status = "Delivered"; deal.delivered_date = today()
+    # Auto-clear from delivery board — no need to keep delivered deals on it
+    deal.on_delivery_board = False; deal.gas_ready = False; deal.inspection_ready = False; deal.insurance_ready = False
+    await db.commit()
     if "application/json" in request.headers.get("accept", ""):
         return JSONResponse({"ok": True})
     return RedirectResponse(url="/delivery", status_code=303)

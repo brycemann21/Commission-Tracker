@@ -604,7 +604,7 @@
     if (drop) drop.classList.add('hidden');
 
     var badge = document.getElementById('status-badge-' + dealId);
-    var prev = badge ? badge.dataset.status || badge.textContent.trim() : 'Pending';
+    var row = badge ? badge.closest('tr') : null;
 
     if (val === 'Scheduled') {
       openSchedModal(dealId, '', false);
@@ -617,15 +617,39 @@
               : null;
       if (url) {
         await fetch(url, {method:'POST', headers:{'Accept':'application/json'}});
+        // Remove the row with animation — deal is no longer pending
+        if (row) {
+          row.style.transition = 'opacity 0.25s, transform 0.2s';
+          row.style.opacity = '0';
+          row.style.transform = 'translateX(20px)';
+          setTimeout(function(){
+            row.remove();
+            _updatePendingCount(-1);
+          }, 250);
+        }
       } else {
+        // Just updating to Pending (no-op if already pending, but handles edge cases)
         await fetch('/deals/' + dealId + '/quick_update', {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({field:'status', value:val})
         });
+        // Update badge inline
+        if (badge) {
+          badge.textContent = val;
+          badge.className = 'inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold cursor-pointer hover:opacity-80 transition select-none bg-amber-100 text-amber-800';
+        }
       }
-      window.location.reload();
     } catch(e) {
       console.error(e);
+      window.location.reload();
+    }
+  }
+
+  function _updatePendingCount(delta) {
+    var countBadge = document.querySelector('h2 .text-slate-500');
+    if (countBadge) {
+      var cur = parseInt(countBadge.textContent.replace(/\D/g,'')) || 0;
+      countBadge.textContent = '(' + Math.max(0, cur + delta) + ')';
     }
   }
 
@@ -891,28 +915,57 @@ function closeDashSchedModal() {
 
 async function saveDashSched() {
   if (!_dashSchedDealId) return;
+  const dealId = _dashSchedDealId;
   const date = document.getElementById('dashSchedDate').value;
   const board = document.getElementById('dashSchedBoard').checked;
+  const saveBtn = document.querySelector('#dashSchedModal button[onclick="saveDashSched()"]');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
   try {
-    await fetch(`/deals/${_dashSchedDealId}/quick_update`, {
+    // Set status to Scheduled
+    await fetch(`/deals/${dealId}/quick_update`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ field: 'status', value: 'Scheduled' }),
     });
+    // Set the scheduled date
     if (date) {
-      await fetch(`/deals/${_dashSchedDealId}/quick_update`, {
+      await fetch(`/deals/${dealId}/quick_update`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ field: 'scheduled_date', value: date }),
       });
     }
+    // Push to delivery board if checked
     if (board) {
       const form = new FormData();
       form.append('next', window.location.href);
-      await fetch(`/delivery/${_dashSchedDealId}/push`, { method: 'POST', body: form });
+      await fetch(`/delivery/${dealId}/push`, { method: 'POST', body: form });
+    }
+    // Update badge inline
+    var badge = document.getElementById('status-badge-' + dealId);
+    if (badge) {
+      var dateLabel = '';
+      if (date) {
+        var parts = date.split('-');
+        dateLabel = ' ' + parseInt(parts[1]) + '/' + parseInt(parts[2]);
+      }
+      badge.textContent = 'Scheduled' + dateLabel;
+      badge.className = 'inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold cursor-pointer hover:opacity-80 transition select-none bg-blue-100 text-blue-800';
+      if (board) {
+        // Add a small board indicator
+        var cell = badge.closest('td');
+        if (cell && !cell.querySelector('.board-indicator')) {
+          var ind = document.createElement('span');
+          ind.className = 'board-indicator ml-1 text-[9px] text-indigo-500 font-medium';
+          ind.textContent = '📋';
+          ind.title = 'On delivery board';
+          badge.parentElement.appendChild(ind);
+        }
+      }
     }
     closeDashSchedModal();
-    window.location.reload();
   } catch(e) {
     alert('Failed to save. Please try again.');
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
   }
 }
 
