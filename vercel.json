@@ -6,12 +6,12 @@
       "use": "@vercel/python",
       "config": {
         "maxLambdaSize": "15mb",
-        "maxDuration": 30
+        "maxDuration": 10
       }
     }
   ],
   "routes": [
     { "src": "/(.*)", "dest": "api/index.py" }
   ],
-  "regions": ["iad1"]
+  "regions": ["pdx1"]
 }

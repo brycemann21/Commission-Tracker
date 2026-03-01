@@ -15,6 +15,8 @@ Sessions:
   - TTL: 30 days (remember me) or 24 hours (session only).
 
 Serverless optimizations applied:
+  - Module-level asyncpg connection POOL (reused across warm Lambda
+    invocations — eliminates ~100-300ms TCP+TLS per DB call).
   - Module-level httpx.AsyncClient with keep-alive (reused across warm
     Lambda invocations — skips DNS + TCP + TLS per Supabase call).
   - Module-level SSL context (avoid re-creating per DB connection).
@@ -271,16 +273,90 @@ async def get_or_create_user_from_supabase(
     await db.refresh(user)
     return user
 
-# ── Raw asyncpg connection helper ─────────────────────────────────────────────
+# ── asyncpg connection pool (module-level — reused across warm invocations) ──
+# Replaces the old _raw_pg_conn() which opened a NEW TCP+TLS connection on
+# every call (~100-300ms each). The pool keeps 1-5 warm connections that are
+# reused across requests within the same Lambda invocation.
+_pg_pool: asyncpg.Pool | None = None
+_pg_pool_dsn: str | None = None
+
+def _get_pg_dsn() -> str | None:
+    """Parse DATABASE_URL into a clean asyncpg-compatible DSN."""
+    raw = os.environ.get("DATABASE_URL", "").strip()
+    if not raw or "postgres" not in raw:
+        return None
+    # Strip query params (sslmode etc. — we handle SSL ourselves)
+    return raw.split("?")[0]
+
+async def _get_pg_pool() -> asyncpg.Pool | None:
+    """Get or create the module-level asyncpg connection pool.
+    
+    On first call (cold start), creates a pool with min_size=1 so one
+    connection is established immediately. On subsequent calls within the
+    same warm Lambda, returns the existing pool instantly.
+    """
+    global _pg_pool, _pg_pool_dsn
+    dsn = _get_pg_dsn()
+    if not dsn:
+        return None
+    if _pg_pool is not None and not _pg_pool._closed and _pg_pool_dsn == dsn:
+        return _pg_pool
+    try:
+        _pg_pool = await asyncpg.create_pool(
+            dsn=dsn,
+            ssl=_get_ssl_ctx(),
+            statement_cache_size=0,
+            min_size=1,        # Keep 1 warm connection ready
+            max_size=5,        # Cap for serverless (Supabase free tier = 60 total)
+            max_inactive_connection_lifetime=120,  # Drop idle conns after 2 min
+            command_timeout=10,
+        )
+        _pg_pool_dsn = dsn
+        return _pg_pool
+    except Exception as e:
+        logger.warning(f"pg pool creation failed: {e}")
+        return None
+
+async def _raw_pg_execute(query: str, *args) -> str | None:
+    """Execute a query via the pool. Returns the status string or None."""
+    pool = await _get_pg_pool()
+    if not pool:
+        return None
+    async with pool.acquire() as conn:
+        return await conn.execute(query, *args)
+
+async def _raw_pg_fetchrow(query: str, *args) -> asyncpg.Record | None:
+    """Fetch a single row via the pool. Returns the Record or None."""
+    pool = await _get_pg_pool()
+    if not pool:
+        return None
+    async with pool.acquire() as conn:
+        return await conn.fetchrow(query, *args)
+
+# Keep backward-compat alias for main.py startup migration (needs a raw conn)
 async def _raw_pg_conn() -> asyncpg.Connection | None:
-    raw_dsn = os.environ.get("DATABASE_URL", "").strip().split("?")[0]
-    if not raw_dsn or "postgres" not in raw_dsn:
+    """Get a raw connection from the pool for DDL/migration use.
+    
+    IMPORTANT: Caller must release via conn.close() or use as context manager.
+    For normal queries, prefer _raw_pg_execute/_raw_pg_fetchrow instead.
+    """
+    pool = await _get_pg_pool()
+    if not pool:
         return None
     try:
-        return await asyncpg.connect(dsn=raw_dsn, ssl=_get_ssl_ctx(), statement_cache_size=0)
+        return await pool.acquire()
     except Exception as e:
-        logger.warning(f"raw_pg_conn failed: {e}")
+        logger.warning(f"pool acquire failed: {e}")
         return None
+
+async def _release_pg_conn(conn) -> None:
+    """Release a connection back to the pool (instead of closing it)."""
+    pool = await _get_pg_pool()
+    if pool and conn:
+        try:
+            await pool.release(conn)
+        except Exception:
+            pass
 
 # ── DB-backed session management ──────────────────────────────────────────────
 async def create_session(
@@ -295,17 +371,13 @@ async def create_session(
     ua = (request.headers.get("user-agent") or "")[:256] if request else None
     ip = (request.client.host if request.client else None) if request else None
 
-    conn = await _raw_pg_conn()
-    if conn:
-        try:
-            await conn.execute(
-                """INSERT INTO user_sessions (token, user_id, created_at, expires_at, remember_me, user_agent, ip_address)
-                   VALUES ($1, $2, NOW(), $3, $4, $5, $6)""",
-                token, user_id, expires_at, remember_me, ua, ip
-            )
-        finally:
-            await conn.close()
-    else:
+    result = await _raw_pg_execute(
+        """INSERT INTO user_sessions (token, user_id, created_at, expires_at, remember_me, user_agent, ip_address)
+           VALUES ($1, $2, NOW(), $3, $4, $5, $6)""",
+        token, user_id, expires_at, remember_me, ua, ip
+    )
+    if result is None:
+        # Fallback to SQLAlchemy (SQLite or pool unavailable)
         db.add(UserSession(
             token=token, user_id=user_id, expires_at=expires_at,
             remember_me=remember_me, user_agent=ua, ip_address=ip,
@@ -325,21 +397,17 @@ async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -
     if cached is not None:
         return cached
 
-    conn = await _raw_pg_conn()
-    if conn:
-        try:
-            row = await conn.fetchrow(
-                "SELECT user_id FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
-                token
-            )
-            if row:
-                _cache_set(token, row["user_id"])
-                return row["user_id"]
-            return None
-        finally:
-            await conn.close()
-    else:
-        row = (
+    row = await _raw_pg_fetchrow(
+        "SELECT user_id FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
+        token
+    )
+    if row is not None:
+        _cache_set(token, row["user_id"])
+        return row["user_id"]
+
+    # Fallback to SQLAlchemy (SQLite or pool unavailable)
+    if db is not None:
+        sa_row = (
             await db.execute(
                 select(UserSession).where(
                     UserSession.token == token,
@@ -347,52 +415,41 @@ async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -
                 )
             )
         ).scalar_one_or_none()
-        if row:
-            _cache_set(token, row.user_id)
-            return row.user_id
-        return None
+        if sa_row:
+            _cache_set(token, sa_row.user_id)
+            return sa_row.user_id
+
+    return None
 
 
 async def destroy_session(db: AsyncSession, token: str | None):
     if not token:
         return
     _cache_delete(token)
-    conn = await _raw_pg_conn()
-    if conn:
-        try:
-            await conn.execute("DELETE FROM user_sessions WHERE token = $1", token)
-        finally:
-            await conn.close()
-    else:
+    result = await _raw_pg_execute("DELETE FROM user_sessions WHERE token = $1", token)
+    if result is None:
         await db.execute(delete(UserSession).where(UserSession.token == token))
         await db.commit()
 
 
 async def destroy_all_user_sessions(db: AsyncSession, user_id: int):
     _cache_delete_user(user_id)
-    conn = await _raw_pg_conn()
-    if conn:
-        try:
-            await conn.execute("DELETE FROM user_sessions WHERE user_id = $1", user_id)
-        finally:
-            await conn.close()
-    else:
+    result = await _raw_pg_execute("DELETE FROM user_sessions WHERE user_id = $1", user_id)
+    if result is None:
         await db.execute(delete(UserSession).where(UserSession.user_id == user_id))
         await db.commit()
 
 
 async def cleanup_expired_sessions(db: AsyncSession):
-    conn = await _raw_pg_conn()
-    if conn:
-        try:
+    pool = await _get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
             r1 = await conn.execute("DELETE FROM user_sessions WHERE expires_at <= NOW()")
             r2 = await conn.execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
             deleted = int(r1.split()[-1]) + int(r2.split()[-1])
             if deleted:
                 logger.info(f"Session cleanup: removed {deleted} expired row(s)")
             return deleted
-        finally:
-            await conn.close()
     else:
         result = await db.execute(
             delete(UserSession).where(UserSession.expires_at <= _utcnow())

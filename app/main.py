@@ -29,7 +29,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.pool import NullPool
 from sqlalchemy import select, func, or_, and_, text as sa_text
 
 from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder
@@ -74,8 +73,6 @@ if db_url.startswith("postgres://"):
 elif db_url.startswith("postgresql://") and "+asyncpg" not in db_url:
     db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-import asyncpg as _asyncpg
-
 connect_args = {}
 _is_pg = "asyncpg" in db_url
 _ssl_ctx = None
@@ -94,7 +91,10 @@ if _is_pg:
 engine = create_async_engine(
     db_url, echo=False, future=True,
     connect_args=connect_args,
-    poolclass=NullPool,
+    pool_size=2,           # Keep 2 warm connections
+    max_overflow=3,        # Allow up to 5 total under burst
+    pool_recycle=120,      # Recycle connections every 2 min (serverless-friendly)
+    pool_pre_ping=True,    # Verify connection is alive before use
 )
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -141,6 +141,11 @@ async def lifespan(application: FastAPI):
     yield
 
 app = FastAPI(title="Commission Tracker", lifespan=lifespan)
+
+# ── GZip compression — reduces HTML/JSON payloads by ~70% ──
+from fastapi.middleware.gzip import GZipMiddleware
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
 templates.env.filters["md"] = lambda v: f"{v.month}/{v.day}" if v else ""
@@ -291,17 +296,14 @@ async def _run_startup_migrations():
         return
 
     # PostgreSQL (Supabase): use raw asyncpg connection for DDL
-    # Parse the DB URL to get asyncpg-compatible DSN
-    raw_dsn = DATABASE_URL.strip()
-    # Strip query params
-    if "?" in raw_dsn:
-        raw_dsn = raw_dsn.split("?")[0]
+    # Acquire a connection from the shared pool (initializes pool on cold start)
+    from .auth import _get_pg_pool, _release_pg_conn
+    pool = await _get_pg_pool()
+    if not pool:
+        logger.error("Failed to create asyncpg pool for migrations")
+        return
 
-    conn = await _asyncpg.connect(
-        dsn=raw_dsn,
-        ssl=_ssl_ctx,
-        statement_cache_size=0,
-    )
+    conn = await pool.acquire()
     try:
         # Rename profiles→users if needed (from previous deploy)
         try:
@@ -550,7 +552,7 @@ async def _run_startup_migrations():
             await conn.execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
         except Exception as e:
             pass
-        await conn.close()
+        await pool.release(conn)
 
 
 
@@ -566,14 +568,9 @@ async def maybe_cleanup_sessions():
     if random.randint(1, 100) != 1:
         return
     try:
-        from .auth import _raw_pg_conn
-        conn = await _raw_pg_conn()
-        if conn:
-            try:
-                await conn.execute("DELETE FROM user_sessions WHERE expires_at <= NOW()")
-                await conn.execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
-            finally:
-                await conn.close()
+        from .auth import _raw_pg_execute
+        await _raw_pg_execute("DELETE FROM user_sessions WHERE expires_at <= NOW()")
+        await _raw_pg_execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
     except Exception as e:
         logger.warning(f"Session cleanup error: {e}")
 
@@ -1034,23 +1031,17 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 @app.get("/api/session-status")
 async def session_status(request: Request):
     """Returns seconds remaining on current session — used by timeout warning."""
-    from .auth import _raw_pg_conn
+    from .auth import _raw_pg_fetchrow
     token = get_session_token(request)
     if not token:
         return JSONResponse({"seconds_remaining": 0, "authenticated": False})
     if not _is_pg:
         return JSONResponse({"seconds_remaining": 86400, "authenticated": True, "remember_me": True})
     try:
-        conn = await _raw_pg_conn()
-        if not conn:
-            return JSONResponse({"seconds_remaining": 86400, "authenticated": True, "remember_me": False})
-        try:
-            row = await conn.fetchrow(
-                "SELECT expires_at, remember_me FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
-                token
-            )
-        finally:
-            await conn.close()
+        row = await _raw_pg_fetchrow(
+            "SELECT expires_at, remember_me FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
+            token
+        )
         if not row:
             return JSONResponse({"seconds_remaining": 0, "authenticated": False})
         delta = (row["expires_at"] - _utcnow()).total_seconds()
@@ -1067,7 +1058,7 @@ async def session_status(request: Request):
 @app.post("/api/session-extend")
 async def session_extend(request: Request):
     """Actually extends the current session's expiry by its original TTL."""
-    from .auth import _raw_pg_conn, SESSION_TTL_SHORT, SESSION_TTL_REMEMBER, _cache_set
+    from .auth import _raw_pg_fetchrow, _raw_pg_execute, SESSION_TTL_SHORT, SESSION_TTL_REMEMBER, _cache_set
     token = get_session_token(request)
     if not token:
         return JSONResponse({"ok": False, "error": "No session"}, status_code=401)
@@ -1076,32 +1067,26 @@ async def session_extend(request: Request):
         return JSONResponse({"ok": True, "seconds_remaining": 86400})
 
     try:
-        conn = await _raw_pg_conn()
-        if not conn:
-            return JSONResponse({"ok": False, "error": "DB unavailable"}, status_code=503)
-        try:
-            row = await conn.fetchrow(
-                "SELECT user_id, remember_me FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
-                token
-            )
-            if not row:
-                return JSONResponse({"ok": False, "error": "Session expired"}, status_code=401)
+        row = await _raw_pg_fetchrow(
+            "SELECT user_id, remember_me FROM user_sessions WHERE token = $1 AND expires_at > NOW()",
+            token
+        )
+        if not row:
+            return JSONResponse({"ok": False, "error": "Session expired"}, status_code=401)
 
-            ttl = SESSION_TTL_REMEMBER if row["remember_me"] else SESSION_TTL_SHORT
-            new_expires = _utcnow() + ttl
-            await conn.execute(
-                "UPDATE user_sessions SET expires_at = $1 WHERE token = $2",
-                new_expires, token
-            )
-            # Update the in-memory cache too
-            _cache_set(token, row["user_id"])
+        ttl = SESSION_TTL_REMEMBER if row["remember_me"] else SESSION_TTL_SHORT
+        new_expires = _utcnow() + ttl
+        await _raw_pg_execute(
+            "UPDATE user_sessions SET expires_at = $1 WHERE token = $2",
+            new_expires, token
+        )
+        # Update the in-memory cache too
+        _cache_set(token, row["user_id"])
 
-            return JSONResponse({
-                "ok": True,
-                "seconds_remaining": int(ttl.total_seconds()),
-            })
-        finally:
-            await conn.close()
+        return JSONResponse({
+            "ok": True,
+            "seconds_remaining": int(ttl.total_seconds()),
+        })
     except Exception as e:
         logger.warning(f"session_extend error: {e}")
         return JSONResponse({"ok": False, "error": "Internal error"}, status_code=500)
