@@ -3005,24 +3005,37 @@ async def team_remove_member(
     User keeps their account but is unassigned from the dealership."""
     _require_admin(request)
     if user_id == uid(request):
-        return RedirectResponse(url="/team", status_code=303)
+        return RedirectResponse(url="/team?tab=members", status_code=303)
     d_id = user_dealership_id(request)
     target = (await db.execute(
         select(User).where(User.id == user_id, User.dealership_id == d_id)
     )).scalar_one_or_none()
     if target:
-        target.dealership_id = None
-        target.role = "salesperson"
-        target.is_verified = False
-        target.verified_by = None
-        target.verified_at = None
-        await db.commit()
-        # Clear their session cache
+        logger.info(f"Removing user {user_id} ({target.display_name}) from dealership {d_id}")
+        # Use raw SQL to guarantee the update persists
+        from .auth import _raw_pg_execute
+        result = await _raw_pg_execute(
+            "UPDATE users SET dealership_id = NULL, role = 'salesperson', "
+            "is_verified = FALSE, verified_by = NULL, verified_at = NULL "
+            "WHERE id = $1", user_id
+        )
+        if result is None:
+            # Fallback to SQLAlchemy
+            target.dealership_id = None
+            target.role = "salesperson"
+            target.is_verified = False
+            target.verified_by = None
+            target.verified_at = None
+            await db.commit()
+        # Destroy ALL their sessions in DB so they're forced to re-login
+        await destroy_all_user_sessions(db, user_id)
+        # Also clear local cache
         from .auth import _cache_delete_user
         _cache_delete_user(user_id)
-        # Clear their session cache so they pick up the new dealership on next request
-        from .auth import _cache_delete_user
-        _cache_delete_user(user_id)
+        logger.info(f"User {user_id} removed and sessions destroyed")
+    return RedirectResponse(url="/team?tab=members", status_code=303)
+
+
     return RedirectResponse(url="/team", status_code=303)
     return RedirectResponse(url="/team", status_code=303)
     return RedirectResponse(url="/team", status_code=303)
