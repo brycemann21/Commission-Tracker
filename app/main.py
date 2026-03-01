@@ -16,6 +16,11 @@ import traceback
 import urllib.parse
 from datetime import date, datetime, timedelta, timezone
 
+
+def _utcnow() -> datetime:
+    """Naive UTC datetime — required by asyncpg for TIMESTAMP (not TIMESTAMPTZ) columns."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Form, Depends, UploadFile, File
@@ -143,9 +148,8 @@ templates.env.globals["today"] = today
 templates.env.globals["current_month"] = lambda: today().strftime("%Y-%m")
 templates.env.globals["csrf_field_name"] = CSRF_FORM_FIELD
 
-def _csrf_hidden(request: Request) -> str:
+def _csrf_hidden(token: str) -> str:
     """Return an HTML hidden input for CSRF protection."""
-    token = request.cookies.get(CSRF_COOKIE, "")
     return f'<input type="hidden" name="{CSRF_FORM_FIELD}" value="{token}"/>'
 
 
@@ -156,8 +160,11 @@ def _csrf_template_response(name, context, **kwargs):
     """Wrapper that injects csrf_token into every template context automatically."""
     request = context.get("request")
     if request:
-        context["csrf_token"] = request.cookies.get(CSRF_COOKIE, "")
-        context["csrf_hidden"] = _csrf_hidden(request)
+        token = request.cookies.get(CSRF_COOKIE) or _generate_csrf_token()
+        context["csrf_token"] = token
+        context["csrf_hidden"] = _csrf_hidden(token)
+        # Store on request.state so the CSRF middleware can set the matching cookie
+        request.state._csrf_generated = token
     return _original_template_response(name, context, **kwargs)
 
 templates.TemplateResponse = _csrf_template_response
@@ -200,11 +207,12 @@ async def csrf_middleware(request: Request, call_next):
                 status_code=403,
             )
     response = await call_next(request)
-    # Ensure CSRF cookie is always set
+    # Ensure CSRF cookie is always set — use the same token the form used
     if not request.cookies.get(CSRF_COOKIE):
+        token = getattr(request.state, "_csrf_generated", None) or _generate_csrf_token()
         is_secure = not os.environ.get("DATABASE_URL", "").startswith("sqlite")
         response.set_cookie(
-            CSRF_COOKIE, _generate_csrf_token(),
+            CSRF_COOKIE, token,
             httponly=False, samesite="lax", secure=is_secure,
             max_age=60 * 60 * 24,
         )
@@ -836,7 +844,7 @@ async def register_post(
             display_name=(display_name.strip() or uname),
             password_hash=pw_hash,
             password_salt=pw_salt,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=_utcnow().isoformat(),
         )
         db.add(user)
         await db.commit()
@@ -1045,7 +1053,7 @@ async def session_status(request: Request):
             await conn.close()
         if not row:
             return JSONResponse({"seconds_remaining": 0, "authenticated": False})
-        delta = (row["expires_at"].replace(tzinfo=None) - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds()
+        delta = (row["expires_at"] - _utcnow()).total_seconds()
         return JSONResponse({
             "seconds_remaining": max(0, int(delta)),
             "authenticated": True,
@@ -1080,7 +1088,7 @@ async def session_extend(request: Request):
                 return JSONResponse({"ok": False, "error": "Session expired"}, status_code=401)
 
             ttl = SESSION_TTL_REMEMBER if row["remember_me"] else SESSION_TTL_SHORT
-            new_expires = datetime.now(timezone.utc) + ttl
+            new_expires = _utcnow() + ttl
             await conn.execute(
                 "UPDATE user_sessions SET expires_at = $1 WHERE token = $2",
                 new_expires, token
@@ -2041,7 +2049,7 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
     headers, rows = _find_header_row(text)
     mapping = _smart_map_columns(headers)
 
-    import_batch_id = f"imp_{secrets.token_hex(8)}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    import_batch_id = f"imp_{secrets.token_hex(8)}_{_utcnow().strftime('%Y%m%d%H%M%S')}"
     imported = skipped = 0
     errors = []
 

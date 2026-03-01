@@ -17,7 +17,7 @@
 </div>
 
 <form id="dealForm" class="bg-white rounded border border-slate-200 p-4" method="post" action="/deals/save">
-        {{ csrf_hidden }}
+        {{ csrf_hidden|safe }}
   <input type="hidden" name="next" value="{{ next_url or '' }}" />
   {% if deal %}<input type="hidden" name="deal_id" value="{{ deal.id }}">{% endif %}
 
@@ -181,7 +181,7 @@
     <a class="px-4 py-2 rounded border" href="/deals">Cancel</a>
     {% if deal %}
       <form method="post" action="/deals/{{ deal.id }}/delete" class="ml-auto">
-        {{ csrf_hidden }}
+        {{ csrf_hidden|safe }}
         <button class="px-4 py-2 rounded bg-rose-600 text-white" formmethod="post" formaction="/deals/{{ deal.id }}/delete">Delete</button>
       </form>
     {% endif %}

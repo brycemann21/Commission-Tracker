@@ -74,7 +74,7 @@
       <!-- ── SIGN IN ── -->
       {% if mode == "login" %}
       <form method="POST" action="/login" class="space-y-4">
-        {{ csrf_hidden }}
+        {{ csrf_hidden|safe }}
         <input type="hidden" name="next" value="{{ next }}"/>
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">
@@ -112,7 +112,7 @@
       <!-- ── CREATE ACCOUNT ── -->
       {% elif mode == "register" %}
       <form method="POST" action="/register" class="space-y-4">
-        {{ csrf_hidden }}
+        {{ csrf_hidden|safe }}
         {% if supabase_enabled %}
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">Email</label>
@@ -155,7 +155,7 @@
       <!-- ── FORGOT PASSWORD ── -->
       {% elif mode == "forgot" %}
       <form method="POST" action="/forgot-password" class="space-y-4">
-        {{ csrf_hidden }}
+        {{ csrf_hidden|safe }}
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">Email address</label>
           <input name="email" type="email" required autocomplete="email"
@@ -198,7 +198,7 @@
         });
       </script>
       <form method="POST" action="/auth/reset-confirm" class="space-y-4">
-        {{ csrf_hidden }}
+        {{ csrf_hidden|safe }}
         <input type="hidden" name="access_token" id="access_token_field" value="{{ access_token | default('') }}"/>
         <input type="hidden" name="token_hash" value="{{ token_hash | default('') }}"/>
         <input type="hidden" name="token" value="{{ token | default('') }}"/>

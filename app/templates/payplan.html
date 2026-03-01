@@ -8,7 +8,7 @@
 </div>
 
 <form method="post" action="/payplan" class="space-y-6">
-        {{ csrf_hidden }}
+        {{ csrf_hidden|safe }}
 
   <!-- Core per-deal values -->
   <div class="bg-white rounded border border-slate-200 p-4">

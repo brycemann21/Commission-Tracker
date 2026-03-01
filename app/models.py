@@ -2,6 +2,10 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import String, Integer, Float, Date, Boolean, Text, DateTime
 from datetime import datetime, timezone
 
+def _utcnow() -> datetime:
+    """Naive UTC now — for TIMESTAMP columns (not TIMESTAMPTZ)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 class Base(DeclarativeBase):
     pass
 
@@ -23,7 +27,7 @@ class UserSession(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     token: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     remember_me: Mapped[bool] = mapped_column(Boolean, default=False)
     user_agent: Mapped[str | None] = mapped_column(String(256), nullable=True)
@@ -35,7 +39,7 @@ class PasswordResetToken(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     token: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     used: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -124,4 +128,4 @@ class Reminder(Base):
     body: Mapped[str] = mapped_column(Text, default="")
     due_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     is_done: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

@@ -31,6 +31,15 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+def _utcnow() -> datetime:
+    """Return current UTC time as a naive datetime.
+    
+    The DB columns use TIMESTAMP (not TIMESTAMPTZ), and asyncpg requires
+    naive datetimes for TIMESTAMP columns. datetime.utcnow() is deprecated
+    in Python 3.12, so we use this wrapper instead.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 import asyncpg
 import httpx
 from fastapi import Request
@@ -249,7 +258,7 @@ async def get_or_create_user_from_supabase(
             display_name=display_name or username,
             supabase_id=sb_id, email_verified=email_verified,
             password_hash="", password_salt="",
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=_utcnow().isoformat(),
         )
         db.add(user)
     else:
@@ -282,7 +291,7 @@ async def create_session(
 ) -> str:
     token = secrets.token_urlsafe(64)
     ttl = SESSION_TTL_REMEMBER if remember_me else SESSION_TTL_SHORT
-    expires_at = datetime.now(timezone.utc) + ttl
+    expires_at = _utcnow() + ttl
     ua = (request.headers.get("user-agent") or "")[:256] if request else None
     ip = (request.client.host if request.client else None) if request else None
 
@@ -334,7 +343,7 @@ async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -
             await db.execute(
                 select(UserSession).where(
                     UserSession.token == token,
-                    UserSession.expires_at > datetime.now(timezone.utc),
+                    UserSession.expires_at > _utcnow(),
                 )
             )
         ).scalar_one_or_none()
@@ -386,7 +395,7 @@ async def cleanup_expired_sessions(db: AsyncSession):
             await conn.close()
     else:
         result = await db.execute(
-            delete(UserSession).where(UserSession.expires_at <= datetime.now(timezone.utc))
+            delete(UserSession).where(UserSession.expires_at <= _utcnow())
         )
         await db.commit()
         return result.rowcount
@@ -396,7 +405,7 @@ async def create_reset_token(db: AsyncSession, user_id: int) -> str:
     token = secrets.token_urlsafe(48)
     db.add(PasswordResetToken(
         token=token, user_id=user_id,
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        expires_at=_utcnow() + timedelta(hours=1),
     ))
     await db.commit()
     return token
@@ -408,7 +417,7 @@ async def validate_reset_token(db: AsyncSession, token: str) -> int | None:
             select(PasswordResetToken).where(
                 PasswordResetToken.token == token,
                 PasswordResetToken.used == False,
-                PasswordResetToken.expires_at > datetime.now(timezone.utc),
+                PasswordResetToken.expires_at > _utcnow(),
             )
         )
     ).scalar_one_or_none()
