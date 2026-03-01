@@ -121,6 +121,19 @@ async def get_db():
 PUBLIC_PATHS = {"/login", "/register", "/forgot-password", "/auth/reset-confirm"}
 
 @app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Cache static assets aggressively
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return response
+
+
+@app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
     if path.startswith("/static"):
@@ -460,35 +473,6 @@ async def maybe_cleanup_sessions():
                 await conn.close()
     except Exception as e:
         logger.warning(f"Session cleanup error: {e}")
-
-
-@app.get("/api/cron/cleanup")
-async def cron_cleanup(request: Request):
-    """
-    Called nightly by Vercel Cron (see vercel.json).
-    Cleans up expired sessions and reset tokens.
-    Only accepts requests from Vercel's cron infrastructure.
-    """
-    from fastapi.responses import JSONResponse
-    # Vercel sets this header on cron invocations — reject anything else
-    if request.headers.get("x-vercel-cron") != "1":
-        return JSONResponse({"error": "Forbidden"}, status_code=403)
-    try:
-        from .auth import _raw_pg_conn
-        conn = await _raw_pg_conn()
-        if not conn:
-            return JSONResponse({"ok": True, "note": "SQLite — no cleanup needed"})
-        try:
-            r1 = await conn.execute("DELETE FROM user_sessions WHERE expires_at <= NOW()")
-            r2 = await conn.execute("DELETE FROM password_reset_tokens WHERE expires_at <= NOW()")
-            deleted = int(r1.split()[-1]) + int(r2.split()[-1])
-        finally:
-            await conn.close()
-        logger.info(f"Cron cleanup: removed {deleted} expired row(s)")
-        return JSONResponse({"ok": True, "deleted": deleted})
-    except Exception as e:
-        logger.error(f"Cron cleanup error: {e}")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 # ─── Utility functions ───
