@@ -237,7 +237,7 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
             {% elif d.status == 'Dead' %}bg-slate-100 text-slate-500
             {% elif d.status == 'Scheduled' %}bg-blue-100 text-blue-800
             {% else %}bg-amber-100 text-amber-800{% endif %}">
-            {{ d.status }}
+            {{ d.status }}{% if d.status == 'Scheduled' and d.scheduled_date %} {{ d.scheduled_date.strftime('%-m/%-d') }}{% endif %}
           </span>
         </span>
       </td>

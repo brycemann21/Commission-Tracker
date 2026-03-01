@@ -287,7 +287,7 @@
           <th class="text-left p-2">Stock #</th>
           <th class="text-left p-2">Model</th>
           <th class="text-left p-2">Notes</th>
-          <th class="p-2"></th>
+          <th class="text-left p-2">Status</th>
         </tr>
       </thead>
       <tbody>
@@ -327,14 +327,27 @@
               <span class="editable-p truncate block" data-field="notes" data-id="{{ d.id }}" data-type="text"
                     data-value="{{ (d.notes or '')|e }}" title="{{ d.notes or '' }}">{{ d.notes or '—' }}</span>
             </td>
-            <td class="p-2 text-right whitespace-nowrap">
-              <select onchange="pendingStatusChange(this, {{ d.id }})"
-                      class="text-xs border border-slate-300 rounded px-2 py-1 bg-white focus:outline-none focus:border-indigo-500 cursor-pointer">
-                <option value="Pending" {% if d.status == 'Pending' %}selected{% endif %}>Pending</option>
-                <option value="Scheduled" {% if d.status == 'Scheduled' %}selected{% endif %}>Scheduled</option>
-                <option value="Delivered" {% if d.status == 'Delivered' %}selected{% endif %}>Delivered</option>
-                <option value="Dead" {% if d.status == 'Dead' %}selected{% endif %}>Dead</option>
-              </select>
+            <td class="p-2 whitespace-nowrap relative" id="status-cell-{{ d.id }}">
+              <div class="flex items-center gap-1.5">
+                <span id="status-badge-{{ d.id }}" class="inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold
+                  {% if d.status == 'Delivered' %}bg-emerald-100 text-emerald-800
+                  {% elif d.status == 'Dead' %}bg-slate-100 text-slate-500
+                  {% elif d.status == 'Scheduled' %}bg-blue-100 text-blue-800
+                  {% else %}bg-amber-100 text-amber-800{% endif %}
+                  cursor-pointer hover:opacity-80 transition select-none"
+                  onclick="togglePendingStatusDropdown({{ d.id }})">
+                  {{ d.status }}{% if d.status == 'Scheduled' and d.scheduled_date %} {{ d.scheduled_date.strftime('%-m/%-d') }}{% endif %}
+                </span>
+              </div>
+              <div id="status-drop-{{ d.id }}" class="hidden absolute z-20 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[120px]">
+                {% for st in ['Pending', 'Scheduled', 'Delivered', 'Dead'] %}
+                <button type="button" onclick="pendingStatusChange('{{ st }}', {{ d.id }})"
+                        class="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 transition
+                        {% if d.status == st %}font-semibold{% endif %}">
+                  {{ st }}
+                </button>
+                {% endfor %}
+              </div>
             </td>
           </tr>
         {% endfor %}
@@ -566,33 +579,51 @@
 {# ═══════ SCRIPTS ═══════ #}
 <script>
   // ── Quick fetch actions (no page reload) ──
-  async function pendingStatusChange(sel, dealId) {
-    const val = sel.value;
-    const prev = sel.dataset.prev || sel.querySelector('option[selected]')?.value || 'Pending';
+  function togglePendingStatusDropdown(dealId) {
+    // Close all other open dropdowns first
+    document.querySelectorAll('[id^="status-drop-"]').forEach(function(d) {
+      if (d.id !== 'status-drop-' + dealId) d.classList.add('hidden');
+    });
+    var drop = document.getElementById('status-drop-' + dealId);
+    if (drop) drop.classList.toggle('hidden');
+  }
+
+  // Close dropdowns when clicking outside
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('[id^="status-cell-"]')) {
+      document.querySelectorAll('[id^="status-drop-"]').forEach(function(d){ d.classList.add('hidden'); });
+    }
+  });
+
+  async function pendingStatusChange(val, dealId) {
+    // Close dropdown
+    var drop = document.getElementById('status-drop-' + dealId);
+    if (drop) drop.classList.add('hidden');
+
+    var badge = document.getElementById('status-badge-' + dealId);
+    var prev = badge ? badge.dataset.status || badge.textContent.trim() : 'Pending';
+
     if (val === 'Scheduled') {
-      // Revert select visually — modal will handle the save
-      sel.value = prev;
       openSchedModal(dealId, '', false);
       return;
     }
-    sel.disabled = true;
+
     try {
-      const url = val === 'Delivered' ? `/deals/${dealId}/mark_delivered`
-                : val === 'Dead'      ? `/deals/${dealId}/mark_dead`
-                : null;
+      var url = val === 'Delivered' ? '/deals/' + dealId + '/mark_delivered'
+              : val === 'Dead'      ? '/deals/' + dealId + '/mark_dead'
+              : null;
       if (url) {
-        await fetch(url, { method: 'POST' });
+        await fetch(url, {method:'POST', headers:{'Accept':'application/json'}});
       } else {
-        await fetch(`/deals/${dealId}/quick_update`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ field: 'status', value: val }),
+        await fetch('/deals/' + dealId + '/quick_update', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({field:'status', value:val})
         });
       }
-      sel.dataset.prev = val;
       window.location.reload();
-    } catch {
-      sel.value = prev;
-    } finally { sel.disabled = false; }
+    } catch(e) {
+      console.error(e);
+    }
   }
 
   async function quickAction(btn, url) {
@@ -844,9 +875,10 @@ let _dashSchedDealId = null;
 
 function openSchedModal(dealId, currentDate, onBoard) {
   _dashSchedDealId = dealId;
-  document.getElementById('dashSchedDate').value = currentDate || '';
+  document.getElementById('dashSchedDate').value = currentDate || new Date().toISOString().split('T')[0];
   document.getElementById('dashSchedBoard').checked = onBoard || false;
   document.getElementById('dashSchedModal').classList.remove('hidden');
+  setTimeout(function(){ document.getElementById('dashSchedDate').focus(); }, 50);
 }
 
 function closeDashSchedModal() {
