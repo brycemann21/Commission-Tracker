@@ -222,7 +222,7 @@
         </span>
       </td>
 
-      <td class="p-2 text-right no-label" style="min-width:110px">
+      <td class="p-2 text-right no-label" style="min-width:80px">
         <a href="/deals/{{ d.id }}/edit"
            class="text-[11px] px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition whitespace-nowrap inline-block mb-0.5">
           ✎ Edit
@@ -235,13 +235,6 @@
           {% else %}bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100{% endif %}">
           {{ "✓ Paid" if d.is_paid else "Pay?" }}
         </button>
-        {% if d.status in ('Pending', 'Scheduled') %}
-        <button type="button"
-          onclick="openScheduleModal({{ d.id }}, '{{ d.scheduled_date.isoformat() if d.scheduled_date else '' }}', {{ 'true' if d.on_delivery_board else 'false' }})"
-          class="text-[11px] px-1.5 py-0.5 rounded border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition whitespace-nowrap mt-0.5 block">
-          📅 Schedule
-        </button>
-        {% endif %}
       </td>
     </tr>
     {% endfor %}
@@ -367,7 +360,18 @@
       if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
       if (e.key === 'Escape') { e.preventDefault(); cancelEdit(span); }
     });
-    if (type === 'select') input.addEventListener('change', () => input.blur());
+    if (type === 'select') {
+      input.addEventListener('change', () => {
+        // Intercept "Scheduled" — open calendar modal instead of saving
+        if (field === 'status' && input.value === 'Scheduled') {
+          input.removeEventListener('blur', commit);
+          cancelEdit(span);
+          openScheduleModal(parseInt(id), '', false);
+          return;
+        }
+        input.blur();
+      });
+    }
   }
 
   document.addEventListener('click', e => {
@@ -524,25 +528,5 @@ const _origStartEdit = window._startEditFn;
 document.addEventListener('click', e => {
   // handled by the existing inline edit system — we patch the select change
 }, true);
-
-// Patch: when status select changes to "Scheduled", open the modal instead
-document.addEventListener('change', e => {
-  const sel = e.target;
-  if (sel.tagName === 'SELECT' && sel.value === 'Scheduled') {
-    const span = sel.closest('.editable');
-    if (span && span.dataset.field === 'status') {
-      const dealId = parseInt(span.dataset.id);
-      // Cancel the inline edit
-      if (sel._blurHandler) sel.removeEventListener('blur', sel._blurHandler);
-      // Restore original display
-      span.innerHTML = span._orig || span.innerHTML;
-      span.classList.remove('editing');
-      // Open our modal
-      openScheduleModal(dealId, '', false);
-      e.stopPropagation();
-    }
-  }
-}, true);
-</script>
 
 {% endblock %}
