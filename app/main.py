@@ -94,6 +94,41 @@ engine = create_async_engine(
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
+# ─── CSRF Protection (double-submit cookie pattern) ───
+# On every page load, set a random CSRF token as a cookie + inject into forms as a hidden field.
+# On every POST, verify the form value matches the cookie value.
+# Since an attacker can't read our cookie from their domain, they can't forge the hidden field.
+
+CSRF_COOKIE = "ct_csrf"
+CSRF_FORM_FIELD = "csrf_token"
+
+def _generate_csrf_token() -> str:
+    return secrets.token_urlsafe(32)
+
+def _get_or_set_csrf(request: Request, response=None) -> str:
+    """Get existing CSRF token from cookie or generate a new one."""
+    existing = request.cookies.get(CSRF_COOKIE)
+    if existing and len(existing) >= 32:
+        return existing
+    token = _generate_csrf_token()
+    if response:
+        is_secure = not os.environ.get("DATABASE_URL", "").startswith("sqlite")
+        response.set_cookie(
+            CSRF_COOKIE, token,
+            httponly=False,  # JS needs to read it for AJAX
+            samesite="lax",
+            secure=is_secure,
+            max_age=60 * 60 * 24,  # 24 hours
+        )
+    return token
+
+def _validate_csrf(request_token: str | None, cookie_token: str | None) -> bool:
+    """Constant-time comparison of form token vs cookie token."""
+    if not request_token or not cookie_token:
+        return False
+    return secrets.compare_digest(request_token, cookie_token)
+
+
 # ─── App setup ───
 @asynccontextmanager
 async def lifespan(application: FastAPI):
@@ -149,41 +184,6 @@ async def _exc(request: Request, exc: Exception):
 async def get_db():
     async with SessionLocal() as session:
         yield session
-
-
-# ─── CSRF Protection (double-submit cookie pattern) ───
-# On every page load, set a random CSRF token as a cookie + inject into forms as a hidden field.
-# On every POST, verify the form value matches the cookie value.
-# Since an attacker can't read our cookie from their domain, they can't forge the hidden field.
-
-CSRF_COOKIE = "ct_csrf"
-CSRF_FORM_FIELD = "csrf_token"
-
-def _generate_csrf_token() -> str:
-    return secrets.token_urlsafe(32)
-
-def _get_or_set_csrf(request: Request, response=None) -> str:
-    """Get existing CSRF token from cookie or generate a new one."""
-    existing = request.cookies.get(CSRF_COOKIE)
-    if existing and len(existing) >= 32:
-        return existing
-    token = _generate_csrf_token()
-    if response:
-        is_secure = not os.environ.get("DATABASE_URL", "").startswith("sqlite")
-        response.set_cookie(
-            CSRF_COOKIE, token,
-            httponly=False,  # JS needs to read it for AJAX
-            samesite="lax",
-            secure=is_secure,
-            max_age=60 * 60 * 24,  # 24 hours
-        )
-    return token
-
-def _validate_csrf(request_token: str | None, cookie_token: str | None) -> bool:
-    """Constant-time comparison of form token vs cookie token."""
-    if not request_token or not cookie_token:
-        return False
-    return secrets.compare_digest(request_token, cookie_token)
 
 
 # ─── Auth helpers ───
