@@ -85,10 +85,19 @@ _SESSION_CACHE: dict[str, tuple[int, int | None, str, bool, float]] = {}
 _SESSION_CACHE_TTL = 30.0  # seconds
 
 def _cache_get(token: str) -> tuple[int, int | None, str, bool] | None:
-    """Returns (user_id, dealership_id, role, is_super_admin) or None."""
+    """Returns (user_id, dealership_id, role, is_super_admin) or None.
+    Only returns cached data if it was populated with full user info
+    (i.e., from the JOIN query, not from create_session's placeholder)."""
     entry = _SESSION_CACHE.get(token)
     if entry and time.monotonic() < entry[4]:
-        return (entry[0], entry[1], entry[2], entry[3])
+        # entry = (user_id, dealership_id, role, is_super_admin, expiry)
+        # If dealership_id is None and role is default, this might be a
+        # placeholder from create_session — skip cache and do a real lookup
+        uid, did, role, is_sa, _ = entry
+        if did is None and role == "salesperson" and not is_sa:
+            # Likely a placeholder — don't trust it, let the DB query populate properly
+            return None
+        return (uid, did, role, is_sa)
     if entry:
         del _SESSION_CACHE[token]
     return None
@@ -385,13 +394,14 @@ async def create_session(
         ))
         await db.commit()
 
-    _cache_set(token, user_id)
+    _cache_set(token, user_id)  # Temporary — next request will refresh with full user data
     return token
 
 
 async def get_user_id_from_session(db: AsyncSession | None, token: str | None) -> tuple[int, int | None, str, bool] | None:
     """Returns (user_id, dealership_id, role, is_super_admin) or None.
-    Joins user_sessions with users to get tenancy info in a single query."""
+    Joins user_sessions with users to get tenancy info in a single query.
+    Always does a DB lookup to ensure role/super_admin are current."""
     if not token:
         return None
 
