@@ -2658,7 +2658,6 @@ async def team_page(request: Request, tab: str = "stats", month: str | None = No
     role = user_role(request)
     is_admin = role == "admin"
     is_manager_or_admin = role in ("admin", "manager")
-    can_see_commission = is_manager_or_admin or is_super_admin(request)
 
     # Get dealership info
     dealership = (await db.execute(
@@ -2724,18 +2723,14 @@ async def team_page(request: Request, tab: str = "stats", month: str | None = No
         select(
             func.extract("month", Deal.delivered_date).label("mo"),
             func.count().label("cnt"),
-            func.sum(Deal.total_deal_comm).label("comm"),
         ).where(
             Deal.dealership_id == d_id, Deal.status == "Delivered",
             Deal.delivered_date >= yr_start, Deal.delivered_date < yr_end,
         ).group_by(func.extract("month", Deal.delivered_date))
     )).all()
     ubm = [0] * 12
-    cbm = [0.0] * 12
     for row in yr_rows:
-        idx = int(row.mo) - 1
-        ubm[idx] = row.cnt
-        cbm[idx] = float(row.comm or 0)
+        ubm[int(row.mo) - 1] = row.cnt
 
     # Pipeline
     pending_all = (await db.execute(
@@ -2744,12 +2739,9 @@ async def team_page(request: Request, tab: str = "stats", month: str | None = No
 
     # ── Compute stats ──
     total_units = len(delivered_mtd)
-    total_comm = sum((d.total_deal_comm or 0) for d in delivered_mtd)
-    avg_deal = total_comm / total_units if total_units else 0.0
     new_count = sum(1 for d in delivered_mtd if (d.new_used or "").lower() == "new")
     used_count = sum(1 for d in delivered_mtd if (d.new_used or "").lower() == "used")
     prev_units = prev_row.cnt or 0
-    prev_comm = float(prev_row.comm or 0)
 
     # Add-on penetration rates (dealership-wide)
     dt = total_units
@@ -2771,29 +2763,48 @@ async def team_page(request: Request, tab: str = "stats", month: str | None = No
         "Aim": {"yes": aim_y, "total": aim_y + aim_n, "pct": round(aim_y / (aim_y + aim_n) * 100, 1) if (aim_y + aim_n) else 0},
     }
 
+    # Previous month per-user (for +/- indicators on leaderboard)
+    prev_deals_all = (await db.execute(
+        select(Deal).where(
+            Deal.dealership_id == d_id, Deal.status == "Delivered",
+            Deal.delivered_date >= ps, Deal.delivered_date < pe,
+        )
+    )).scalars().all()
+    prev_by_user = {}
+    for d in prev_deals_all:
+        prev_by_user[d.user_id] = prev_by_user.get(d.user_id, 0) + 1
+
     # Pipeline aging
     for d in pending_all:
         d.days_pending = (today_date - d.sold_date).days if d.sold_date else 0
     aging_30_plus = sum(1 for d in pending_all if d.days_pending >= 30)
+    stale_deals = sorted(
+        [d for d in pending_all if d.days_pending >= 30],
+        key=lambda d: d.days_pending, reverse=True
+    )[:10]  # Top 10 oldest
+
+    # Enrich stale deals with salesperson name
+    team_map = {u.id: u for u in team}
+    for d in stale_deals:
+        d._salesperson = team_map.get(d.user_id)
 
     # ── Leaderboard (by user) ──
-    team_map = {u.id: u for u in team}
     leaderboard = []
     for u in team:
         user_deals = [d for d in delivered_mtd if d.user_id == u.id]
         u_units = len(user_deals)
-        u_comm = sum((d.total_deal_comm or 0) for d in user_deals)
         u_new = sum(1 for d in user_deals if (d.new_used or "").lower() == "new")
         u_used = sum(1 for d in user_deals if (d.new_used or "").lower() == "used")
         u_spots = sum(1 for d in user_deals if d.spot_sold)
+        u_prev = prev_by_user.get(u.id, 0)
         leaderboard.append({
             "user": u,
             "units": u_units,
-            "commission": u_comm,
             "new": u_new,
             "used": u_used,
             "spots": u_spots,
-            "avg_deal": u_comm / u_units if u_units else 0,
+            "prev_units": u_prev,
+            "delta": u_units - u_prev,
         })
     leaderboard.sort(key=lambda x: x["units"], reverse=True)
 
@@ -2801,18 +2812,17 @@ async def team_page(request: Request, tab: str = "stats", month: str | None = No
         "request": request, "user": user, "team": team, "invites": invites,
         "dealership": dealership, "is_admin": is_admin,
         "is_manager_or_admin": is_manager_or_admin,
-        "can_see_commission": can_see_commission,
         "overdue_reminders": await get_overdue_reminders(db, uid(request)),
         "tab": tab,
         # Stats data
         "month_key": month_key, "sel_y": sel_y, "sel_m": sel_m,
-        "total_units": total_units, "total_comm": total_comm, "avg_deal": avg_deal,
-        "new_count": new_count, "used_count": used_count,
-        "prev_units": prev_units, "prev_comm": prev_comm,
+        "total_units": total_units, "new_count": new_count, "used_count": used_count,
+        "prev_units": prev_units,
         "addon_rates": addon_rates,
         "leaderboard": leaderboard,
         "pending_count": len(pending_all), "aging_30_plus": aging_30_plus,
-        "ubm": ubm, "cbm": cbm,
+        "stale_deals": stale_deals,
+        "ubm": ubm,
         "month_labels": ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],
     })
 
@@ -3095,10 +3105,14 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     _require_super_admin(request)
     user = await _user(request, db)
 
-    # All dealerships with user counts
+    # All dealerships
     dealerships = (await db.execute(
         select(Dealership).order_by(Dealership.created_at.desc())
     )).scalars().all()
+
+    # Current month bounds
+    td = today()
+    mtd_start = td.replace(day=1)
 
     # Build stats per dealership
     dealer_stats = []
@@ -3109,7 +3123,18 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         deal_count = (await db.execute(
             select(func.count()).where(Deal.dealership_id == d.id)
         )).scalar() or 0
-        # Get the admin/GM for this dealership
+        deals_mtd = (await db.execute(
+            select(func.count()).where(
+                Deal.dealership_id == d.id, Deal.status == "Delivered",
+                Deal.delivered_date >= mtd_start,
+            )
+        )).scalar() or 0
+        # Last deal activity
+        last_deal_date = (await db.execute(
+            select(Deal.sold_date).where(Deal.dealership_id == d.id)
+            .order_by(Deal.sold_date.desc().nullslast()).limit(1)
+        )).scalar()
+        # GM
         gm = (await db.execute(
             select(User).where(User.dealership_id == d.id, User.role == "admin")
             .order_by(User.id.asc()).limit(1)
@@ -3118,18 +3143,26 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
             "dealership": d,
             "user_count": user_count,
             "deal_count": deal_count,
+            "deals_mtd": deals_mtd,
+            "last_activity": last_deal_date,
             "gm": gm,
         })
 
-    # Total platform stats
+    # Platform totals
     total_users = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
     total_deals = (await db.execute(select(func.count()).select_from(Deal))).scalar() or 0
+    active_dealerships = sum(1 for ds in dealer_stats if ds["dealership"].is_active and ds["dealership"].subscription_status != "pending")
+    pending_approvals = sum(1 for ds in dealer_stats if ds["dealership"].subscription_status == "pending")
+    deals_mtd_total = sum(ds["deals_mtd"] for ds in dealer_stats)
 
     return templates.TemplateResponse("admin_dashboard.html", {
         "request": request, "user": user,
         "dealer_stats": dealer_stats,
         "total_users": total_users,
         "total_deals": total_deals,
+        "active_dealerships": active_dealerships,
+        "pending_approvals": pending_approvals,
+        "deals_mtd_total": deals_mtd_total,
         "overdue_reminders": await get_overdue_reminders(db, uid(request)),
     })
 
