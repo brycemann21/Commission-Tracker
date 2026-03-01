@@ -2645,36 +2645,175 @@ async def _sp(): return RedirectResponse(url="/payplan", status_code=303)
 
 
 # ════════════════════════════════════════════════
-# TEAM MANAGEMENT (admin/manager)
+# TEAM MANAGEMENT (admin/manager) + DEALERSHIP STATS (all team)
 # ════════════════════════════════════════════════
 
 @app.get("/team", response_class=HTMLResponse)
-async def team_page(request: Request, db: AsyncSession = Depends(get_db)):
-    """Team management page — admins can invite/manage users, managers can view the team."""
-    _require_admin_or_manager(request)
+async def team_page(request: Request, tab: str = "stats", month: str | None = None, db: AsyncSession = Depends(get_db)):
+    """Team page with tabs: Stats (everyone), Members (admin/manager), Invites (admin)."""
     d_id = user_dealership_id(request)
+    if not d_id:
+        return RedirectResponse(url="/", status_code=303)
     user = await _user(request, db)
-
-    # Get all team members in this dealership
-    team = (await db.execute(
-        select(User).where(User.dealership_id == d_id).order_by(User.role.asc(), User.display_name.asc())
-    )).scalars().all()
-
-    # Get pending (unused) invites
-    invites = (await db.execute(
-        select(Invite).where(Invite.dealership_id == d_id, Invite.used == False)
-        .order_by(Invite.created_at.desc())
-    )).scalars().all()
+    role = user_role(request)
+    is_admin = role == "admin"
+    is_manager_or_admin = role in ("admin", "manager")
+    can_see_commission = is_manager_or_admin or is_super_admin(request)
 
     # Get dealership info
     dealership = (await db.execute(
         select(Dealership).where(Dealership.id == d_id)
     )).scalar_one_or_none()
 
+    # Get all team members
+    team = (await db.execute(
+        select(User).where(User.dealership_id == d_id).order_by(User.role.asc(), User.display_name.asc())
+    )).scalars().all()
+
+    # Get pending invites (for Members tab)
+    invites = (await db.execute(
+        select(Invite).where(Invite.dealership_id == d_id, Invite.used == False)
+        .order_by(Invite.created_at.desc())
+    )).scalars().all()
+
+    # ── Stats tab data ──
+    today_date = today()
+    # Parse month
+    if month:
+        m = re.fullmatch(r"(\d{4})-(\d{1,2})", month)
+        if m:
+            sel_y, sel_m = int(m.group(1)), int(m.group(2))
+        else:
+            sel_y, sel_m = today_date.year, today_date.month
+    else:
+        sel_y, sel_m = today_date.year, today_date.month
+    sel_m = max(1, min(12, sel_m))
+    d0 = date(sel_y, sel_m, 1)
+    start_m, end_m = month_bounds(d0)
+    month_key = f"{sel_y:04d}-{sel_m:02d}"
+
+    # Previous month
+    py, pm = (sel_y - 1, 12) if sel_m == 1 else (sel_y, sel_m - 1)
+    ps, pe = month_bounds(date(py, pm, 1))
+
+    # Year bounds
+    yr_start = date(sel_y, 1, 1)
+    yr_end = date(sel_y + 1, 1, 1)
+
+    # All delivered deals this month for the entire dealership
+    delivered_mtd = (await db.execute(
+        select(Deal).where(
+            Deal.dealership_id == d_id, Deal.status == "Delivered",
+            Deal.delivered_date >= start_m, Deal.delivered_date < end_m,
+        )
+    )).scalars().all()
+
+    # Previous month stats
+    prev_row = (await db.execute(
+        select(
+            func.count().label("cnt"),
+            func.sum(Deal.total_deal_comm).label("comm"),
+        ).where(
+            Deal.dealership_id == d_id, Deal.status == "Delivered",
+            Deal.delivered_date >= ps, Deal.delivered_date < pe,
+        )
+    )).one()
+
+    # Year trend
+    yr_rows = (await db.execute(
+        select(
+            func.extract("month", Deal.delivered_date).label("mo"),
+            func.count().label("cnt"),
+            func.sum(Deal.total_deal_comm).label("comm"),
+        ).where(
+            Deal.dealership_id == d_id, Deal.status == "Delivered",
+            Deal.delivered_date >= yr_start, Deal.delivered_date < yr_end,
+        ).group_by(func.extract("month", Deal.delivered_date))
+    )).all()
+    ubm = [0] * 12
+    cbm = [0.0] * 12
+    for row in yr_rows:
+        idx = int(row.mo) - 1
+        ubm[idx] = row.cnt
+        cbm[idx] = float(row.comm or 0)
+
+    # Pipeline
+    pending_all = (await db.execute(
+        select(Deal).where(Deal.dealership_id == d_id, Deal.status.in_(["Pending", "Scheduled"]))
+    )).scalars().all()
+
+    # ── Compute stats ──
+    total_units = len(delivered_mtd)
+    total_comm = sum((d.total_deal_comm or 0) for d in delivered_mtd)
+    avg_deal = total_comm / total_units if total_units else 0.0
+    new_count = sum(1 for d in delivered_mtd if (d.new_used or "").lower() == "new")
+    used_count = sum(1 for d in delivered_mtd if (d.new_used or "").lower() == "used")
+    prev_units = prev_row.cnt or 0
+    prev_comm = float(prev_row.comm or 0)
+
+    # Add-on penetration rates (dealership-wide)
+    dt = total_units
+    pulse_y = sum(1 for d in delivered_mtd if d.pulse)
+    nitro_y = sum(1 for d in delivered_mtd if d.nitro_fill)
+    perma_y = sum(1 for d in delivered_mtd if d.permaplate)
+    warranty_y = sum(1 for d in delivered_mtd if d.warranty)
+    finance_y = sum(1 for d in delivered_mtd if d.finance_non_subvented)
+    tw_y = sum(1 for d in delivered_mtd if d.tire_wheel)
+    aim_y = sum(1 for d in delivered_mtd if (d.aim_presentation or "X") == "Yes")
+    aim_n = sum(1 for d in delivered_mtd if (d.aim_presentation or "X") == "No")
+    addon_rates = {
+        "Pulse": {"yes": pulse_y, "total": dt, "pct": round(pulse_y / dt * 100, 1) if dt else 0},
+        "Nitro Fill": {"yes": nitro_y, "total": dt, "pct": round(nitro_y / dt * 100, 1) if dt else 0},
+        "PermaPlate": {"yes": perma_y, "total": dt, "pct": round(perma_y / dt * 100, 1) if dt else 0},
+        "Warranty": {"yes": warranty_y, "total": dt, "pct": round(warranty_y / dt * 100, 1) if dt else 0},
+        "Finance": {"yes": finance_y, "total": dt, "pct": round(finance_y / dt * 100, 1) if dt else 0},
+        "Tire & Wheel": {"yes": tw_y, "total": dt, "pct": round(tw_y / dt * 100, 1) if dt else 0},
+        "Aim": {"yes": aim_y, "total": aim_y + aim_n, "pct": round(aim_y / (aim_y + aim_n) * 100, 1) if (aim_y + aim_n) else 0},
+    }
+
+    # Pipeline aging
+    for d in pending_all:
+        d.days_pending = (today_date - d.sold_date).days if d.sold_date else 0
+    aging_30_plus = sum(1 for d in pending_all if d.days_pending >= 30)
+
+    # ── Leaderboard (by user) ──
+    team_map = {u.id: u for u in team}
+    leaderboard = []
+    for u in team:
+        user_deals = [d for d in delivered_mtd if d.user_id == u.id]
+        u_units = len(user_deals)
+        u_comm = sum((d.total_deal_comm or 0) for d in user_deals)
+        u_new = sum(1 for d in user_deals if (d.new_used or "").lower() == "new")
+        u_used = sum(1 for d in user_deals if (d.new_used or "").lower() == "used")
+        u_spots = sum(1 for d in user_deals if d.spot_sold)
+        leaderboard.append({
+            "user": u,
+            "units": u_units,
+            "commission": u_comm,
+            "new": u_new,
+            "used": u_used,
+            "spots": u_spots,
+            "avg_deal": u_comm / u_units if u_units else 0,
+        })
+    leaderboard.sort(key=lambda x: x["units"], reverse=True)
+
     return templates.TemplateResponse("team.html", {
         "request": request, "user": user, "team": team, "invites": invites,
-        "dealership": dealership, "is_admin": user_role(request) == "admin",
+        "dealership": dealership, "is_admin": is_admin,
+        "is_manager_or_admin": is_manager_or_admin,
+        "can_see_commission": can_see_commission,
         "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+        "tab": tab,
+        # Stats data
+        "month_key": month_key, "sel_y": sel_y, "sel_m": sel_m,
+        "total_units": total_units, "total_comm": total_comm, "avg_deal": avg_deal,
+        "new_count": new_count, "used_count": used_count,
+        "prev_units": prev_units, "prev_comm": prev_comm,
+        "addon_rates": addon_rates,
+        "leaderboard": leaderboard,
+        "pending_count": len(pending_all), "aging_30_plus": aging_30_plus,
+        "ubm": ubm, "cbm": cbm,
+        "month_labels": ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],
     })
 
 
