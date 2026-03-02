@@ -179,7 +179,7 @@
     <div class="grid md:grid-cols-3 gap-3">
       {% for p in products %}
       <label class="flex items-center gap-2 bg-slate-50 border rounded p-2 cursor-pointer hover:bg-slate-100 transition">
-        <input type="checkbox" name="product_{{ p.id }}" value="1" data-comm="{{ p.commission }}" class="product-cb"
+        <input type="checkbox" name="product_{{ p.id }}" value="1" data-comm="{{ p.commission }}" data-name="{{ p.name }}" class="product-cb"
                {% if deal and p.id in deal_product_ids %}checked{% elif not deal and p.default_on %}checked{% endif %}>
         <span class="text-sm">{{ p.name }}</span>
         <span class="ml-auto text-xs text-slate-500">${{ "{:,.0f}".format(p.commission) }}</span>
@@ -483,6 +483,10 @@
           let addons = 0;
           // Sum commission from all checked custom product checkboxes
           document.querySelectorAll('.product-cb').forEach(function(cb) {
+            // Auto-check Finance product when F/C/L is Finance or Lease
+            if (cb.getAttribute('data-name') === 'Finance') {
+              if (autoFinNonSub && !cb.checked) cb.checked = true;
+            }
             if (cb.checked) addons += parseFloat(cb.getAttribute('data-comm') || '0');
           });
 
