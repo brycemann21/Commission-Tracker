@@ -27,7 +27,6 @@ class DealIn(BaseModel):
     fi_pvr: float = 0.0
     front_gross: float = 0.0
     back_gross: float = 0.0
-    expected_commission: float = 0.0
     actual_paid: float | None = None
     notes: str = ""
     pay_date: date | None = None

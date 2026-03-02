@@ -2196,14 +2196,20 @@ async def deal_save(
             select(DealerProduct).where(DealerProduct.id.in_(product_ids))
         )).scalars().all()
         for p in prods:
+            if p.name == "Finance":
+                continue  # Skip Finance product; handled by F/C/L
             db.add(DealProduct(deal_id=the_deal.id, product_id=p.id))
             custom_addon_comm += p.commission
+
+    # Add $50 for Finance or Lease F/C/L
+    if dt in ("Finance", "Lease"):
+        custom_addon_comm += 50.0
 
     # Update add_ons and totals with custom product commission
     if custom_addon_comm > 0:
         the_deal.add_ons = custom_addon_comm
         if comm_ov is None:
-            the_deal.total_deal_comm = uc + custom_addon_comm + th
+            the_deal.total_deal_comm = uc + custom_addon_comm + th + aim_val
             the_deal.expected_commission = the_deal.total_deal_comm
 
     await db.commit()
