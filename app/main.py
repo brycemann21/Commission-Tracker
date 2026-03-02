@@ -2136,6 +2136,10 @@ async def deal_save(
     )
     uc, ao, th, tot = calc_commission(deal_in, settings)
 
+    # Add aim_amount to total
+    aim_val = float(aim_amount or 0)
+    tot += aim_val
+
     # If user provided a manual override, use it as total_deal_comm
     comm_ov: float | None = None
     if commission_override is not None and commission_override.strip() != "":
@@ -2257,6 +2261,7 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
         # Recalc total
         deal_in = DealIn(**{c.key: getattr(deal, c.key) for c in deal.__table__.columns if c.key in DealIn.model_fields})
         uc, ao, th, tot = calc_commission(deal_in, settings)
+        tot += float(deal.aim_amount or 0)
         deal.total_deal_comm = deal.commission_override if deal.commission_override is not None else tot
     else:
         setattr(deal, field, value)
@@ -2742,6 +2747,7 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
                 deal_in.delivered_date = deal_in.sold_date or today()
 
             uc, ao, th, tot = calc_commission(deal_in, settings)
+            tot += float(deal_in.aim_amount or 0)
             db.add(Deal(
                 **deal_in.model_dump(),
                 user_id=user_id,

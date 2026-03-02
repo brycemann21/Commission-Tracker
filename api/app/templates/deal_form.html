@@ -147,28 +147,21 @@
     </div>
 
     <div>
-      <label class="text-xs text-slate-500">Front Gross</label>
-      <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="front_gross" value="{{ deal.front_gross if deal and deal.front_gross else 0 }}">
-      <div class="text-xs text-slate-400 mt-1">Gross profit on the car (for gross-based plans)</div>
-    </div>
-
-    <div>
-      <label class="text-xs text-slate-500">Back Gross</label>
-      <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="back_gross" value="{{ deal.back_gross if deal and deal.back_gross else 0 }}">
-      <div class="text-xs text-slate-400 mt-1">F&I / back-end gross profit</div>
-    </div>
-
-    <div>
-      <label class="text-xs text-slate-500">Actual Paid</label>
-      <input type="text" class="w-full border rounded px-3 py-2" name="actual_paid" placeholder="Enter when you get your check"
-             value="{{ deal.actual_paid if deal and deal.actual_paid is not none else '' }}">
-      <div class="text-xs text-slate-400 mt-1">What you actually got paid on this deal</div>
+      <label class="text-xs text-slate-500">Aim $</label>
+      <div class="relative">
+        <span class="absolute left-3 top-2.5 text-slate-400">$</span>
+        <input type="number" step="0.01" class="w-full border rounded pl-7 pr-3 py-2" name="aim_amount" id="aim_input" value="{{ deal.aim_amount if deal and deal.aim_amount else 0 }}">
+      </div>
+      <div class="text-xs text-slate-400 mt-1">Aim product commission (added to total)</div>
     </div>
 
     <div>
       <label class="text-xs text-slate-500">Comments</label>
       <input class="w-full border rounded px-3 py-2" name="notes" value="{{ deal.notes if deal else '' }}">
     </div>
+    <input type="hidden" name="front_gross" value="0">
+    <input type="hidden" name="back_gross" value="0">
+    <input type="hidden" name="actual_paid" value="">
   </div>
 
 
@@ -232,6 +225,7 @@
           <div class="flex justify-between"><span class="text-slate-600">Unit</span><b id="lc_unit">$0</b></div>
           <div class="flex justify-between"><span class="text-slate-600">Add-ons</span><b id="lc_addons">$0</b></div>
           <div class="flex justify-between"><span class="text-slate-600">Money Held Comm</span><b id="lc_hold">$0</b></div>
+          <div class="flex justify-between"><span class="text-slate-600">Aim $</span><b id="lc_aim">$0</b></div>
           <div class="border-t border-slate-200 pt-2 flex justify-between text-base">
             <span class="text-slate-700 font-bold">Total</span>
             <span class="font-bold" id="lc_total">$0</span>
@@ -460,10 +454,12 @@
           discount: $('select[name="discount_gt_200"]'),
           hold: $('input[name="hold_amount"]'),
           dealType: $('select[name="deal_type"]'),
+          aim: $('input[name="aim_amount"]'),
 
           outUnit: $('#lc_unit'),
           outAddons: $('#lc_addons'),
           outHold: $('#lc_hold'),
+          outAim: $('#lc_aim'),
           outTotal: $('#lc_total'),
           hint: $('#lc_hint'),
         };
@@ -493,11 +489,14 @@
           const holdAmt = parseFloat(els.hold?.value || '0') || 0;
           const holdComm = Math.floor(holdAmt / 1000) * 100;
 
-          const total = unit + addons + holdComm;
+          const aimAmt = parseFloat(els.aim?.value || '0') || 0;
+
+          const total = unit + addons + holdComm + aimAmt;
 
           els.outUnit.textContent = fmt(unit);
           els.outAddons.textContent = fmt(addons);
           els.outHold.textContent = fmt(holdComm);
+          if (els.outAim) els.outAim.textContent = fmt(aimAmt);
           els.outTotal.textContent = fmt(total);
 
           if (els.hint) {
@@ -509,7 +508,7 @@
         window.__ct_calc_live_comm = calc;
 
         const watch = [
-          els.customer, els.discount, els.hold, els.dealType,
+          els.customer, els.discount, els.hold, els.dealType, els.aim,
         ].filter(Boolean);
 
         watch.forEach((el) => {
