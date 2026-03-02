@@ -39,13 +39,14 @@ class BonusTier:
     name: str = ""
     category: str = ""
     range_label: str = ""
-    amount_per: float = 0.0       # the configured $ amount
+    amount_per: float = 0.0       # the configured $ amount or % value
     earned: float = 0.0           # what was actually earned
     hit: bool = False
     need: int = 0                 # units needed to reach threshold
     count: int = 0                # current count
     period: str = "monthly"
     projected_earned: float = 0.0
+    bonus_type: str = "flat"      # flat | gross_pct
 
 
 @dataclass
@@ -76,6 +77,9 @@ class MonthStats:
     # Projected (including pending)
     proj_units: int = 0
     proj_used: int = 0
+    # Gross totals for gross_pct bonus type
+    total_front_gross_mtd: float = 0.0
+    total_back_gross_mtd: float = 0.0
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -190,10 +194,12 @@ class CommissionEngine:
     def calc_bonuses(self, stats: MonthStats) -> BonusResult:
         """Calculate all bonus tiers from DealerBonus rows."""
         result = BonusResult()
+        total_gross = stats.total_front_gross_mtd + stats.total_back_gross_mtd
 
         for b in self.bonuses:
             count = self._bonus_count(b, stats)
             proj_count = self._bonus_proj_count(b, stats)
+            bonus_type = getattr(b, "bonus_type", "flat") or "flat"
 
             in_range = count >= b.threshold_min and (
                 b.threshold_max is None or count <= b.threshold_max
@@ -202,20 +208,18 @@ class CommissionEngine:
                 b.threshold_max is None or proj_count <= b.threshold_max
             )
 
-            # Spot bonuses multiply: $X per spot
-            if b.category == "spot" and in_range:
+            # Calculate earned amount based on bonus type
+            if bonus_type == "gross_pct":
+                # Gross percentage: amount is a %, earned = total_gross * (amount / 100)
+                earned = total_gross * (b.amount / 100.0) if in_range else 0.0
+                proj_earned = total_gross * (b.amount / 100.0) if proj_in_range else 0.0
+            elif b.category == "spot" and in_range:
+                # Spot bonuses multiply: $X per spot
                 earned = b.amount * count
-            elif in_range:
-                earned = b.amount
+                proj_earned = b.amount * proj_count if proj_in_range else 0.0
             else:
-                earned = 0.0
-
-            if b.category == "spot" and proj_in_range:
-                proj_earned = b.amount * proj_count
-            elif proj_in_range:
-                proj_earned = b.amount
-            else:
-                proj_earned = 0.0
+                earned = b.amount if in_range else 0.0
+                proj_earned = b.amount if proj_in_range else 0.0
 
             need = max(0, b.threshold_min - count) if not in_range else 0
             range_label = f"{b.threshold_min}{'–' + str(b.threshold_max) if b.threshold_max else '+'}"
@@ -231,6 +235,7 @@ class CommissionEngine:
                 count=count,
                 period=b.period,
                 projected_earned=proj_earned,
+                bonus_type=bonus_type,
             )
             result.tiers.append(tier)
             result.total += earned

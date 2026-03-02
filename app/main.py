@@ -995,12 +995,18 @@ async def _run_startup_migrations():
                     threshold_min INTEGER DEFAULT 0,
                     threshold_max INTEGER,
                     amount FLOAT DEFAULT 0,
+                    bonus_type VARCHAR(16) DEFAULT 'flat',
                     period VARCHAR(16) DEFAULT 'monthly',
                     sort_order INTEGER DEFAULT 0,
                     is_active BOOLEAN DEFAULT true
                 )
             """)
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_dealer_bonuses_dlr ON dealer_bonuses(dealership_id)")
+        except Exception:
+            pass
+        # Add bonus_type column if table already exists without it
+        try:
+            await conn.execute("ALTER TABLE dealer_bonuses ADD COLUMN IF NOT EXISTS bonus_type VARCHAR(16) DEFAULT 'flat'")
         except Exception:
             pass
 
@@ -1764,10 +1770,15 @@ async def dashboard(
     proj_used = used_mtd + sum(1 for d in pend_month if (d.new_used or "").lower() == "used")
     proj_comm = comm_mtd + sum((d.total_deal_comm or 0) for d in pend_month)
 
+    # Gross totals for gross_pct bonus calculations
+    total_front_gross = sum((d.front_gross or 0) for d in delivered_mtd)
+    total_back_gross = sum((d.back_gross or 0) for d in delivered_mtd)
+
     stats = MonthStats(
         units_mtd=units_mtd, new_mtd=new_mtd, used_mtd=used_mtd,
         spots=spots, qtd_count=qtd_count, ytd_units=ytd_units,
         proj_units=proj_units, proj_used=proj_used,
+        total_front_gross_mtd=total_front_gross, total_back_gross_mtd=total_back_gross,
     )
     bonus_result = engine.calc_bonuses(stats)
     bonus_total = bonus_result.total
@@ -1781,6 +1792,7 @@ async def dashboard(
                 "name": t.name, "category": t.category, "range": t.range_label,
                 "amount": t.amount_per, "earned": t.earned, "hit": t.hit,
                 "need": t.need, "count": t.count, "period": t.period,
+                "bonus_type": t.bonus_type,
             }
             for t in bonus_result.tiers
         ],
@@ -2988,6 +3000,7 @@ async def payplan_add_bonus(
     bonus_name: str = Form(""), bonus_category: str = Form("custom"),
     bonus_min: int = Form(0), bonus_max: str = Form(""),
     bonus_amount: float = Form(0.0), bonus_period: str = Form("monthly"),
+    bonus_type: str = Form("flat"),
 ):
     """Add a custom bonus tier."""
     _require_admin(request)
@@ -2999,13 +3012,15 @@ async def payplan_add_bonus(
         bonus_category = "custom"
     if bonus_period not in ("monthly", "quarterly", "yearly"):
         bonus_period = "monthly"
+    if bonus_type not in ("flat", "gross_pct"):
+        bonus_type = "flat"
     max_order = (await db.execute(
         select(func.max(DealerBonus.sort_order)).where(DealerBonus.dealership_id == d_id)
     )).scalar() or 0
     db.add(DealerBonus(
         dealership_id=d_id, name=bonus_name.strip()[:100], category=bonus_category,
         threshold_min=bonus_min, threshold_max=mx, amount=bonus_amount,
-        period=bonus_period, sort_order=max_order + 1,
+        bonus_type=bonus_type, period=bonus_period, sort_order=max_order + 1,
     ))
     await db.commit()
     return RedirectResponse(url="/payplan", status_code=303)
