@@ -59,8 +59,11 @@
           <span class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{{ overdue_reminders }}</span>
           {%- endif %}
         </a>
-        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/community') else 'text-slate-600 hover:bg-slate-100' }}" href="/community">
+        <a class="text-sm px-3 py-1.5 rounded transition relative {{ 'bg-slate-900 text-white' if path.startswith('/community') else 'text-slate-600 hover:bg-slate-100' }}" href="/community">
           Community
+          {%- if has_new_posts is defined and has_new_posts and not path.startswith('/community') %}
+          <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+          {%- endif %}
         </a>
         {% if request.state.is_super_admin is defined and request.state.is_super_admin %}
         <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-violet-700 text-white' if path.startswith('/admin') else 'text-violet-600 hover:bg-violet-50' }}" href="/admin">
@@ -270,8 +273,11 @@
         </div>
         <span class="text-[10px] mt-0.5 text-emerald-700 font-medium">New</span>
       </a>
-      <a href="/community" class="flex flex-col items-center py-1 px-3 {{ 'text-slate-900' if path.startswith('/community') else 'text-slate-400' }}">
+      <a href="/community" class="flex flex-col items-center py-1 px-3 relative {{ 'text-slate-900' if path.startswith('/community') else 'text-slate-400' }}">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"/></svg>
+        {%- if has_new_posts is defined and has_new_posts and not path.startswith('/community') %}
+        <span class="absolute top-0 right-2 w-2 h-2 rounded-full bg-emerald-500"></span>
+        {%- endif %}
         <span class="text-[10px] mt-0.5">Community</span>
       </a>
       <a href="/profile" class="flex flex-col items-center py-1 px-3 {{ 'text-slate-900' if path.startswith('/profile') else 'text-slate-400' }}">

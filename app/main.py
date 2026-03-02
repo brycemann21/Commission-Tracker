@@ -864,12 +864,16 @@ async def _run_startup_migrations():
         except Exception as e:
             logger.warning(f"Super admin setup error: {e}")
 
-        # 10. Community tables
+        # 10. Community tables + notification tracking
         for col, typ in [("brand", "VARCHAR(80)"), ("state", "VARCHAR(2)")]:
             try:
                 await conn.execute(f"ALTER TABLE dealerships ADD COLUMN IF NOT EXISTS {col} {typ}")
             except Exception:
                 pass
+        try:
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_community_visit TIMESTAMP")
+        except Exception:
+            pass
 
         try:
             await conn.execute("""
@@ -977,6 +981,27 @@ async def get_overdue_reminders(db: AsyncSession, user_id: int) -> int:
         return result.scalar() or 0
     except Exception:
         return 0
+
+async def get_new_community_posts(db: AsyncSession, user_id: int) -> bool:
+    """Check if there are community posts newer than user's last visit."""
+    try:
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if not user or not user.last_community_visit:
+            # Never visited — show dot if any posts exist
+            count = (await db.execute(
+                select(func.count()).where(Post.is_deleted == False)
+            )).scalar() or 0
+            return count > 0
+        count = (await db.execute(
+            select(func.count()).where(
+                Post.is_deleted == False,
+                Post.created_at > user.last_community_visit,
+                Post.user_id != user_id,  # Don't count your own posts
+            )
+        )).scalar() or 0
+        return count > 0
+    except Exception:
+        return False
 
 def quarter_bounds(d: date):
     q = ((d.month - 1) // 3) * 3 + 1
@@ -2882,6 +2907,7 @@ async def team_page(request: Request, tab: str = "stats", month: str | None = No
         "dealership": dealership, "is_admin": is_admin,
         "is_manager_or_admin": is_manager_or_admin,
         "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+        "has_new_posts": await get_new_community_posts(db, uid(request)),
         "tab": tab,
         # Stats data
         "month_key": month_key, "sel_y": sel_y, "sel_m": sel_m,
@@ -3202,6 +3228,7 @@ async def profile_page(request: Request, db: AsyncSession = Depends(get_db)):
         "total_deals": total_deals,
         "ytd_deals": ytd_deals,
         "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+        "has_new_posts": await get_new_community_posts(db, uid(request)),
     })
 
 
@@ -3379,6 +3406,10 @@ async def community_feed(
         select(Dealership).where(Dealership.id == user_dealership_id(request))
     )).scalar_one_or_none() if user_dealership_id(request) else None
 
+    # Update last visit timestamp for notification tracking
+    user.last_community_visit = _utcnow()
+    await db.commit()
+
     return templates.TemplateResponse("community.html", {
         "request": request, "user": user, "posts": posts,
         "brands": brands, "states": states,
@@ -3386,6 +3417,7 @@ async def community_feed(
         "page": page, "total": total, "per_page": per_page,
         "my_dealership": my_dealership,
         "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+        "has_new_posts": await get_new_community_posts(db, uid(request)),
     })
 
 
@@ -3597,6 +3629,7 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         "deals_mtd": deals_mtd,
         "active_dealerships": active_dealerships,
         "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+        "has_new_posts": await get_new_community_posts(db, uid(request)),
     })
 
 
@@ -3715,6 +3748,7 @@ async def admin_dealership_detail(dealership_id: int, request: Request, db: Asyn
         "total_deals": total_deals, "delivered_mtd": delivered_mtd,
         "dealership_settings": dealership_settings,
         "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+        "has_new_posts": await get_new_community_posts(db, uid(request)),
     })
 
 
@@ -3966,3 +4000,218 @@ async def admin_assign_user_to_dealership(
         from .auth import _cache_delete_user
         _cache_delete_user(user_id)
     return RedirectResponse(url="/admin/users", status_code=303)
+
+
+# ════════════════════════════════════════════════
+# SEED — Pre-populate community with realistic content
+# ════════════════════════════════════════════════
+
+import random as _random
+
+SEED_PAY_PLANS = {
+    "Toyota": {"unit_le": 200, "unit_gt": 150, "hourly": 16, "perma": 40, "nitro": 40, "pulse": 40, "finance": 50, "warranty": 25, "tw": 25, "nv1516": 1000, "nv1718": 1250, "nv1920": 1500, "nv2124": 2000, "nv25": 3000, "uv810": 350, "uv1112": 500, "uv13": 1000, "qt": 60, "qa": 1200},
+    "Honda": {"unit_le": 175, "unit_gt": 125, "hourly": 15, "perma": 35, "nitro": 35, "pulse": 35, "finance": 40, "warranty": 25, "tw": 20, "nv1516": 800, "nv1718": 1000, "nv1920": 1200, "nv2124": 1600, "nv25": 2200, "uv810": 300, "uv1112": 450, "uv13": 800, "qt": 55, "qa": 1000},
+    "Ford": {"unit_le": 225, "unit_gt": 175, "hourly": 15, "perma": 50, "nitro": 45, "pulse": 45, "finance": 50, "warranty": 30, "tw": 30, "nv1516": 1200, "nv1718": 1500, "nv1920": 1800, "nv2124": 2500, "nv25": 3500, "uv810": 400, "uv1112": 600, "uv13": 1200, "qt": 55, "qa": 1500},
+    "Chevrolet": {"unit_le": 190, "unit_gt": 140, "hourly": 14, "perma": 40, "nitro": 40, "pulse": 35, "finance": 45, "warranty": 25, "tw": 25, "nv1516": 900, "nv1718": 1100, "nv1920": 1400, "nv2124": 1800, "nv25": 2600, "uv810": 350, "uv1112": 500, "uv13": 900, "qt": 60, "qa": 1100},
+    "Hyundai": {"unit_le": 160, "unit_gt": 110, "hourly": 14, "perma": 30, "nitro": 30, "pulse": 30, "finance": 35, "warranty": 20, "tw": 20, "nv1516": 700, "nv1718": 900, "nv1920": 1100, "nv2124": 1400, "nv25": 2000, "uv810": 250, "uv1112": 400, "uv13": 700, "qt": 50, "qa": 900},
+    "Kia": {"unit_le": 155, "unit_gt": 105, "hourly": 14, "perma": 30, "nitro": 30, "pulse": 25, "finance": 35, "warranty": 20, "tw": 20, "nv1516": 650, "nv1718": 850, "nv1920": 1050, "nv2124": 1300, "nv25": 1800, "uv810": 250, "uv1112": 375, "uv13": 650, "qt": 50, "qa": 800},
+    "Nissan": {"unit_le": 170, "unit_gt": 120, "hourly": 14, "perma": 35, "nitro": 35, "pulse": 30, "finance": 40, "warranty": 20, "tw": 20, "nv1516": 750, "nv1718": 950, "nv1920": 1150, "nv2124": 1500, "nv25": 2100, "uv810": 300, "uv1112": 425, "uv13": 750, "qt": 55, "qa": 950},
+    "BMW": {"unit_le": 300, "unit_gt": 250, "hourly": 18, "perma": 50, "nitro": 50, "pulse": 50, "finance": 75, "warranty": 50, "tw": 40, "nv1516": 1500, "nv1718": 2000, "nv1920": 2500, "nv2124": 3500, "nv25": 5000, "uv810": 500, "uv1112": 750, "uv13": 1500, "qt": 45, "qa": 2000},
+    "Subaru": {"unit_le": 165, "unit_gt": 115, "hourly": 15, "perma": 35, "nitro": 30, "pulse": 30, "finance": 35, "warranty": 25, "tw": 20, "nv1516": 750, "nv1718": 950, "nv1920": 1200, "nv2124": 1500, "nv25": 2000, "uv810": 275, "uv1112": 400, "uv13": 700, "qt": 50, "qa": 900},
+    "Jeep": {"unit_le": 210, "unit_gt": 160, "hourly": 15, "perma": 45, "nitro": 40, "pulse": 40, "finance": 50, "warranty": 30, "tw": 30, "nv1516": 1100, "nv1718": 1400, "nv1920": 1700, "nv2124": 2200, "nv25": 3000, "uv810": 375, "uv1112": 550, "uv13": 1000, "qt": 55, "qa": 1300},
+}
+
+SEED_CITIES = [
+    ("NY", "Wappinger Falls"), ("NY", "Poughkeepsie"), ("NJ", "Paramus"), ("NJ", "Hackensack"),
+    ("CT", "Danbury"), ("PA", "Philadelphia"), ("CA", "Torrance"), ("CA", "Fremont"),
+    ("TX", "Plano"), ("TX", "Houston"), ("FL", "Orlando"), ("FL", "Tampa"),
+    ("IL", "Naperville"), ("OH", "Dublin"), ("GA", "Marietta"), ("VA", "Tysons"),
+]
+
+SEED_TEXT_POSTS = [
+    ("Is anyone else getting crushed on used car inventory?", "My lot has maybe 30 pre-owned units and half of them are over 80k miles. Meanwhile new is flowing in but the margins are trash. Anyone else dealing with this?"),
+    ("Just hit 20 units for the first time", "Been grinding for 8 months at this store. Finally broke 20 this month — 14 new 6 used. The volume bonus really kicks in at this level."),
+    ("How do you handle the 'I need to think about it' objection?", "Serious question. I lose at least 3-4 deals a month to this. What's your go-to response?"),
+    ("F&I is killing my deals", "My finance manager pushes so hard on products that customers get buyer's remorse and back out. Lost two deliveries last week because of this. Anyone else?"),
+    ("What CRM does your store use?", "We're on DealerSocket and it's painful. Curious what everyone else is using and if it's any better."),
+    ("Saturday hours are brutal", "12 hour shifts every Saturday. No rotating schedule. Manager says 'that's the car business.' Is this normal everywhere?"),
+    ("Thinking about switching to a luxury brand", "Been at a volume store doing 18-20 units/month. BMW dealer down the road is hiring. Less units but bigger grosses. Anyone made this switch?"),
+    ("Tips for working internet leads", "I get about 40 internet leads a month and my close rate is maybe 8%. The good salespeople here are at 15%+. What am I doing wrong?"),
+    ("New guy here — what should I know?", "Just got hired at my first dealership. Any advice for a green pea? What do you wish someone told you on day one?"),
+    ("Pay plan just changed and I'm making less", "They restructured our commission and now the per-unit flat is $50 less. They say the volume bonuses make up for it but you'd need 20+ units to break even. Shady."),
+    ("How many hours do you actually work per week?", "I'm at about 55 hours and my manager acts like I'm part-time. What's normal in this industry?"),
+    ("Best month of my career", "26 units, mix of new and used. Some luck with walk-ins but mostly internet leads I've been nurturing for months. Just wanted to share the win."),
+]
+
+SEED_POLLS = [
+    ("How many units do you average per month?", ["Under 10", "10-14", "15-19", "20-24", "25+"]),
+    ("How long have you been in car sales?", ["Under 1 year", "1-3 years", "3-5 years", "5-10 years", "10+ years"]),
+    ("What's your biggest source of deals?", ["Walk-ins", "Internet leads", "Phone ups", "Referrals/Repeats", "Service drive"]),
+    ("Are you happy with your pay plan?", ["Yes, it's fair", "It's okay", "No, it's below average", "It's terrible"]),
+    ("Do you work a 5 or 6 day week?", ["5 days", "5.5 days", "6 days", "Varies"]),
+    ("Would you recommend car sales to a friend?", ["Absolutely", "Maybe", "Probably not", "Never"]),
+]
+
+
+@app.get("/admin/seed", response_class=HTMLResponse)
+async def admin_seed_page(request: Request, db: AsyncSession = Depends(get_db)):
+    """Show the seed community page."""
+    _require_super_admin(request)
+    user = await _user(request, db)
+    post_count = (await db.execute(select(func.count()).where(Post.is_deleted == False))).scalar() or 0
+    return templates.TemplateResponse("admin_seed.html", {
+        "request": request, "user": user, "post_count": post_count,
+        "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+        "has_new_posts": await get_new_community_posts(db, uid(request)),
+    })
+
+
+@app.post("/admin/seed")
+async def admin_seed_execute(request: Request, db: AsyncSession = Depends(get_db)):
+    """Generate seed content for the community."""
+    _require_super_admin(request)
+
+    # Create seed dealerships (one per brand/city combo)
+    seed_dealerships = []
+    for brand, pp in SEED_PAY_PLANS.items():
+        state, city = _random.choice(SEED_CITIES)
+        name = f"{brand} of {city}"
+        slug = f"seed-{brand.lower()}-{city.lower().replace(' ', '-')}"
+
+        existing = (await db.execute(select(Dealership).where(Dealership.slug == slug))).scalar_one_or_none()
+        if existing:
+            seed_dealerships.append(existing)
+            continue
+
+        d = Dealership(
+            name=name, slug=slug, brand=brand, state=state,
+            subscription_status="free", is_active=True,
+        )
+        db.add(d)
+        await db.commit()
+        await db.refresh(d)
+        seed_dealerships.append(d)
+
+    # Create pay plan posts (one per brand)
+    for d in seed_dealerships:
+        brand = d.brand
+        pp = SEED_PAY_PLANS.get(brand, {})
+        if not pp:
+            continue
+
+        # Check if we already seeded a pay plan for this dealership
+        existing = (await db.execute(
+            select(Post).where(Post.dealership_id == d.id, Post.post_type == "payplan", Post.is_deleted == False)
+        )).scalar_one_or_none()
+        if existing:
+            continue
+
+        payload = _json.dumps({
+            "unit_comm_le_200": pp["unit_le"], "unit_comm_gt_200": pp["unit_gt"],
+            "hourly_offset": pp["hourly"],
+            "permaplate": pp["perma"], "nitro_fill": pp["nitro"], "pulse": pp["pulse"],
+            "finance": pp["finance"], "warranty": pp["warranty"], "tire_wheel": pp["tw"],
+            "new_vol_15_16": pp["nv1516"], "new_vol_17_18": pp["nv1718"],
+            "new_vol_19_20": pp["nv1920"], "new_vol_21_24": pp["nv2124"],
+            "new_vol_25_plus": pp["nv25"],
+            "used_vol_8_10": pp["uv810"], "used_vol_11_12": pp["uv1112"],
+            "used_vol_13_plus": pp["uv13"],
+            "quarterly_threshold": pp["qt"], "quarterly_amount": pp["qa"],
+        })
+        comments = [
+            f"Current {brand} pay plan as of this year. Volume bonuses are decent if you can push past 15.",
+            f"Our {brand} store's commission structure. Add-ons are where the real money is.",
+            f"Sharing our {brand} pay plan for transparency. Unit flat is solid but used bonus tiers are weak.",
+        ]
+        post = Post(
+            user_id=uid(request), dealership_id=d.id, post_type="payplan",
+            anonymity="brand", title=f"{brand} Pay Plan",
+            body=_random.choice(comments), payload=payload,
+            upvote_count=_random.randint(3, 25),
+            created_at=_utcnow() - timedelta(days=_random.randint(0, 14)),
+        )
+        db.add(post)
+
+    # Create YTD posts
+    for d in _random.sample(seed_dealerships, min(5, len(seed_dealerships))):
+        existing = (await db.execute(
+            select(Post).where(Post.dealership_id == d.id, Post.post_type == "ytd", Post.is_deleted == False)
+        )).scalar_one_or_none()
+        if existing:
+            continue
+
+        yr = today().year
+        mo = today().month
+        months = [0] * 12
+        total = 0
+        for i in range(mo):
+            m_units = _random.randint(10, 28)
+            months[i] = m_units
+            total += m_units
+        avg = total / mo if mo else 0
+        new_pct = _random.uniform(0.5, 0.75)
+        payload = _json.dumps({
+            "year": yr, "total_units": total, "months": months,
+            "avg_per_month": round(avg, 1),
+            "new_count": int(total * new_pct), "used_count": total - int(total * new_pct),
+        })
+        comments = [
+            "Sharing my numbers. February was slow but picking back up.",
+            "YTD so far. Trying to hit 250 by end of year.",
+            "Not my best start but grinding it out.",
+        ]
+        post = Post(
+            user_id=uid(request), dealership_id=d.id, post_type="ytd",
+            anonymity=_random.choice(["brand", "anonymous"]),
+            title="My YTD Numbers", body=_random.choice(comments),
+            payload=payload, upvote_count=_random.randint(2, 18),
+            created_at=_utcnow() - timedelta(days=_random.randint(0, 7)),
+        )
+        db.add(post)
+
+    # Create text posts
+    for title, body in SEED_TEXT_POSTS:
+        existing = (await db.execute(
+            select(Post).where(Post.title == title, Post.is_deleted == False)
+        )).scalar_one_or_none()
+        if existing:
+            continue
+
+        d = _random.choice(seed_dealerships)
+        post = Post(
+            user_id=uid(request), dealership_id=d.id, post_type="text",
+            anonymity=_random.choice(["brand", "anonymous", "anonymous"]),
+            title=title, body=body,
+            upvote_count=_random.randint(1, 40),
+            created_at=_utcnow() - timedelta(days=_random.randint(0, 21)),
+        )
+        db.add(post)
+
+    # Create polls
+    for question, options in SEED_POLLS:
+        existing = (await db.execute(
+            select(Post).where(Post.title == question, Post.is_deleted == False)
+        )).scalar_one_or_none()
+        if existing:
+            continue
+
+        d = _random.choice(seed_dealerships)
+        post = Post(
+            user_id=uid(request), dealership_id=d.id, post_type="poll",
+            anonymity="anonymous", title=question, body="",
+            upvote_count=_random.randint(5, 30),
+            created_at=_utcnow() - timedelta(days=_random.randint(0, 14)),
+        )
+        db.add(post)
+        await db.commit()
+        await db.refresh(post)
+
+        total_votes = _random.randint(20, 80)
+        weights = [_random.random() for _ in options]
+        weight_sum = sum(weights)
+        for i, label in enumerate(options):
+            votes = int(total_votes * weights[i] / weight_sum)
+            db.add(PollOption(post_id=post.id, label=label, vote_count=votes, sort_order=i))
+
+    await db.commit()
+    return RedirectResponse(url="/admin/seed", status_code=303)

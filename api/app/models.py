@@ -69,6 +69,8 @@ class User(Base):
     # Verified: GM has confirmed this person works at the dealership
     verified_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Community notification tracking
+    last_community_visit: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 # ════════════════════════════════════════════════

@@ -2,10 +2,13 @@
 {% block content %}
 
 {# ── Header ── #}
-<div class="mb-5">
-  <span class="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-violet-100 text-violet-700 uppercase mb-1">Platform Admin</span>
-  <h1 class="text-xl font-bold">All Users</h1>
-  <div class="text-sm text-slate-500">{{ total_users }} users across {{ active_dealerships }} dealership{{ 's' if active_dealerships != 1 else '' }}</div>
+<div class="flex items-center justify-between mb-5">
+  <div>
+    <span class="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-violet-100 text-violet-700 uppercase mb-1">Platform Admin</span>
+    <h1 class="text-xl font-bold">All Users</h1>
+    <div class="text-sm text-slate-500">{{ total_users }} users across {{ active_dealerships }} dealership{{ 's' if active_dealerships != 1 else '' }}</div>
+  </div>
+  <a href="/admin/seed" class="text-xs px-3 py-1.5 rounded border border-violet-200 text-violet-600 hover:bg-violet-50 transition">Seed Community</a>
 </div>
 
 {# ── Summary Stats ── #}
