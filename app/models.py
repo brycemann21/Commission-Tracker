@@ -253,6 +253,7 @@ class DealerProduct(Base):
     commission: Mapped[float] = mapped_column(Float, default=0.0)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_on: Mapped[bool] = mapped_column(Boolean, default=False)  # auto-checked on new deals
 
 
 class DealProduct(Base):

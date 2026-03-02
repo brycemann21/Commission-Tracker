@@ -179,7 +179,8 @@
     <div class="grid md:grid-cols-3 gap-3">
       {% for p in products %}
       <label class="flex items-center gap-2 bg-slate-50 border rounded p-2 cursor-pointer hover:bg-slate-100 transition">
-        <input type="checkbox" name="product_{{ p.id }}" value="1" {% if p.id in deal_product_ids %}checked{% endif %}>
+        <input type="checkbox" name="product_{{ p.id }}" value="1" data-comm="{{ p.commission }}" class="product-cb"
+               {% if deal and p.id in deal_product_ids %}checked{% elif not deal and p.default_on %}checked{% endif %}>
         <span class="text-sm">{{ p.name }}</span>
         <span class="ml-auto text-xs text-slate-500">${{ "{:,.0f}".format(p.commission) }}</span>
       </label>
@@ -456,14 +457,9 @@
 
         const els = {
           customer: $('input[name="customer"]'),
-          discount_el: $('select[name="discount_gt_200"]'),
+          discount: $('select[name="discount_gt_200"]'),
           hold: $('input[name="hold_amount"]'),
           dealType: $('select[name="deal_type"]'),
-          permaplate: $('input[name="permaplate"]'),
-          nitro: $('input[name="nitro_fill"]'),
-          pulse: $('input[name="pulse"]'),
-          warranty: $('input[name="warranty"]'),
-          tire: $('input[name="tire_wheel"]'),
 
           outUnit: $('#lc_unit'),
           outAddons: $('#lc_addons'),
@@ -477,14 +473,6 @@
           if (!els.outUnit || !els.outAddons || !els.outHold || !els.outTotal) return;
 
           const customer = (els.customer?.value || '').trim();
-          if (!customer) {
-            els.outUnit.textContent = '$0';
-            els.outAddons.textContent = '$0';
-            els.outHold.textContent = '$0';
-            els.outTotal.textContent = '$0';
-            if (els.hint) els.hint.textContent = 'Enter a customer name to see totals.';
-            return;
-          }
 
           const discYes = (els.discount?.value || 'No').toLowerCase() === 'yes';
           const unit = discYes ? SETTINGS.unit_gt : SETTINGS.unit_le;
@@ -493,12 +481,10 @@
           const autoFinNonSub = (dt === 'Finance' || dt === 'Lease');
 
           let addons = 0;
-          if (els.permaplate?.checked) addons += SETTINGS.permaplate;
-          if (els.nitro?.checked) addons += SETTINGS.nitro_fill;
-          if (els.pulse?.checked) addons += SETTINGS.pulse;
-          if (autoFinNonSub) addons += SETTINGS.finance_non_subvented;
-          if (els.warranty?.checked) addons += SETTINGS.warranty;
-          if (els.tire?.checked) addons += SETTINGS.tire_wheel;
+          // Sum commission from all checked custom product checkboxes
+          document.querySelectorAll('.product-cb').forEach(function(cb) {
+            if (cb.checked) addons += parseFloat(cb.getAttribute('data-comm') || '0');
+          });
 
           const holdAmt = parseFloat(els.hold?.value || '0') || 0;
           const holdComm = Math.floor(holdAmt / 1000) * 100;
@@ -511,7 +497,7 @@
           els.outTotal.textContent = fmt(total);
 
           if (els.hint) {
-            els.hint.textContent = autoFinNonSub ? 'Includes Finance/Lease (Non-Subvented) automatically.' : '';
+            els.hint.textContent = customer ? '' : 'Enter a customer name to save.';
           }
         }
 
@@ -520,12 +506,16 @@
 
         const watch = [
           els.customer, els.discount, els.hold, els.dealType,
-          els.permaplate, els.nitro, els.pulse, els.warranty, els.tire,
         ].filter(Boolean);
 
         watch.forEach((el) => {
           el.addEventListener('input', calc);
           el.addEventListener('change', calc);
+        });
+
+        // Watch all product checkboxes too
+        document.querySelectorAll('.product-cb').forEach(function(cb) {
+          cb.addEventListener('change', calc);
         });
 
         calc();

@@ -969,6 +969,11 @@ async def _run_startup_migrations():
                 )
             """)
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_dealer_products_dlr ON dealer_products(dealership_id)")
+            await conn.execute("ALTER TABLE dealer_products ADD COLUMN IF NOT EXISTS default_on BOOLEAN DEFAULT false")
+            # Rename "Pulse/GPS" to "Pulse" for existing data
+            await conn.execute("UPDATE dealer_products SET name = 'Pulse' WHERE name = 'Pulse/GPS'")
+            # Set default_on for the standard 3 products
+            await conn.execute("UPDATE dealer_products SET default_on = true WHERE name IN ('PermaPlate', 'Nitro Fill', 'Pulse') AND default_on = false")
         except Exception:
             pass
         try:
@@ -2931,11 +2936,11 @@ async def payplan_get(request: Request, db: AsyncSession = Depends(get_db)):
     # Seed defaults if no custom products exist (migrate from hardcoded ones)
     if d_id and not products:
         defaults = [
-            ("PermaPlate", s.permaplate), ("Nitro Fill", s.nitro_fill), ("Pulse/GPS", s.pulse),
-            ("Finance", s.finance_non_subvented), ("Warranty", s.warranty), ("Tire & Wheel", s.tire_wheel),
+            ("PermaPlate", s.permaplate, True), ("Nitro Fill", s.nitro_fill, True), ("Pulse", s.pulse, True),
+            ("Finance", s.finance_non_subvented, False), ("Warranty", s.warranty, False), ("Tire & Wheel", s.tire_wheel, False),
         ]
-        for i, (name, comm) in enumerate(defaults):
-            db.add(DealerProduct(dealership_id=d_id, name=name, commission=comm, sort_order=i))
+        for i, (name, comm, dflt) in enumerate(defaults):
+            db.add(DealerProduct(dealership_id=d_id, name=name, commission=comm, sort_order=i, default_on=dflt))
         await db.commit()
         products = (await db.execute(
             select(DealerProduct).where(DealerProduct.dealership_id == d_id, DealerProduct.is_active == True)
