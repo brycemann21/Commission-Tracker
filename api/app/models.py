@@ -233,7 +233,6 @@ class Deal(Base):
     expected_commission: Mapped[float] = mapped_column(Float, default=0.0)
     actual_paid: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Delivery board
-    on_delivery_board: Mapped[bool] = mapped_column(Boolean, default=False)
     gas_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     inspection_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     insurance_ready: Mapped[bool] = mapped_column(Boolean, default=False)
