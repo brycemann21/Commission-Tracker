@@ -434,17 +434,23 @@
         validate();
       }
 
-      // Live commission calculator (mirrors app/payplan.py)
+      // Live commission calculator (uses dynamic products from DealerProduct)
       {
         const SETTINGS = {
           unit_le: {{ settings.unit_comm_discount_le_200 or 0 }},
-          unit_gt: {{ settings.unit_comm_discount_gt_200 or 0 }}, // used below
-          permaplate: {{ settings.permaplate or 0 }},
-          nitro_fill: {{ settings.nitro_fill or 0 }},
-          pulse: {{ settings.pulse or 0 }},
-          finance_non_subvented: {{ settings.finance_non_subvented or 0 }},
-          warranty: {{ settings.warranty or 0 }},
-          tire_wheel: {{ settings.tire_wheel or 0 }},
+          unit_gt: {{ settings.unit_comm_discount_gt_200 or 0 }},
+          pay_type: '{{ settings.pay_type or "flat" }}',
+          gross_front_pct: {{ settings.gross_front_pct or 0 }},
+          gross_back_pct: {{ settings.gross_back_pct or 0 }},
+          pack_deduction: {{ settings.pack_deduction or 0 }},
+          mini_deal: {{ settings.mini_deal or 0 }},
+        };
+
+        // Dynamic products — commission values baked in from the server
+        const PRODUCTS = {
+          {% for p in products %}
+          '{{ p.id }}': {{ p.commission or 0 }},
+          {% endfor %}
         };
 
         const fmt = (n) => {
@@ -458,12 +464,8 @@
           customer: $('input[name="customer"]'),
           discount_el: $('select[name="discount_gt_200"]'),
           hold: $('input[name="hold_amount"]'),
-          dealType: $('select[name="deal_type"]'),
-          permaplate: $('input[name="permaplate"]'),
-          nitro: $('input[name="nitro_fill"]'),
-          pulse: $('input[name="pulse"]'),
-          warranty: $('input[name="warranty"]'),
-          tire: $('input[name="tire_wheel"]'),
+          frontGross: $('input[name="front_gross"]'),
+          backGross: $('input[name="back_gross"]'),
 
           outUnit: $('#lc_unit'),
           outAddons: $('#lc_addons'),
@@ -473,7 +475,6 @@
         };
 
         function calc() {
-          // If the live box isn't on the page, don't do anything.
           if (!els.outUnit || !els.outAddons || !els.outHold || !els.outTotal) return;
 
           const customer = (els.customer?.value || '').trim();
@@ -486,19 +487,32 @@
             return;
           }
 
-          const discYes = (els.discount?.value || 'No').toLowerCase() === 'yes';
-          const unit = discYes ? SETTINGS.unit_gt : SETTINGS.unit_le;
+          const discYes = (els.discount_el?.value || 'No').toLowerCase() === 'yes';
+          let unit = 0;
 
-          const dt = (els.dealType?.value || '').trim();
-          const autoFinNonSub = (dt === 'Finance' || dt === 'Lease');
+          if (SETTINGS.pay_type === 'gross') {
+            const front = parseFloat(els.frontGross?.value || '0') || 0;
+            const back = parseFloat(els.backGross?.value || '0') || 0;
+            const fc = Math.max(0, front - SETTINGS.pack_deduction) * (SETTINGS.gross_front_pct / 100);
+            const bc = back * (SETTINGS.gross_back_pct / 100);
+            unit = fc + bc;
+            if (SETTINGS.mini_deal > 0 && unit < SETTINGS.mini_deal && (front > 0 || back > 0)) unit = SETTINGS.mini_deal;
+          } else if (SETTINGS.pay_type === 'hybrid') {
+            unit = discYes ? SETTINGS.unit_gt : SETTINGS.unit_le;
+            const back = parseFloat(els.backGross?.value || '0') || 0;
+            unit += back * (SETTINGS.gross_back_pct / 100);
+          } else {
+            unit = discYes ? SETTINGS.unit_gt : SETTINGS.unit_le;
+          }
 
+          // Sum product commissions from checked checkboxes
           let addons = 0;
-          if (els.permaplate?.checked) addons += SETTINGS.permaplate;
-          if (els.nitro?.checked) addons += SETTINGS.nitro_fill;
-          if (els.pulse?.checked) addons += SETTINGS.pulse;
-          if (autoFinNonSub) addons += SETTINGS.finance_non_subvented;
-          if (els.warranty?.checked) addons += SETTINGS.warranty;
-          if (els.tire?.checked) addons += SETTINGS.tire_wheel;
+          document.querySelectorAll('input[name^="product_"]').forEach(cb => {
+            if (cb.checked) {
+              const pid = cb.name.replace('product_', '');
+              addons += (PRODUCTS[pid] || 0);
+            }
+          });
 
           const holdAmt = parseFloat(els.hold?.value || '0') || 0;
           const holdComm = Math.floor(holdAmt / 1000) * 100;
@@ -510,22 +524,22 @@
           els.outHold.textContent = fmt(holdComm);
           els.outTotal.textContent = fmt(total);
 
-          if (els.hint) {
-            els.hint.textContent = autoFinNonSub ? 'Includes Finance/Lease (Non-Subvented) automatically.' : '';
-          }
+          if (els.hint) els.hint.textContent = '';
         }
 
-        // expose so other handlers can trigger recalcs
         window.__ct_calc_live_comm = calc;
 
+        // Watch all relevant fields
         const watch = [
-          els.customer, els.discount, els.hold, els.dealType,
-          els.permaplate, els.nitro, els.pulse, els.warranty, els.tire,
+          els.customer, els.discount_el, els.hold, els.frontGross, els.backGross,
         ].filter(Boolean);
-
         watch.forEach((el) => {
           el.addEventListener('input', calc);
           el.addEventListener('change', calc);
+        });
+        // Also watch product checkboxes
+        document.querySelectorAll('input[name^="product_"]').forEach(cb => {
+          cb.addEventListener('change', calc);
         });
 
         calc();
