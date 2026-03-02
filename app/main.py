@@ -3154,6 +3154,111 @@ async def team_update_dealership(
 
 
 # ════════════════════════════════════════════════
+# PROFILE — user settings, dealership, brand/state
+# ════════════════════════════════════════════════
+
+# Common US auto brands for the brand picker
+AUTO_BRANDS = [
+    "Acura","Alfa Romeo","Audi","BMW","Buick","Cadillac","Chevrolet","Chrysler",
+    "Dodge","FIAT","Ford","Genesis","GMC","Honda","Hyundai","INFINITI","Jaguar",
+    "Jeep","Kia","Land Rover","Lexus","Lincoln","Maserati","Mazda","Mercedes-Benz",
+    "MINI","Mitsubishi","Nissan","Porsche","RAM","Rivian","Subaru","Tesla","Toyota",
+    "Volkswagen","Volvo",
+]
+
+US_STATES = [
+    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
+    "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+    "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
+    "VA","WA","WV","WI","WY","DC",
+]
+
+@app.get("/profile", response_class=HTMLResponse)
+async def profile_page(request: Request, db: AsyncSession = Depends(get_db)):
+    """User profile — set display name, dealership, brand, state."""
+    user = await _user(request, db)
+    d_id = user_dealership_id(request)
+    dealership = None
+    if d_id:
+        dealership = (await db.execute(select(Dealership).where(Dealership.id == d_id))).scalar_one_or_none()
+
+    # Stats for the profile page
+    yr = today().year
+    total_deals = (await db.execute(
+        select(func.count()).where(Deal.user_id == uid(request))
+    )).scalar() or 0
+    ytd_deals = (await db.execute(
+        select(func.count()).where(
+            Deal.user_id == uid(request), Deal.status == "Delivered",
+            Deal.delivered_date >= date(yr, 1, 1),
+        )
+    )).scalar() or 0
+
+    return templates.TemplateResponse("profile.html", {
+        "request": request, "user": user,
+        "dealership": dealership,
+        "auto_brands": AUTO_BRANDS,
+        "us_states": US_STATES,
+        "total_deals": total_deals,
+        "ytd_deals": ytd_deals,
+        "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+    })
+
+
+@app.post("/profile")
+async def profile_update(
+    request: Request, db: AsyncSession = Depends(get_db),
+    display_name: str = Form(""),
+    dealership_name: str = Form(""),
+    brand: str = Form(""),
+    state: str = Form(""),
+):
+    """Update user profile and dealership info."""
+    user = await _user(request, db)
+
+    # Update display name
+    if display_name.strip():
+        user.display_name = display_name.strip()[:120]
+
+    # Handle dealership
+    d_id = user_dealership_id(request)
+    if d_id:
+        dealership = (await db.execute(select(Dealership).where(Dealership.id == d_id))).scalar_one_or_none()
+        if dealership:
+            if dealership_name.strip():
+                dealership.name = dealership_name.strip()[:200]
+            dealership.brand = brand.strip()[:80] if brand.strip() else dealership.brand
+            dealership.state = state.strip().upper()[:2] if state.strip() else dealership.state
+    elif dealership_name.strip():
+        # Create a new dealership for this user
+        import re as _re
+        base_slug = _re.sub(r'[^a-z0-9]+', '-', dealership_name.lower()).strip('-')[:60]
+        slug = base_slug
+        i = 1
+        while (await db.execute(select(Dealership).where(Dealership.slug == slug))).scalar_one_or_none():
+            slug = f"{base_slug}-{i}"
+            i += 1
+        dealership = Dealership(
+            name=dealership_name.strip()[:200],
+            slug=slug,
+            brand=brand.strip()[:80] if brand.strip() else None,
+            state=state.strip().upper()[:2] if state.strip() else None,
+            subscription_status="free",
+        )
+        db.add(dealership)
+        await db.commit()
+        await db.refresh(dealership)
+        user.dealership_id = dealership.id
+        user.role = "admin"
+        # Clear session cache so new dealership_id takes effect
+        from .auth import _cache_delete_user
+        _cache_delete_user(user.id)
+
+    await db.commit()
+    return RedirectResponse(url="/profile", status_code=303)
+
+
+# ════════════════════════════════════════════════
 # COMMUNITY — anonymous feed for salespeople
 # ════════════════════════════════════════════════
 
