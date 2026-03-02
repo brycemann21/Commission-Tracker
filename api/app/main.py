@@ -2168,7 +2168,7 @@ async def deal_save(
         existing.actual_paid = actual_paid_val if actual_paid_val is not None else existing.actual_paid
         the_deal = existing
     else:
-        deal = Deal(**deal_in.model_dump(), user_id=user_id, dealership_id=user_dealership_id(request),
+        deal = Deal(**deal_in.model_dump(exclude={"actual_paid"}), user_id=user_id, dealership_id=user_dealership_id(request),
                      unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot,
                      commission_override=comm_ov, expected_commission=tot, actual_paid=actual_paid_val)
         db.add(deal)
