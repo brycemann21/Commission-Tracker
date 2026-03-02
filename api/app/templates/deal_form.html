@@ -174,25 +174,29 @@
 
 
   <div class="mt-5">
-    <div class="font-bold mb-2">Add-ons (1/0)</div>
+    <div class="font-bold mb-2">Products Sold</div>
+    {% if products is defined and products|length > 0 %}
     <div class="grid md:grid-cols-3 gap-3">
-      {% set flags = [
-        ("permaplate","PermaPlate", settings.permaplate),
-        ("nitro_fill","Nitro Fill", settings.nitro_fill),
-        ("pulse","Pulse", settings.pulse),
-        ("warranty","Warranty", settings.warranty),
-        ("tire_wheel","Tire & Wheel", settings.tire_wheel),
-      ] %}
-      {% for name,label,val in flags %}
-        <label class="flex items-center gap-2 bg-slate-50 border rounded p-2">
-          {# Jinja does not expose Python's getattr() by default; use the built-in attr filter instead. #}
-          <input type="checkbox" name="{{ name }}" value="1" {% if (deal and (deal|attr(name))) or (not deal and name in ["permaplate","nitro_fill","pulse"]) %}checked{% endif %}>
-          <span class="text-sm">{{ label }}</span>
-          <span class="ml-auto text-xs text-slate-500">${{ val }}</span>
-        </label>
+      {% for p in products %}
+      <label class="flex items-center gap-2 bg-slate-50 border rounded p-2 cursor-pointer hover:bg-slate-100 transition">
+        <input type="checkbox" name="product_{{ p.id }}" value="1" {% if p.id in deal_product_ids %}checked{% endif %}>
+        <span class="text-sm">{{ p.name }}</span>
+        <span class="ml-auto text-xs text-slate-500">${{ "{:,.0f}".format(p.commission) }}</span>
+      </label>
       {% endfor %}
     </div>
-    <div class="text-xs text-slate-400 mt-2">Finance (Non-Subvented) is now counted automatically when F/C/L = <b>Finance</b> or <b>Lease</b>.</div>
+    {% else %}
+    <div class="text-sm text-slate-400 bg-slate-50 rounded p-3">
+      No products configured. <a href="/payplan" class="text-violet-600 hover:underline">Set up your products in Pay Plan</a>.
+    </div>
+    {% endif %}
+    {# Hidden legacy fields so old logic still works #}
+    <input type="hidden" name="permaplate" value="0">
+    <input type="hidden" name="nitro_fill" value="0">
+    <input type="hidden" name="pulse" value="0">
+    <input type="hidden" name="finance_non_subvented" value="0">
+    <input type="hidden" name="warranty" value="0">
+    <input type="hidden" name="tire_wheel" value="0">
   </div>
 
   <div class="mt-5 flex items-center gap-3">

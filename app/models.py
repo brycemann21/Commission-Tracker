@@ -239,6 +239,56 @@ class Deal(Base):
 
 
 # ════════════════════════════════════════════════
+# CUSTOM PRODUCTS — dealership-defined add-ons
+# ════════════════════════════════════════════════
+
+class DealerProduct(Base):
+    """A product/add-on that a dealership sells (e.g. GAP, Paint Protection, LoJack).
+    Each dealership defines their own list. Commission amount is per-product."""
+    __tablename__ = "dealer_products"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dealership_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    commission: Mapped[float] = mapped_column(Float, default=0.0)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class DealProduct(Base):
+    """Tracks which products were sold on a specific deal."""
+    __tablename__ = "deal_products"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    deal_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    product_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Optional override for this specific deal (e.g. if commission varies)
+    commission_override: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+# ════════════════════════════════════════════════
+# CUSTOM BONUSES — dealership-defined bonus tiers
+# ════════════════════════════════════════════════
+
+class DealerBonus(Base):
+    """A bonus tier defined by the dealership.
+    Replaces all hardcoded volume/spot/quarterly bonus fields in Settings.
+    Each row is one tier (e.g. 'New Volume 15-16 = $1,000')."""
+    __tablename__ = "dealer_bonuses"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dealership_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)           # e.g. "New Volume 15-16"
+    # Category for grouping in UI
+    category: Mapped[str] = mapped_column(String(32), default="custom")      # volume_new | volume_used | spot | quarterly | custom
+    # Threshold: bonus triggers when units in period are between min and max
+    threshold_min: Mapped[int] = mapped_column(Integer, default=0)
+    threshold_max: Mapped[int | None] = mapped_column(Integer, nullable=True)  # null = unlimited (e.g. "25+")
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    # Period this bonus resets on
+    period: Mapped[str] = mapped_column(String(16), default="monthly")       # monthly | quarterly | yearly
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+# ════════════════════════════════════════════════
 # REMINDER — per-user (within a dealership)
 # ════════════════════════════════════════════════
 class Reminder(Base):
