@@ -1770,18 +1770,31 @@ async def dashboard(
     prev_units = prev_row.cnt or 0
     prev_comm = float(prev_row.comm or 0)
 
-    # ── Closing rates ─────────────────────────────────────────────────────────
+    # ── Closing rates (query DealProduct table for accurate product tracking) ──
     deal_count_mtd = len(delivered_mtd)  # total deals (not split-adjusted)
-    pulse_y = sum(1 for d in delivered_mtd if d.pulse)
-    nitro_y = sum(1 for d in delivered_mtd if d.nitro_fill)
-    perma_y = sum(1 for d in delivered_mtd if d.permaplate)
+    delivered_ids = [d.id for d in delivered_mtd]
+
+    # Build a set of (deal_id, product_name) from DealProduct + DealerProduct
+    deal_product_names = set()
+    if delivered_ids:
+        dp_rows = (await db.execute(
+            select(DealProduct.deal_id, DealerProduct.name)
+            .join(DealerProduct, DealProduct.product_id == DealerProduct.id)
+            .where(DealProduct.deal_id.in_(delivered_ids))
+        )).all()
+        for row in dp_rows:
+            deal_product_names.add((row[0], row[1]))
+
+    pulse_y = sum(1 for d in delivered_mtd if (d.id, "Pulse") in deal_product_names)
+    nitro_y = sum(1 for d in delivered_mtd if (d.id, "Nitro Fill") in deal_product_names)
+    perma_y = sum(1 for d in delivered_mtd if (d.id, "PermaPlate") in deal_product_names)
     aim_y = sum(1 for d in delivered_mtd if (d.aim_presentation or "X") == "Yes")
     aim_n = sum(1 for d in delivered_mtd if (d.aim_presentation or "X") == "No")
     closing_rates = {
         "pulse": {"label": "Pulse", "yes": pulse_y, "den": deal_count_mtd, "pct": _pct(pulse_y, deal_count_mtd)},
         "nitro": {"label": "Nitro Fill", "yes": nitro_y, "den": deal_count_mtd, "pct": _pct(nitro_y, deal_count_mtd)},
         "permaplate": {"label": "PermaPlate", "yes": perma_y, "den": deal_count_mtd, "pct": _pct(perma_y, deal_count_mtd)},
-        "aim": {"label": "Aim", "yes": aim_y, "den": aim_y + aim_n, "pct": _pct(aim_y, aim_y + aim_n)},
+        "aim": {"label": "Aim Presentation", "yes": aim_y, "den": aim_y + aim_n, "pct": _pct(aim_y, aim_y + aim_n)},
     }
 
     # ── Bonus tiers (from custom dealer_bonuses table) ─────────────────────────
