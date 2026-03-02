@@ -154,20 +154,28 @@
     <div class="text-xl font-bold">${{ "{:,.0f}".format(comm_ytd or 0) }}</div>
   </div>
   <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
-    <div class="text-xs text-slate-500">Paid MTD</div>
-    <div class="text-xl font-bold text-emerald-700">${{ "{:,.0f}".format(paid_comm_mtd or 0) }}</div>
+    <div class="text-xs text-slate-500">Avg Per Copy</div>
+    <div class="text-xl font-bold">${{ "{:,.0f}".format(avg_per_deal or 0) }}</div>
   </div>
   <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
-    <div class="text-xs text-slate-500">Pending Pay MTD</div>
-    <div class="text-xl font-bold text-amber-700">${{ "{:,.0f}".format(pending_comm_mtd or 0) }}</div>
+    <div class="text-xs text-slate-500">Spots MTD</div>
+    <div class="text-xl font-bold">{{ spots_mtd }}</div>
   </div>
 </div>
 
 {# ── Next Milestones ── #}
 {% set custom_list = bonus_breakdown.get('custom_list', []) %}
 {% if custom_list %}
-  {% set upcoming = [] %}
-  {% for b in custom_list %}{% if not b.hit and b.need > 0 %}{% if upcoming.append(b) %}{% endif %}{% endif %}{% endfor %}
+  {# Group by category and pick closest (lowest need) per category #}
+  {% set closest = {} %}
+  {% for b in custom_list %}
+    {% if not b.hit and b.need > 0 %}
+      {% if b.category not in closest or b.need < closest[b.category].need %}
+        {% if closest.update({b.category: b}) %}{% endif %}
+      {% endif %}
+    {% endif %}
+  {% endfor %}
+  {% set upcoming = closest.values() | list %}
   {% if upcoming|length > 0 %}
   <div class="mb-4 bg-white rounded-lg border border-amber-200 p-4">
     <div class="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-3 flex items-center gap-1">
@@ -175,7 +183,7 @@
       Next Milestones
     </div>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      {% for b in upcoming[:8] %}
+      {% for b in upcoming %}
       <div class="bg-amber-50 rounded-lg p-3">
         <div class="text-[11px] text-slate-500">{{ b.name }}</div>
         <div class="text-lg font-bold text-amber-800">{{ b.need }} more</div>

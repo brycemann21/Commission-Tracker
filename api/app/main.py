@@ -1769,6 +1769,7 @@ async def dashboard(
 
     prev_units = prev_row.cnt or 0
     prev_comm = float(prev_row.comm or 0)
+    spots_mtd = sum(1 for d in delivered_mtd if d.spot_sold)
 
     # ── Closing rates (query DealProduct table for accurate product tracking) ──
     deal_count_mtd = len(delivered_mtd)  # total deals (not split-adjusted)
@@ -1934,7 +1935,7 @@ async def dashboard(
         "request": request, "user": user,
         "month": month_key, "selected_year": sel_y, "selected_month": sel_m,
         "year_options": years, "month_options": [{"num": i, "label": calendar.month_name[i]} for i in range(1,13)],
-        "units_mtd": units_mtd, "closing_rates": closing_rates,
+        "units_mtd": units_mtd, "closing_rates": closing_rates, "spots_mtd": spots_mtd,
         "comm_mtd": comm_mtd, "paid_comm_mtd": paid_comm, "pending_comm_mtd": comm_mtd - paid_comm,
         "new_mtd": new_mtd, "used_mtd": used_mtd, "avg_per_deal": avg_deal,
         "current_bonus_total": bonus_total, "bonus_breakdown": bonus_breakdown,
