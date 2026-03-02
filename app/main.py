@@ -1639,7 +1639,7 @@ async def dashboard(
         return (await db.execute(
             select(Deal).where(
                 Deal.user_id == user_id,
-                Deal.status.notin_(["Delivered", "Dead"]),
+                Deal.status == "Scheduled",
                 Deal.scheduled_date == today_date,
             )
         )).scalars().all()
@@ -2018,6 +2018,8 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
             deal.delivered_date = deal.sold_date or today()
         if value == "Scheduled" and not deal.scheduled_date:
             deal.scheduled_date = today()
+        if value == "Pending":
+            deal.scheduled_date = None
     elif field == "commission_override":
         if value == "" or value is None:
             deal.commission_override = None
