@@ -974,6 +974,8 @@ async def _run_startup_migrations():
             await conn.execute("UPDATE dealer_products SET name = 'Pulse' WHERE name = 'Pulse/GPS'")
             # Set default_on for the standard 3 products
             await conn.execute("UPDATE dealer_products SET default_on = true WHERE name IN ('PermaPlate', 'Nitro Fill', 'Pulse') AND default_on = false")
+            # Rename "New Volume" to "Volume" in existing bonuses
+            await conn.execute("UPDATE dealer_bonuses SET name = REPLACE(name, 'New Volume', 'Volume') WHERE name LIKE 'New Volume%'")
         except Exception:
             pass
         try:
@@ -1832,8 +1834,8 @@ async def dashboard(
 
         for b in custom_bonuses:
             # Determine which count to check against this bonus
-            if b.category == "volume_new":
-                count = new_mtd if b.period == "monthly" else qtd_count
+            if b.category == "volume_new" or b.category == "volume":
+                count = units_mtd if b.period == "monthly" else qtd_count
                 proj_count = proj_units
             elif b.category == "volume_used":
                 count = used_mtd if b.period == "monthly" else qtd_count
@@ -2964,11 +2966,11 @@ async def payplan_get(request: Request, db: AsyncSession = Depends(get_db)):
     # Seed defaults if no custom bonuses exist
     if d_id and not bonuses:
         defaults = [
-            ("New Volume 15-16", "volume_new", 15, 16, s.new_volume_bonus_15_16, "monthly"),
-            ("New Volume 17-18", "volume_new", 17, 18, s.new_volume_bonus_17_18, "monthly"),
-            ("New Volume 19-20", "volume_new", 19, 20, s.new_volume_bonus_19_20, "monthly"),
-            ("New Volume 21-24", "volume_new", 21, 24, s.new_volume_bonus_21_24, "monthly"),
-            ("New Volume 25+", "volume_new", 25, None, s.new_volume_bonus_25_plus, "monthly"),
+            ("Volume 15-16", "volume_new", 15, 16, s.new_volume_bonus_15_16, "monthly"),
+            ("Volume 17-18", "volume_new", 17, 18, s.new_volume_bonus_17_18, "monthly"),
+            ("Volume 19-20", "volume_new", 19, 20, s.new_volume_bonus_19_20, "monthly"),
+            ("Volume 21-24", "volume_new", 21, 24, s.new_volume_bonus_21_24, "monthly"),
+            ("Volume 25+", "volume_new", 25, None, s.new_volume_bonus_25_plus, "monthly"),
             ("Used Volume 8-10", "volume_used", 8, 10, s.used_volume_bonus_8_10, "monthly"),
             ("Used Volume 11-12", "volume_used", 11, 12, s.used_volume_bonus_11_12, "monthly"),
             ("Used Volume 13+", "volume_used", 13, None, s.used_volume_bonus_13_plus, "monthly"),

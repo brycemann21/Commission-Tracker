@@ -143,7 +143,7 @@
       <div class="text-xs text-slate-400">Volume, spot, quarterly, or any custom bonus</div>
     </div>
 
-    {% set cat_labels = {"volume_new": "New Volume", "volume_used": "Used Volume", "spot": "Spot Bonus", "quarterly": "Quarterly", "custom": "Custom"} %}
+    {% set cat_labels = {"volume_new": "Volume", "volume_used": "Used Volume", "spot": "Spot Bonus", "quarterly": "Quarterly", "custom": "Custom"} %}
     {% for cat, items in bonus_groups.items() %}
     <div class="mb-4">
       <div class="text-xs font-bold text-slate-500 uppercase mb-2">{{ cat_labels.get(cat, cat) }}</div>
@@ -180,7 +180,7 @@
         <input type="text" name="bonus_name" placeholder="Bonus name" maxlength="100"
                class="col-span-2 md:col-span-1 border rounded px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
         <select name="bonus_category" class="border rounded px-3 py-2 text-sm bg-white">
-          <option value="volume_new">New Volume</option>
+          <option value="volume_new">Volume</option>
           <option value="volume_used">Used Volume</option>
           <option value="spot">Spot</option>
           <option value="quarterly">Quarterly</option>
