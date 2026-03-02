@@ -125,14 +125,12 @@
     </div>
   </div>
 
-  {# Projected #}
+  {# Projected Units #}
   <div class="bg-white rounded-lg border border-slate-200 p-4">
-    <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Projected (w/ Pending)</div>
-    <div class="text-3xl font-bold mt-1 text-blue-700">${{ "{:,.0f}".format(proj_comm or 0) }}</div>
-    <div class="text-xs text-slate-500 mt-1">{{ pending_in_month_count }} pending · {{ proj_units }} proj. units</div>
-    {% if bonus_uplift > 0 %}
-      <div class="text-xs text-emerald-600 mt-1">+${{ "{:,.0f}".format(bonus_uplift) }} bonus if all close</div>
-    {% endif %}
+    <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Projected Units</div>
+    <div class="text-3xl font-bold mt-1 text-blue-700">{{ proj_units | int if proj_units == proj_units | int else proj_units }} <span class="text-base font-medium text-slate-400">MTD</span></div>
+    <div class="text-xs text-slate-500 mt-1">{{ pending_in_month_count }} pending</div>
+    <div class="text-xl font-bold mt-2">{{ units_ytd }} <span class="text-sm font-medium text-slate-400">YTD</span></div>
   </div>
 
   {# Bonus #}
@@ -146,10 +144,6 @@
 {# ── Secondary stats ── #}
 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
   <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
-    <div class="text-xs text-slate-500">Units YTD</div>
-    <div class="text-xl font-bold">{{ units_ytd }}</div>
-  </div>
-  <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
     <div class="text-xs text-slate-500">Commission YTD</div>
     <div class="text-xl font-bold">${{ "{:,.0f}".format(comm_ytd or 0) }}</div>
   </div>
@@ -160,6 +154,10 @@
   <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
     <div class="text-xs text-slate-500">Spots MTD</div>
     <div class="text-xl font-bold">{{ spots_mtd }}</div>
+  </div>
+  <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
+    <div class="text-xs text-slate-500">Projected Commission</div>
+    <div class="text-xl font-bold text-blue-700">${{ "{:,.0f}".format(proj_comm or 0) }}</div>
   </div>
 </div>
 
