@@ -237,6 +237,9 @@ class Deal(Base):
     gas_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     inspection_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     insurance_ready: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Split deal & Star car
+    split_deal: Mapped[bool] = mapped_column(Boolean, default=False)
+    star_car: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 # ════════════════════════════════════════════════
@@ -253,6 +256,7 @@ class DealerProduct(Base):
     commission: Mapped[float] = mapped_column(Float, default=0.0)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_on: Mapped[bool] = mapped_column(Boolean, default=False)  # auto-checked on new deals
 
 
 class DealProduct(Base):

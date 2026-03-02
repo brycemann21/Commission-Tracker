@@ -950,6 +950,7 @@ async def _run_startup_migrations():
         for col, typ in [
             ("front_gross", "FLOAT DEFAULT 0"), ("back_gross", "FLOAT DEFAULT 0"),
             ("expected_commission", "FLOAT DEFAULT 0"), ("actual_paid", "FLOAT"),
+            ("split_deal", "BOOLEAN DEFAULT false"), ("star_car", "BOOLEAN DEFAULT false"),
         ]:
             try:
                 await conn.execute(f"ALTER TABLE deals ADD COLUMN IF NOT EXISTS {col} {typ}")
@@ -1757,27 +1758,29 @@ async def dashboard(
     )
 
     # ── Stats (computed from the small delivered_mtd list) ───────────────────
-    units_mtd = len(delivered_mtd)
+    def _deal_units(d):
+        return 0.5 if getattr(d, 'split_deal', False) else 1
+    units_mtd = sum(_deal_units(d) for d in delivered_mtd)
     comm_mtd = sum((d.total_deal_comm or 0) for d in delivered_mtd)
     paid_comm = sum((d.total_deal_comm or 0) for d in delivered_mtd if d.is_paid)
-    new_mtd = sum(1 for d in delivered_mtd if (d.new_used or "").lower() == "new")
-    used_mtd = sum(1 for d in delivered_mtd if (d.new_used or "").lower() == "used")
+    new_mtd = sum(_deal_units(d) for d in delivered_mtd if (d.new_used or "").lower() == "new")
+    used_mtd = sum(_deal_units(d) for d in delivered_mtd if (d.new_used or "").lower() == "used")
     avg_deal = comm_mtd / units_mtd if units_mtd else 0.0
 
     prev_units = prev_row.cnt or 0
     prev_comm = float(prev_row.comm or 0)
 
     # ── Closing rates ─────────────────────────────────────────────────────────
-    dt = units_mtd
+    deal_count_mtd = len(delivered_mtd)  # total deals (not split-adjusted)
     pulse_y = sum(1 for d in delivered_mtd if d.pulse)
     nitro_y = sum(1 for d in delivered_mtd if d.nitro_fill)
     perma_y = sum(1 for d in delivered_mtd if d.permaplate)
     aim_y = sum(1 for d in delivered_mtd if (d.aim_presentation or "X") == "Yes")
     aim_n = sum(1 for d in delivered_mtd if (d.aim_presentation or "X") == "No")
     closing_rates = {
-        "pulse": {"label": "Pulse", "yes": pulse_y, "den": dt, "pct": _pct(pulse_y, dt)},
-        "nitro": {"label": "Nitro Fill", "yes": nitro_y, "den": dt, "pct": _pct(nitro_y, dt)},
-        "permaplate": {"label": "PermaPlate", "yes": perma_y, "den": dt, "pct": _pct(perma_y, dt)},
+        "pulse": {"label": "Pulse", "yes": pulse_y, "den": deal_count_mtd, "pct": _pct(pulse_y, deal_count_mtd)},
+        "nitro": {"label": "Nitro Fill", "yes": nitro_y, "den": deal_count_mtd, "pct": _pct(nitro_y, deal_count_mtd)},
+        "permaplate": {"label": "PermaPlate", "yes": perma_y, "den": deal_count_mtd, "pct": _pct(perma_y, deal_count_mtd)},
         "aim": {"label": "Aim", "yes": aim_y, "den": aim_y + aim_n, "pct": _pct(aim_y, aim_y + aim_n)},
     }
 
@@ -1804,8 +1807,8 @@ async def dashboard(
         q_bonus = float(s.quarterly_bonus_amount) if q_hit else 0.0
         bonus_total = float(vol_amt) + float(used_amt) + float(spot_total) + q_bonus
         pend_month = [d for d in pending_all if d.sold_date and start_m <= d.sold_date < end_m]
-        proj_units = units_mtd + len(pend_month)
-        proj_used = used_mtd + sum(1 for d in pend_month if (d.new_used or "").lower() == "used")
+        proj_units = units_mtd + sum(_deal_units(d) for d in pend_month)
+        proj_used = used_mtd + sum(_deal_units(d) for d in pend_month if (d.new_used or "").lower() == "used")
         pv, _ = _tiered(proj_units, vol_tiers)
         pu, _ = _tiered(proj_used, used_tiers)
         proj_bonus = float(pv) + float(pu) + float(spot_total) + q_bonus
@@ -1824,8 +1827,8 @@ async def dashboard(
         # ── Custom bonus calculation ──
         spots = sum(1 for d in delivered_mtd if d.spot_sold)
         pend_month = [d for d in pending_all if d.sold_date and start_m <= d.sold_date < end_m]
-        proj_units = units_mtd + len(pend_month)
-        proj_used = used_mtd + sum(1 for d in pend_month if (d.new_used or "").lower() == "used")
+        proj_units = units_mtd + sum(_deal_units(d) for d in pend_month)
+        proj_used = used_mtd + sum(_deal_units(d) for d in pend_month if (d.new_used or "").lower() == "used")
         proj_comm = comm_mtd + sum((d.total_deal_comm or 0) for d in pend_month)
 
         bonus_total = 0.0
@@ -2095,6 +2098,7 @@ async def deal_save(
     actual_paid: str | None = Form(None),
     notes: str | None = Form(None), pay_date: str | None = Form(None), is_paid: int = Form(0),
     commission_override: str | None = Form(None),
+    split_deal: int = Form(0), star_car: int = Form(0),
     next: str | None = Form(None), db: AsyncSession = Depends(get_db),
 ):
     user_id = uid(request)
@@ -2135,6 +2139,7 @@ async def deal_save(
         hold_amount=float(hold_amount or 0), aim_amount=float(aim_amount or 0), fi_pvr=float(fi_pvr or 0),
         front_gross=float(front_gross or 0), back_gross=float(back_gross or 0),
         notes=notes or "", pay_date=pay, is_paid=bool(is_paid),
+        split_deal=bool(split_deal), star_car=bool(star_car),
     )
     uc, ao, th, tot = calc_commission(deal_in, settings)
 
@@ -2191,6 +2196,8 @@ async def deal_save(
 
     # Add new ones and calculate custom product commission
     custom_addon_comm = 0.0
+    # Track product names for syncing legacy boolean fields (used by closing % on dashboard)
+    sold_product_names = set()
     if product_ids:
         prods = (await db.execute(
             select(DealerProduct).where(DealerProduct.id.in_(product_ids))
@@ -2200,10 +2207,19 @@ async def deal_save(
                 continue  # Skip Finance product; handled by F/C/L
             db.add(DealProduct(deal_id=the_deal.id, product_id=p.id))
             custom_addon_comm += p.commission
+            sold_product_names.add(p.name)
 
     # Add $50 for Finance or Lease F/C/L
     if dt in ("Finance", "Lease"):
         custom_addon_comm += 50.0
+
+    # Sync legacy boolean fields from product checkboxes (powers dashboard closing %)
+    the_deal.permaplate = "PermaPlate" in sold_product_names
+    the_deal.nitro_fill = "Nitro Fill" in sold_product_names
+    the_deal.pulse = "Pulse" in sold_product_names
+    the_deal.warranty = "Warranty" in sold_product_names
+    the_deal.tire_wheel = "Tire & Wheel" in sold_product_names
+    the_deal.finance_non_subvented = dt in ("Finance", "Lease")
 
     # Update add_ons and totals with custom product commission
     if custom_addon_comm > 0:
@@ -2211,6 +2227,11 @@ async def deal_save(
         if comm_ov is None:
             the_deal.total_deal_comm = uc + custom_addon_comm + th + aim_val
             the_deal.expected_commission = the_deal.total_deal_comm
+
+    # Split deal: halve the total commission
+    if bool(split_deal):
+        the_deal.total_deal_comm = round((the_deal.total_deal_comm or 0) / 2, 2)
+        the_deal.expected_commission = the_deal.total_deal_comm
 
     await db.commit()
     return RedirectResponse(url=(next or "/deals"), status_code=303)

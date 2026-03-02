@@ -237,6 +237,9 @@ class Deal(Base):
     gas_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     inspection_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     insurance_ready: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Split deal & Star car
+    split_deal: Mapped[bool] = mapped_column(Boolean, default=False)
+    star_car: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 # ════════════════════════════════════════════════

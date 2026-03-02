@@ -35,3 +35,5 @@ class DealIn(BaseModel):
     gas_ready: bool = False
     inspection_ready: bool = False
     insurance_ready: bool = False
+    split_deal: bool = False
+    star_car: bool = False

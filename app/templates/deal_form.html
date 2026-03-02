@@ -35,6 +35,10 @@
       <input type="checkbox" class="h-4 w-4" name="spot_sold" value="1" {% if deal and deal.spot_sold %}checked{% endif %}>
         <span class="text-sm text-slate-700">Yes (sets Delivered Date = today)</span>
       </div>
+      <div class="flex items-center gap-2 mt-2">
+        <input type="checkbox" class="h-4 w-4" name="split_deal" id="split_deal_cb" value="1" {% if deal and deal.split_deal %}checked{% endif %}>
+        <span class="text-sm text-slate-700">Split Deal (½ unit, ½ commission)</span>
+      </div>
     </div>
     <div>
       <label class="text-xs text-slate-500">Status</label>
@@ -492,13 +496,17 @@
 
           const aimAmt = parseFloat(els.aim?.value || '0') || 0;
 
-          const total = unit + addons + holdComm + aimAmt;
+          let total = unit + addons + holdComm + aimAmt;
+
+          // Split deal: halve the total commission
+          const isSplit = document.getElementById('split_deal_cb')?.checked;
+          if (isSplit) total = Math.round(total / 2);
 
           els.outUnit.textContent = fmt(unit);
           els.outAddons.textContent = fmt(addons);
           els.outHold.textContent = fmt(holdComm);
           if (els.outAim) els.outAim.textContent = fmt(aimAmt);
-          els.outTotal.textContent = fmt(total);
+          els.outTotal.textContent = fmt(total) + (isSplit ? ' (split)' : '');
 
           if (els.hint) {
             els.hint.textContent = customer ? '' : 'Enter a customer name to save.';
@@ -521,6 +529,10 @@
         document.querySelectorAll('.product-cb').forEach(function(cb) {
           cb.addEventListener('change', calc);
         });
+
+        // Watch split deal checkbox
+        const splitCb = document.getElementById('split_deal_cb');
+        if (splitCb) splitCb.addEventListener('change', calc);
 
         calc();
       }

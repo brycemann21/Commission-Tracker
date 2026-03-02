@@ -84,7 +84,7 @@
   {# Units MTD #}
   <div class="bg-white rounded-lg border border-slate-200 p-4">
     <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Units MTD</div>
-    <div class="text-3xl font-bold mt-1">{{ units_mtd }}</div>
+    <div class="text-3xl font-bold mt-1">{{ units_mtd | int if units_mtd == units_mtd | int else units_mtd }}</div>
     <div class="text-xs text-slate-500 mt-1">New: {{ new_mtd }} · Used: {{ used_mtd }}</div>
     {% if units_diff != 0 %}
       <div class="text-xs mt-1 flex items-center gap-1 {{ 'text-emerald-600' if units_diff > 0 else 'text-rose-600' }}">
