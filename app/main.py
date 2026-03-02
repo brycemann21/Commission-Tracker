@@ -33,7 +33,7 @@ from sqlalchemy import select, func, or_, and_, text as sa_text
 
 from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder, Dealership, Invite, Post, PostUpvote, PollOption, PollVote, DealerProduct, DealProduct, DealerBonus
 from .schemas import DealIn
-from .payplan import CommissionEngine, MonthStats, _pct
+from .payplan import calc_commission
 from .utils import parse_date, today
 from .auth import (
     # Legacy password helpers
@@ -995,18 +995,12 @@ async def _run_startup_migrations():
                     threshold_min INTEGER DEFAULT 0,
                     threshold_max INTEGER,
                     amount FLOAT DEFAULT 0,
-                    bonus_type VARCHAR(16) DEFAULT 'flat',
                     period VARCHAR(16) DEFAULT 'monthly',
                     sort_order INTEGER DEFAULT 0,
                     is_active BOOLEAN DEFAULT true
                 )
             """)
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_dealer_bonuses_dlr ON dealer_bonuses(dealership_id)")
-        except Exception:
-            pass
-        # Add bonus_type column if table already exists without it
-        try:
-            await conn.execute("ALTER TABLE dealer_bonuses ADD COLUMN IF NOT EXISTS bonus_type VARCHAR(16) DEFAULT 'flat'")
         except Exception:
             pass
 
@@ -1082,6 +1076,37 @@ def quarter_bounds(d: date):
     start = date(d.year, q, 1)
     end = date(d.year + 1, 1, 1) if q == 10 else date(d.year, q + 3, 1)
     return start, end
+
+def _tiered(count, tiers):
+    for mn, mx, amt in tiers:
+        if count >= mn and (mx is None or count <= mx):
+            return amt, (f"{mn}+" if mx is None else f"{mn}-{mx}")
+    return 0.0, "--"
+
+def _tiered_spot(count, tiers):
+    for mn, mx, per in tiers:
+        if count >= mn and (mx is None or count <= mx):
+            label = f"{mn}+" if mx is None else f"{mn}-{mx}"
+            return float(count) * float(per), float(per), label
+    return 0.0, 0.0, "--"
+
+def _next_tier(count, tiers):
+    asc = sorted(tiers, key=lambda x: x[0])
+    for mn, mx, amt in asc:
+        if count < mn:
+            return {"tier": f"{mn}+" if mx is None else f"{mn}–{mx}", "at": mn, "need": mn - count, "amount": float(amt)}
+    return {"tier": "Maxed", "at": None, "need": 0, "amount": 0.0}
+
+def _next_spot(count, tiers):
+    asc = sorted(tiers, key=lambda x: x[0])
+    for mn, mx, per in asc:
+        if count < mn:
+            return {"tier": f"{mn}+" if mx is None else f"{mn}–{mx}", "at": mn, "need": mn - count, "per": float(per)}
+    return {"tier": "Maxed", "at": None, "need": 0, "per": 0.0}
+
+def _pct(n, d):
+    return round((n / d) * 100.0, 1) if d > 0 else None
+
 
 # ════════════════════════════════════════════════
 # AUTH ROUTES
@@ -1735,75 +1760,141 @@ async def dashboard(
     prev_units = prev_row.cnt or 0
     prev_comm = float(prev_row.comm or 0)
 
-    # ── Commission engine setup ──────────────────────────────────────────────
+    # ── Closing rates ─────────────────────────────────────────────────────────
+    dt = units_mtd
+    pulse_y = sum(1 for d in delivered_mtd if d.pulse)
+    nitro_y = sum(1 for d in delivered_mtd if d.nitro_fill)
+    perma_y = sum(1 for d in delivered_mtd if d.permaplate)
+    aim_y = sum(1 for d in delivered_mtd if (d.aim_presentation or "X") == "Yes")
+    aim_n = sum(1 for d in delivered_mtd if (d.aim_presentation or "X") == "No")
+    closing_rates = {
+        "pulse": {"label": "Pulse", "yes": pulse_y, "den": dt, "pct": _pct(pulse_y, dt)},
+        "nitro": {"label": "Nitro Fill", "yes": nitro_y, "den": dt, "pct": _pct(nitro_y, dt)},
+        "permaplate": {"label": "PermaPlate", "yes": perma_y, "den": dt, "pct": _pct(perma_y, dt)},
+        "aim": {"label": "Aim", "yes": aim_y, "den": aim_y + aim_n, "pct": _pct(aim_y, aim_y + aim_n)},
+    }
+
+    # ── Bonus tiers (from custom dealer_bonuses table) ─────────────────────────
     d_id = user_dealership_id(request)
-    products = []
-    bonuses = []
+    custom_bonuses = []
     if d_id:
-        products = (await db.execute(
-            select(DealerProduct).where(DealerProduct.dealership_id == d_id, DealerProduct.is_active == True)
-            .order_by(DealerProduct.sort_order)
-        )).scalars().all()
-        bonuses = (await db.execute(
+        custom_bonuses = (await db.execute(
             select(DealerBonus).where(DealerBonus.dealership_id == d_id, DealerBonus.is_active == True)
             .order_by(DealerBonus.category, DealerBonus.threshold_min.desc())
         )).scalars().all()
 
-    engine = CommissionEngine(s, products, bonuses)
+    # Fallback: if no custom bonuses, use legacy Settings fields
+    if not custom_bonuses:
+        vol_tiers = [(25,None,float(s.new_volume_bonus_25_plus)),(21,24,float(s.new_volume_bonus_21_24)),
+                     (19,20,float(s.new_volume_bonus_19_20)),(17,18,float(s.new_volume_bonus_17_18)),(15,16,float(s.new_volume_bonus_15_16))]
+        used_tiers = [(13,None,float(s.used_volume_bonus_13_plus)),(11,12,float(s.used_volume_bonus_11_12)),(8,10,float(s.used_volume_bonus_8_10))]
+        spot_tiers = [(13,None,float(s.spot_bonus_13_plus)),(10,12,float(s.spot_bonus_10_12)),(5,9,float(s.spot_bonus_5_9))]
+        vol_amt, vol_tier = _tiered(units_mtd, vol_tiers)
+        used_amt, used_tier = _tiered(used_mtd, used_tiers)
+        spots = sum(1 for d in delivered_mtd if d.spot_sold)
+        spot_total, spot_per, spot_tier = _tiered_spot(spots, spot_tiers)
+        q_hit = qtd_count >= int(s.quarterly_bonus_threshold_units or 0)
+        q_bonus = float(s.quarterly_bonus_amount) if q_hit else 0.0
+        bonus_total = float(vol_amt) + float(used_amt) + float(spot_total) + q_bonus
+        pend_month = [d for d in pending_all if d.sold_date and start_m <= d.sold_date < end_m]
+        proj_units = units_mtd + len(pend_month)
+        proj_used = used_mtd + sum(1 for d in pend_month if (d.new_used or "").lower() == "used")
+        pv, _ = _tiered(proj_units, vol_tiers)
+        pu, _ = _tiered(proj_used, used_tiers)
+        proj_bonus = float(pv) + float(pu) + float(spot_total) + q_bonus
+        proj_comm = comm_mtd + sum((d.total_deal_comm or 0) for d in pend_month)
+        bonus_breakdown = {
+            "volume": {"units": units_mtd, "new_units": new_mtd, "used_units": used_mtd, "tier": vol_tier, "amount": float(vol_amt), "next": _next_tier(units_mtd, vol_tiers)},
+            "used": {"units": used_mtd, "tier": used_tier, "amount": float(used_amt), "next": _next_tier(used_mtd, used_tiers)},
+            "spot": {"spots": spots, "tier": spot_tier, "per": float(spot_per), "amount": float(spot_total), "next": _next_spot(spots, spot_tiers)},
+            "quarterly": {"units_qtd": qtd_count, "threshold": int(s.quarterly_bonus_threshold_units or 0), "hit": q_hit, "amount": q_bonus,
+                           "q_label": f"Q{((sel_m-1)//3)+1}", "next": {"tier": "Hit" if q_hit else f"{int(s.quarterly_bonus_threshold_units or 0)} units",
+                           "need": 0 if q_hit else max(0, int(s.quarterly_bonus_threshold_units or 0) - qtd_count), "amount": float(s.quarterly_bonus_amount or 0)}},
+            "total": bonus_total,
+            "custom_list": [],
+        }
+    else:
+        # ── Custom bonus calculation ──
+        spots = sum(1 for d in delivered_mtd if d.spot_sold)
+        pend_month = [d for d in pending_all if d.sold_date and start_m <= d.sold_date < end_m]
+        proj_units = units_mtd + len(pend_month)
+        proj_used = used_mtd + sum(1 for d in pend_month if (d.new_used or "").lower() == "used")
+        proj_comm = comm_mtd + sum((d.total_deal_comm or 0) for d in pend_month)
 
-    # ── Dynamic closing rates (all products) ──────────────────────────────────
-    deal_ids = [d.id for d in delivered_mtd]
-    deal_product_map = {}
-    if deal_ids:
-        dp_rows = (await db.execute(
-            select(DealProduct.deal_id, DealProduct.product_id).where(DealProduct.deal_id.in_(deal_ids))
-        )).all()
-        for row in dp_rows:
-            deal_product_map.setdefault(row.deal_id, set()).add(row.product_id)
+        bonus_total = 0.0
+        proj_bonus = 0.0
+        custom_list = []
 
-    closing_rates = engine.calc_closing_rates(delivered_mtd, deal_product_map)
+        for b in custom_bonuses:
+            # Determine which count to check against this bonus
+            if b.category == "volume_new":
+                count = new_mtd if b.period == "monthly" else qtd_count
+                proj_count = proj_units
+            elif b.category == "volume_used":
+                count = used_mtd if b.period == "monthly" else qtd_count
+                proj_count = proj_used
+            elif b.category == "spot":
+                count = spots
+                proj_count = spots
+            elif b.category == "quarterly":
+                count = qtd_count
+                proj_count = qtd_count
+            else:
+                # Custom: use total units
+                count = units_mtd if b.period == "monthly" else (qtd_count if b.period == "quarterly" else ytd_units)
+                proj_count = proj_units
 
-    # ── Bonus calculation (single path) ────────────────────────────────────────
-    spots = sum(1 for d in delivered_mtd if d.spot_sold)
-    pend_month = [d for d in pending_all if d.sold_date and start_m <= d.sold_date < end_m]
-    proj_units = units_mtd + len(pend_month)
-    proj_used = used_mtd + sum(1 for d in pend_month if (d.new_used or "").lower() == "used")
-    proj_comm = comm_mtd + sum((d.total_deal_comm or 0) for d in pend_month)
+            in_range = count >= b.threshold_min and (b.threshold_max is None or count <= b.threshold_max)
+            proj_in_range = proj_count >= b.threshold_min and (b.threshold_max is None or proj_count <= b.threshold_max)
 
-    # Gross totals for gross_pct bonus calculations
-    total_front_gross = sum((d.front_gross or 0) for d in delivered_mtd)
-    total_back_gross = sum((d.back_gross or 0) for d in delivered_mtd)
+            if b.category == "spot" and in_range:
+                amt = b.amount * count  # per-spot bonus
+            elif in_range:
+                amt = b.amount
+            else:
+                amt = 0.0
 
-    stats = MonthStats(
-        units_mtd=units_mtd, new_mtd=new_mtd, used_mtd=used_mtd,
-        spots=spots, qtd_count=qtd_count, ytd_units=ytd_units,
-        proj_units=proj_units, proj_used=proj_used,
-        total_front_gross_mtd=total_front_gross, total_back_gross_mtd=total_back_gross,
-    )
-    bonus_result = engine.calc_bonuses(stats)
-    bonus_total = bonus_result.total
-    proj_bonus = bonus_result.projected_total
+            if b.category == "spot" and proj_in_range:
+                proj_amt = b.amount * proj_count
+            elif proj_in_range:
+                proj_amt = b.amount
+            else:
+                proj_amt = 0.0
 
-    # Build bonus_breakdown for template (unified format)
-    bonus_breakdown = {
-        "total": bonus_total,
-        "custom_list": [
-            {
-                "name": t.name, "category": t.category, "range": t.range_label,
-                "amount": t.amount_per, "earned": t.earned, "hit": t.hit,
-                "need": t.need, "count": t.count, "period": t.period,
-                "bonus_type": t.bonus_type,
-            }
-            for t in bonus_result.tiers
-        ],
-    }
+            bonus_total += amt
+            proj_bonus += proj_amt
+
+            # How many more units to reach this bonus
+            need = max(0, b.threshold_min - count) if not in_range else 0
+            range_label = f"{b.threshold_min}{'–' + str(b.threshold_max) if b.threshold_max else '+'}"
+
+            custom_list.append({
+                "name": b.name, "category": b.category, "range": range_label,
+                "amount": b.amount, "earned": amt, "hit": in_range,
+                "need": need, "count": count, "period": b.period,
+            })
+
+        bonus_breakdown = {
+            "total": bonus_total,
+            "custom_list": custom_list,
+            # Legacy fields for template backwards compat
+            "volume": {"units": units_mtd, "amount": 0, "next": {"need": 0, "amount": 0}},
+            "used": {"units": used_mtd, "amount": 0, "next": {"need": 0, "amount": 0}},
+            "spot": {"spots": spots, "amount": 0, "next": {"need": 0, "per_spot": 0}},
+            "quarterly": {"units_qtd": qtd_count, "hit": False, "amount": 0, "q_label": f"Q{((sel_m-1)//3)+1}",
+                          "next": {"need": 0, "amount": 0}},
+        }
 
     # ── Pending deal ages ─────────────────────────────────────────────────────
     for d in pending_all:
         d.days_pending = (today_date - d.sold_date).days if d.sold_date else 0
 
     # ── Milestones ────────────────────────────────────────────────────────────
-    milestones = engine.milestones(bonus_result)
+    milestones = []
+    if vol_amt > 0: milestones.append(f"Volume Bonus unlocked — ${vol_amt:,.0f}")
+    if used_amt > 0: milestones.append(f"Used Bonus unlocked — ${used_amt:,.0f}")
+    if spot_total > 0: milestones.append(f"Spot Bonus active — ${spot_total:,.0f}")
+    if q_hit: milestones.append(f"Quarterly target hit — ${q_bonus:,.0f}")
 
     goals = {"unit_goal": goal.unit_goal if goal else 20, "commission_goal": goal.commission_goal if goal else 8000.0, "has_custom": goal is not None}
 
@@ -2029,22 +2120,7 @@ async def deal_save(
         front_gross=float(front_gross or 0), back_gross=float(back_gross or 0),
         notes=notes or "", pay_date=pay, is_paid=bool(is_paid),
     )
-
-    # Parse product checkboxes BEFORE commission calc so we can include them
-    form_data = await request.form()
-    product_ids = set(int(k.split("_")[1]) for k in form_data.keys() if k.startswith("product_") and form_data[k])
-
-    # Load dealer products for commission engine
-    d_id = user_dealership_id(request)
-    dealer_products = []
-    if d_id:
-        dealer_products = (await db.execute(
-            select(DealerProduct).where(DealerProduct.dealership_id == d_id, DealerProduct.is_active == True)
-        )).scalars().all()
-
-    engine = CommissionEngine(settings, dealer_products, [])
-    comm_result = engine.calc_deal(deal_in, product_ids if product_ids else None)
-    uc, ao, th, tot = comm_result.unit_comm, comm_result.addon_comm, comm_result.trade_hold_comm, comm_result.total
+    uc, ao, th, tot = calc_commission(deal_in, settings)
 
     # If user provided a manual override, use it as total_deal_comm
     comm_ov: float | None = None
@@ -2082,14 +2158,33 @@ async def deal_save(
     if not deal_id:
         await db.refresh(the_deal)
 
-    # Sync deal_products join table
+    # Handle custom products (checkboxes named "product_<id>")
+    form_data = await request.form()
+    product_ids = [int(k.split("_")[1]) for k in form_data.keys() if k.startswith("product_") and form_data[k]]
+
+    # Clear old deal products
     old_prods = (await db.execute(
         select(DealProduct).where(DealProduct.deal_id == the_deal.id)
     )).scalars().all()
     for op in old_prods:
         await db.delete(op)
-    for pid in product_ids:
-        db.add(DealProduct(deal_id=the_deal.id, product_id=pid))
+
+    # Add new ones and calculate custom product commission
+    custom_addon_comm = 0.0
+    if product_ids:
+        prods = (await db.execute(
+            select(DealerProduct).where(DealerProduct.id.in_(product_ids))
+        )).scalars().all()
+        for p in prods:
+            db.add(DealProduct(deal_id=the_deal.id, product_id=p.id))
+            custom_addon_comm += p.commission
+
+    # Update add_ons and totals with custom product commission
+    if custom_addon_comm > 0:
+        the_deal.add_ons = custom_addon_comm
+        if comm_ov is None:
+            the_deal.total_deal_comm = uc + custom_addon_comm + th
+            the_deal.expected_commission = the_deal.total_deal_comm
 
     await db.commit()
     return RedirectResponse(url=(next or "/deals"), status_code=303)
@@ -2145,20 +2240,9 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
                 deal.commission_override = float(str(value).replace("$","").replace(",",""))
             except ValueError:
                 return JSONResponse({"ok": False, "error": "Invalid number"}, status_code=400)
-        # Recalc total using engine
+        # Recalc total
         deal_in = DealIn(**{c.key: getattr(deal, c.key) for c in deal.__table__.columns if c.key in DealIn.model_fields})
-        # Load this deal's products
-        d_id = user_dealership_id(request)
-        dealer_products = (await db.execute(
-            select(DealerProduct).where(DealerProduct.dealership_id == d_id, DealerProduct.is_active == True)
-        )).scalars().all() if d_id else []
-        dp_rows = (await db.execute(
-            select(DealProduct.product_id).where(DealProduct.deal_id == deal.id)
-        )).scalars().all()
-        deal_prod_ids = set(dp_rows)
-        eng = CommissionEngine(settings, dealer_products, [])
-        cr = eng.calc_deal(deal_in, deal_prod_ids if deal_prod_ids else None)
-        uc, ao, th, tot = cr.unit_comm, cr.addon_comm, cr.trade_hold_comm, cr.total
+        uc, ao, th, tot = calc_commission(deal_in, settings)
         deal.total_deal_comm = deal.commission_override if deal.commission_override is not None else tot
     else:
         setattr(deal, field, value)
@@ -2643,11 +2727,7 @@ async def import_csv(request: Request, db: AsyncSession = Depends(get_db)):
             if deal_in.status == "Delivered" and not deal_in.delivered_date:
                 deal_in.delivered_date = deal_in.sold_date or today()
 
-            uc, ao, th, tot = 0.0, 0.0, 0.0, 0.0
-            # Use engine for import commission calc (no products attached during import)
-            _eng = CommissionEngine(settings, [], [])
-            _cr = _eng.calc_deal(deal_in)
-            uc, ao, th, tot = _cr.unit_comm, _cr.addon_comm, _cr.trade_hold_comm, _cr.total
+            uc, ao, th, tot = calc_commission(deal_in, settings)
             db.add(Deal(
                 **deal_in.model_dump(),
                 user_id=user_id,
@@ -2908,18 +2988,18 @@ async def payplan_post(
     pay_type: str = Form("flat"),
     gross_front_pct: float = Form(0.0), gross_back_pct: float = Form(0.0),
     mini_deal: float = Form(0.0), pack_deduction: float = Form(0.0),
-    unit_comm_discount_le_200: float = Form(0.0), unit_comm_discount_gt_200: float = Form(0.0),
-    permaplate: float = Form(0.0), nitro_fill: float = Form(0.0), pulse: float = Form(0.0),
-    finance_non_subvented: float = Form(0.0), warranty: float = Form(0.0), tire_wheel: float = Form(0.0),
-    hourly_rate_ny_offset: float = Form(0.0),
-    new_volume_bonus_15_16: float = Form(0.0), new_volume_bonus_17_18: float = Form(0.0),
-    new_volume_bonus_19_20: float = Form(0.0), new_volume_bonus_21_24: float = Form(0.0),
-    new_volume_bonus_25_plus: float = Form(0.0),
-    used_volume_bonus_8_10: float = Form(0.0), used_volume_bonus_11_12: float = Form(0.0),
-    used_volume_bonus_13_plus: float = Form(0.0),
-    spot_bonus_5_9: float = Form(0.0), spot_bonus_10_12: float = Form(0.0),
-    spot_bonus_13_plus: float = Form(0.0),
-    quarterly_bonus_threshold_units: int = Form(0), quarterly_bonus_amount: float = Form(0.0),
+    unit_comm_discount_le_200: float = Form(...), unit_comm_discount_gt_200: float = Form(...),
+    permaplate: float = Form(...), nitro_fill: float = Form(...), pulse: float = Form(...),
+    finance_non_subvented: float = Form(...), warranty: float = Form(...), tire_wheel: float = Form(...),
+    hourly_rate_ny_offset: float = Form(...),
+    new_volume_bonus_15_16: float = Form(...), new_volume_bonus_17_18: float = Form(...),
+    new_volume_bonus_19_20: float = Form(...), new_volume_bonus_21_24: float = Form(...),
+    new_volume_bonus_25_plus: float = Form(...),
+    used_volume_bonus_8_10: float = Form(...), used_volume_bonus_11_12: float = Form(...),
+    used_volume_bonus_13_plus: float = Form(...),
+    spot_bonus_5_9: float = Form(...), spot_bonus_10_12: float = Form(...),
+    spot_bonus_13_plus: float = Form(...),
+    quarterly_bonus_threshold_units: int = Form(...), quarterly_bonus_amount: float = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
     # Only admins can change the pay plan — it affects the entire dealership
@@ -3000,7 +3080,6 @@ async def payplan_add_bonus(
     bonus_name: str = Form(""), bonus_category: str = Form("custom"),
     bonus_min: int = Form(0), bonus_max: str = Form(""),
     bonus_amount: float = Form(0.0), bonus_period: str = Form("monthly"),
-    bonus_type: str = Form("flat"),
 ):
     """Add a custom bonus tier."""
     _require_admin(request)
@@ -3012,15 +3091,13 @@ async def payplan_add_bonus(
         bonus_category = "custom"
     if bonus_period not in ("monthly", "quarterly", "yearly"):
         bonus_period = "monthly"
-    if bonus_type not in ("flat", "gross_pct"):
-        bonus_type = "flat"
     max_order = (await db.execute(
         select(func.max(DealerBonus.sort_order)).where(DealerBonus.dealership_id == d_id)
     )).scalar() or 0
     db.add(DealerBonus(
         dealership_id=d_id, name=bonus_name.strip()[:100], category=bonus_category,
         threshold_min=bonus_min, threshold_max=mx, amount=bonus_amount,
-        bonus_type=bonus_type, period=bonus_period, sort_order=max_order + 1,
+        period=bonus_period, sort_order=max_order + 1,
     ))
     await db.commit()
     return RedirectResponse(url="/payplan", status_code=303)
@@ -4032,18 +4109,26 @@ async def community_create_post(
     payload = "{}"
 
     if post_type == "payplan":
-        # Auto-generate from settings + dynamic products/bonuses
+        # Auto-generate from settings
         s = await get_or_create_settings(db, uid(request), d_id)
-        products = (await db.execute(
-            select(DealerProduct).where(DealerProduct.dealership_id == d_id, DealerProduct.is_active == True)
-            .order_by(DealerProduct.sort_order)
-        )).scalars().all() if d_id else []
-        bonuses = (await db.execute(
-            select(DealerBonus).where(DealerBonus.dealership_id == d_id, DealerBonus.is_active == True)
-            .order_by(DealerBonus.category, DealerBonus.threshold_min)
-        )).scalars().all() if d_id else []
-        engine = CommissionEngine(s, products, bonuses)
-        payload = _json.dumps(engine.share_payload())
+        payload = _json.dumps({
+            "unit_comm_le_200": s.unit_comm_discount_le_200,
+            "unit_comm_gt_200": s.unit_comm_discount_gt_200,
+            "permaplate": s.permaplate, "nitro_fill": s.nitro_fill,
+            "pulse": s.pulse, "finance": s.finance_non_subvented,
+            "warranty": s.warranty, "tire_wheel": s.tire_wheel,
+            "hourly_offset": s.hourly_rate_ny_offset,
+            "new_vol_15_16": s.new_volume_bonus_15_16,
+            "new_vol_17_18": s.new_volume_bonus_17_18,
+            "new_vol_19_20": s.new_volume_bonus_19_20,
+            "new_vol_21_24": s.new_volume_bonus_21_24,
+            "new_vol_25_plus": s.new_volume_bonus_25_plus,
+            "used_vol_8_10": s.used_volume_bonus_8_10,
+            "used_vol_11_12": s.used_volume_bonus_11_12,
+            "used_vol_13_plus": s.used_volume_bonus_13_plus,
+            "quarterly_threshold": s.quarterly_bonus_threshold_units,
+            "quarterly_amount": s.quarterly_bonus_amount,
+        })
 
     elif post_type == "ytd":
         # Auto-generate from deals

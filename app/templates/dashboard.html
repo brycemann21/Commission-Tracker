@@ -185,14 +185,58 @@
     </div>
   </div>
   {% endif %}
+{% else %}
+  {# Legacy milestones fallback #}
+  {% set vn = bonus_breakdown.volume.next %}
+  {% set un = bonus_breakdown.used.next %}
+  {% set sn = bonus_breakdown.spot.next %}
+  {% set qn = bonus_breakdown.quarterly.next %}
+  {% if vn.need > 0 or un.need > 0 or sn.need > 0 or qn.need > 0 %}
+  <div class="mb-4 bg-white rounded-lg border border-amber-200 p-4">
+    <div class="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-3 flex items-center gap-1">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      Next Milestones
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {% if vn.need > 0 %}
+      <div class="bg-amber-50 rounded-lg p-3">
+        <div class="text-[11px] text-slate-500">Volume Bonus</div>
+        <div class="text-lg font-bold text-amber-800">{{ vn.need }} more</div>
+        <div class="text-[11px] text-slate-500">→ {{ vn.tier }} = ${{ "{:,.0f}".format(vn.amount) }}</div>
+      </div>
+      {% endif %}
+      {% if un.need > 0 %}
+      <div class="bg-amber-50 rounded-lg p-3">
+        <div class="text-[11px] text-slate-500">Used Bonus</div>
+        <div class="text-lg font-bold text-amber-800">{{ un.need }} more used</div>
+        <div class="text-[11px] text-slate-500">→ {{ un.tier }} = ${{ "{:,.0f}".format(un.amount) }}</div>
+      </div>
+      {% endif %}
+      {% if sn.need > 0 %}
+      <div class="bg-amber-50 rounded-lg p-3">
+        <div class="text-[11px] text-slate-500">Spot Bonus</div>
+        <div class="text-lg font-bold text-amber-800">{{ sn.need }} more spots</div>
+        <div class="text-[11px] text-slate-500">→ {{ sn.tier }} @ ${{ "{:,.0f}".format(sn.per) }}/spot</div>
+      </div>
+      {% endif %}
+      {% if qn.need > 0 %}
+      <div class="bg-amber-50 rounded-lg p-3">
+        <div class="text-[11px] text-slate-500">Quarterly ({{ bonus_breakdown.quarterly.q_label }})</div>
+        <div class="text-lg font-bold text-amber-800">{{ qn.need }} more units</div>
+        <div class="text-[11px] text-slate-500">→ ${{ "{:,.0f}".format(qn.amount) }}</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 {% endif %}
 
-{# ── Closing Rates (color coded, dynamic products) ── #}
-{% if closing_rates|length > 0 %}
+{# ── Closing Rates (color coded) ── #}
 <div class="mb-4 bg-white rounded-lg border border-slate-200 p-4">
   <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Closing % (Delivered Deals)</div>
-  <div class="grid grid-cols-2 md:grid-cols-{{ [closing_rates|length, 4]|min }} gap-4">
-    {% for r in closing_rates %}
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    {% for k in ["pulse","nitro","permaplate","aim"] %}
+      {% set r = closing_rates[k] %}
       {% set pct = (r.pct if r.pct is not none else 0) %}
       {% set bar_color = 'bg-emerald-500' if r.pct is not none and r.pct >= 60 else 'bg-amber-500' if r.pct is not none and r.pct >= 30 else 'bg-rose-400' if r.pct is not none else 'bg-slate-200' %}
       {% set text_color = 'text-emerald-700' if r.pct is not none and r.pct >= 60 else 'text-amber-700' if r.pct is not none and r.pct >= 30 else 'text-rose-600' if r.pct is not none else 'text-slate-400' %}
@@ -206,12 +250,11 @@
         <div class="h-2.5 bg-slate-100 rounded-full overflow-hidden">
           <div class="h-2.5 rounded-full {{ bar_color }} transition-all duration-500" style="width: {{ pct }}%"></div>
         </div>
-        <div class="text-[10px] text-slate-400 mt-1">{{ r.yes }}/{{ r.den }}{% if r.label == "Aim" %} (X excluded){% endif %}</div>
+        <div class="text-[10px] text-slate-400 mt-1">{{ r.yes }}/{{ r.den }}{% if k == "aim" %} (X excluded){% endif %}</div>
       </div>
     {% endfor %}
   </div>
 </div>
-{% endif %}
 
 {# ── Year Trend ── #}
 <div class="mb-4 bg-white rounded-lg border border-slate-200 p-4">
@@ -371,7 +414,8 @@
               </tr>
             </thead>
             <tbody>
-              {% for b in bonus_breakdown.get('custom_list', []) %}
+              {% if bonus_breakdown.get('custom_list') %}
+                {% for b in bonus_breakdown.custom_list %}
                 <tr class="border-t {{ 'bg-emerald-50' if b.hit else '' }}">
                   <td class="p-2.5 font-medium">{{ b.name }}</td>
                   <td class="p-2.5">{{ b.count }} {{ b.category.replace('volume_', '') if 'volume' in b.category else b.category }}</td>
@@ -382,10 +426,36 @@
                   </td>
                   <td class="p-2.5 text-right font-semibold {{ 'text-emerald-700' if b.earned > 0 else '' }}">${{ "{:,.0f}".format(b.earned) }}</td>
                 </tr>
-              {% endfor %}
-              {% if not bonus_breakdown.get('custom_list') %}
+                {% endfor %}
+              {% else %}
+                {# Legacy fallback rows #}
                 <tr class="border-t">
-                  <td colspan="5" class="p-4 text-center text-slate-400">No bonuses configured. <a href="/payplan" class="text-violet-600 hover:underline">Set up bonuses</a></td>
+                  <td class="p-2.5 font-medium">Volume Bonus</td>
+                  <td class="p-2.5">{{ bonus_breakdown.volume.units }} units</td>
+                  <td class="p-2.5">{{ bonus_breakdown.volume.get('tier', '--') }}</td>
+                  <td class="p-2.5">—</td>
+                  <td class="p-2.5 text-right font-semibold">${{ "{:,.0f}".format(bonus_breakdown.volume.amount or 0) }}</td>
+                </tr>
+                <tr class="border-t">
+                  <td class="p-2.5 font-medium">Used Volume</td>
+                  <td class="p-2.5">{{ bonus_breakdown.used.units }} used</td>
+                  <td class="p-2.5">{{ bonus_breakdown.used.get('tier', '--') }}</td>
+                  <td class="p-2.5">—</td>
+                  <td class="p-2.5 text-right font-semibold">${{ "{:,.0f}".format(bonus_breakdown.used.amount or 0) }}</td>
+                </tr>
+                <tr class="border-t">
+                  <td class="p-2.5 font-medium">Spot Bonus</td>
+                  <td class="p-2.5">{{ bonus_breakdown.spot.spots }} spots</td>
+                  <td class="p-2.5">—</td>
+                  <td class="p-2.5">—</td>
+                  <td class="p-2.5 text-right font-semibold">${{ "{:,.0f}".format(bonus_breakdown.spot.amount or 0) }}</td>
+                </tr>
+                <tr class="border-t">
+                  <td class="p-2.5 font-medium">Quarterly</td>
+                  <td class="p-2.5">{{ bonus_breakdown.quarterly.units_qtd }} units ({{ bonus_breakdown.quarterly.q_label }})</td>
+                  <td class="p-2.5">—</td>
+                  <td class="p-2.5">{{ 'Hit ✓' if bonus_breakdown.quarterly.hit else 'Not hit' }}</td>
+                  <td class="p-2.5 text-right font-semibold">${{ "{:,.0f}".format(bonus_breakdown.quarterly.amount or 0) }}</td>
                 </tr>
               {% endif %}
             </tbody>

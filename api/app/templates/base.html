@@ -53,6 +53,7 @@
         <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/deals') else 'text-slate-600 hover:bg-slate-100' }}" href="/deals">Sales Entry</a>
         <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/delivery') else 'text-slate-600 hover:bg-slate-100' }}" href="/delivery">Delivery Board</a>
         <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/payplan') else 'text-slate-600 hover:bg-slate-100' }}" href="/payplan">Pay Plan</a>
+        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path.startswith('/paycheck') else 'text-slate-600 hover:bg-slate-100' }}" href="/paycheck">Paycheck</a>
         <a class="text-sm px-3 py-1.5 rounded transition relative {{ 'bg-slate-900 text-white' if path.startswith('/reminders') else 'text-slate-600 hover:bg-slate-100' }}" href="/reminders">
           Reminders
           {%- if overdue_reminders is defined and overdue_reminders > 0 %}

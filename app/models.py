@@ -282,8 +282,6 @@ class DealerBonus(Base):
     threshold_min: Mapped[int] = mapped_column(Integer, default=0)
     threshold_max: Mapped[int | None] = mapped_column(Integer, nullable=True)  # null = unlimited (e.g. "25+")
     amount: Mapped[float] = mapped_column(Float, default=0.0)
-    # Bonus type: "flat" = dollar amount, "gross_pct" = extra % of front+back gross on every deal
-    bonus_type: Mapped[str] = mapped_column(String(16), default="flat")      # flat | gross_pct
     # Period this bonus resets on
     period: Mapped[str] = mapped_column(String(16), default="monthly")       # monthly | quarterly | yearly
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
