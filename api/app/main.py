@@ -936,6 +936,26 @@ async def _run_startup_migrations():
             """)
         except Exception:
             pass
+
+        # 11. Pay auditor + gross-based pay plan fields
+        for col, typ in [
+            ("pay_type", "VARCHAR(16) DEFAULT 'flat'"),
+            ("gross_front_pct", "FLOAT DEFAULT 0"), ("gross_back_pct", "FLOAT DEFAULT 0"),
+            ("mini_deal", "FLOAT DEFAULT 0"), ("pack_deduction", "FLOAT DEFAULT 0"),
+        ]:
+            try:
+                await conn.execute(f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} {typ}")
+            except Exception:
+                pass
+        for col, typ in [
+            ("front_gross", "FLOAT DEFAULT 0"), ("back_gross", "FLOAT DEFAULT 0"),
+            ("expected_commission", "FLOAT DEFAULT 0"), ("actual_paid", "FLOAT"),
+        ]:
+            try:
+                await conn.execute(f"ALTER TABLE deals ADD COLUMN IF NOT EXISTS {col} {typ}")
+            except Exception:
+                pass
+
     finally:
         # Clean up expired sessions via raw asyncpg (avoids pgBouncer prepared stmt issue)
         try:
@@ -1242,7 +1262,7 @@ async def register_post(
             })
 
         token = await create_session(db, local_user.id, remember_me=False, request=request)
-        resp = RedirectResponse(url="/", status_code=303)
+        resp = RedirectResponse(url="/onboarding", status_code=303)
         _set_session_cookie(resp, token, False)
         return resp
 
@@ -1285,7 +1305,7 @@ async def register_post(
 
         await get_or_create_settings(db, user.id, user.dealership_id)
         token = await create_session(db, user.id, remember_me=False, request=request)
-        resp = RedirectResponse(url="/", status_code=303)
+        resp = RedirectResponse(url="/onboarding", status_code=303)
         _set_session_cookie(resp, token, False)
         return resp
 
@@ -1913,6 +1933,8 @@ async def deal_save(
     permaplate: int = Form(0), nitro_fill: int = Form(0), pulse: int = Form(0),
     finance_non_subvented: int = Form(0), warranty: int = Form(0), tire_wheel: int = Form(0),
     hold_amount: float = Form(0.0), aim_amount: float = Form(0.0), fi_pvr: float = Form(0.0),
+    front_gross: float = Form(0.0), back_gross: float = Form(0.0),
+    actual_paid: str | None = Form(None),
     notes: str | None = Form(None), pay_date: str | None = Form(None), is_paid: int = Form(0),
     commission_override: str | None = Form(None),
     next: str | None = Form(None), db: AsyncSession = Depends(get_db),
@@ -1953,6 +1975,7 @@ async def deal_save(
         finance_non_subvented=bool(dt in ("Finance","Lease") or finance_non_subvented),
         warranty=bool(warranty), tire_wheel=bool(tire_wheel),
         hold_amount=float(hold_amount or 0), aim_amount=float(aim_amount or 0), fi_pvr=float(fi_pvr or 0),
+        front_gross=float(front_gross or 0), back_gross=float(back_gross or 0),
         notes=notes or "", pay_date=pay, is_paid=bool(is_paid),
     )
     uc, ao, th, tot = calc_commission(deal_in, settings)
@@ -1967,12 +1990,24 @@ async def deal_save(
     if comm_ov is not None:
         tot = comm_ov
 
+    # Parse actual_paid
+    actual_paid_val: float | None = None
+    if actual_paid is not None and actual_paid.strip() != "":
+        try:
+            actual_paid_val = float(actual_paid.replace("$", "").replace(",", "").strip())
+        except ValueError:
+            actual_paid_val = None
+
     if deal_id:
         for k, v in deal_in.model_dump().items(): setattr(existing, k, v)
         existing.unit_comm = uc; existing.add_ons = ao; existing.trade_hold_comm = th; existing.total_deal_comm = tot
         existing.commission_override = comm_ov
+        existing.expected_commission = tot
+        existing.actual_paid = actual_paid_val if actual_paid_val is not None else existing.actual_paid
     else:
-        deal = Deal(**deal_in.model_dump(), user_id=user_id, dealership_id=user_dealership_id(request), unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot, commission_override=comm_ov)
+        deal = Deal(**deal_in.model_dump(), user_id=user_id, dealership_id=user_dealership_id(request),
+                     unit_comm=uc, add_ons=ao, trade_hold_comm=th, total_deal_comm=tot,
+                     commission_override=comm_ov, expected_commission=tot, actual_paid=actual_paid_val)
         db.add(deal)
     await db.commit()
     return RedirectResponse(url=(next or "/deals"), status_code=303)
@@ -2705,6 +2740,9 @@ async def payplan_get(request: Request, db: AsyncSession = Depends(get_db)):
 @app.post("/payplan")
 async def payplan_post(
     request: Request,
+    pay_type: str = Form("flat"),
+    gross_front_pct: float = Form(0.0), gross_back_pct: float = Form(0.0),
+    mini_deal: float = Form(0.0), pack_deduction: float = Form(0.0),
     unit_comm_discount_le_200: float = Form(...), unit_comm_discount_gt_200: float = Form(...),
     permaplate: float = Form(...), nitro_fill: float = Form(...), pulse: float = Form(...),
     finance_non_subvented: float = Form(...), warranty: float = Form(...), tire_wheel: float = Form(...),
@@ -2722,6 +2760,12 @@ async def payplan_post(
     # Only admins can change the pay plan — it affects the entire dealership
     _require_admin(request)
     s = await get_or_create_settings(db, uid(request), user_dealership_id(request))
+    if pay_type in ("flat", "gross", "hybrid"):
+        s.pay_type = pay_type
+    s.gross_front_pct = gross_front_pct
+    s.gross_back_pct = gross_back_pct
+    s.mini_deal = mini_deal
+    s.pack_deduction = pack_deduction
     for f in ["unit_comm_discount_le_200","unit_comm_discount_gt_200","permaplate","nitro_fill","pulse",
               "finance_non_subvented","warranty","tire_wheel","hourly_rate_ny_offset",
               "new_volume_bonus_15_16","new_volume_bonus_17_18","new_volume_bonus_19_20",
@@ -3179,6 +3223,289 @@ async def team_update_dealership(
         dealership.name = name.strip()[:200]
         await db.commit()
     return RedirectResponse(url="/team", status_code=303)
+
+
+# ════════════════════════════════════════════════
+# PAYCHECK — pay auditor (expected vs actual)
+# ════════════════════════════════════════════════
+
+@app.get("/paycheck", response_class=HTMLResponse)
+async def paycheck_page(
+    request: Request, db: AsyncSession = Depends(get_db),
+    start: str = "", end: str = "",
+):
+    """Pay auditor — compare expected commission vs actual paid."""
+    user = await _user(request, db)
+    user_id = uid(request)
+
+    # Default to current month
+    td = today()
+    if start:
+        s_date = parse_date(start)
+    else:
+        s_date = td.replace(day=1)
+    if end:
+        e_date = parse_date(end)
+    else:
+        if td.month == 12:
+            e_date = date(td.year + 1, 1, 1)
+        else:
+            e_date = date(td.year, td.month + 1, 1)
+
+    if not s_date: s_date = td.replace(day=1)
+    if not e_date: e_date = date(s_date.year, s_date.month + 1, 1) if s_date.month < 12 else date(s_date.year + 1, 1, 1)
+
+    # Get delivered deals in range
+    deals = (await db.execute(
+        select(Deal).where(
+            Deal.user_id == user_id,
+            Deal.status == "Delivered",
+            Deal.delivered_date >= s_date,
+            Deal.delivered_date < e_date,
+        ).order_by(Deal.delivered_date.asc())
+    )).scalars().all()
+
+    # Calculate totals
+    total_expected = sum(d.expected_commission or d.total_deal_comm or 0 for d in deals)
+    total_actual = sum(d.actual_paid or 0 for d in deals if d.actual_paid is not None)
+    deals_with_actual = [d for d in deals if d.actual_paid is not None]
+    deals_without_actual = [d for d in deals if d.actual_paid is None]
+    total_difference = total_actual - total_expected if deals_with_actual else None
+
+    # Flag discrepancies
+    for d in deals:
+        exp = d.expected_commission or d.total_deal_comm or 0
+        if d.actual_paid is not None:
+            d._diff = d.actual_paid - exp
+            d._has_discrepancy = abs(d._diff) > 1.0  # more than $1 off
+        else:
+            d._diff = None
+            d._has_discrepancy = False
+
+    discrepancy_count = sum(1 for d in deals if d._has_discrepancy)
+
+    return templates.TemplateResponse("paycheck.html", {
+        "request": request, "user": user, "deals": deals,
+        "start_date": s_date, "end_date": e_date,
+        "total_expected": total_expected,
+        "total_actual": total_actual,
+        "total_difference": total_difference,
+        "deals_with_actual": len(deals_with_actual),
+        "discrepancy_count": discrepancy_count,
+        "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+        "has_new_posts": await get_new_community_posts(db, uid(request)),
+    })
+
+
+@app.post("/paycheck/update")
+async def paycheck_update_actual(
+    request: Request, db: AsyncSession = Depends(get_db),
+    deal_id: int = Form(...),
+    actual_paid: str = Form(""),
+    start: str = Form(""), end: str = Form(""),
+):
+    """Quick-update actual_paid from the paycheck view."""
+    deal = (await db.execute(
+        select(Deal).where(Deal.id == deal_id, Deal.user_id == uid(request))
+    )).scalar_one_or_none()
+    if deal and actual_paid.strip():
+        try:
+            deal.actual_paid = float(actual_paid.replace("$", "").replace(",", "").strip())
+        except ValueError:
+            pass
+        await db.commit()
+    redirect_url = f"/paycheck?start={start}&end={end}" if start else "/paycheck"
+    return RedirectResponse(url=redirect_url, status_code=303)
+
+
+# ════════════════════════════════════════════════
+# ONBOARDING — post-signup setup wizard
+# ════════════════════════════════════════════════
+
+@app.get("/onboarding", response_class=HTMLResponse)
+async def onboarding_page(request: Request, db: AsyncSession = Depends(get_db)):
+    """Post-signup onboarding stepper."""
+    user = await _user(request, db)
+    d_id = user_dealership_id(request)
+    dealership = None
+    if d_id:
+        dealership = (await db.execute(select(Dealership).where(Dealership.id == d_id))).scalar_one_or_none()
+
+    # If already onboarded (has brand+state), just go to dashboard
+    if dealership and dealership.brand and dealership.state:
+        return RedirectResponse(url="/", status_code=303)
+
+    s = await get_or_create_settings(db, uid(request), d_id)
+
+    return templates.TemplateResponse("onboarding.html", {
+        "request": request, "user": user, "dealership": dealership, "s": s,
+        "auto_brands": AUTO_BRANDS, "us_states": US_STATES,
+        "overdue_reminders": 0,
+        "has_new_posts": False,
+    })
+
+
+@app.post("/onboarding")
+async def onboarding_submit(
+    request: Request, db: AsyncSession = Depends(get_db),
+    display_name: str = Form(""),
+    dealership_name: str = Form(""),
+    brand: str = Form(""),
+    state: str = Form(""),
+    # Simplified pay plan fields
+    unit_comm_le_200: str = Form(""),
+    unit_comm_gt_200: str = Form(""),
+    hourly_offset: str = Form(""),
+    permaplate: str = Form(""),
+    nitro_fill: str = Form(""),
+    pulse: str = Form(""),
+    finance: str = Form(""),
+    warranty: str = Form(""),
+    tire_wheel: str = Form(""),
+):
+    """Save onboarding data and redirect to dashboard."""
+    user = await _user(request, db)
+
+    # Update display name
+    if display_name.strip():
+        user.display_name = display_name.strip()[:120]
+
+    # Handle dealership
+    d_id = user_dealership_id(request)
+    if d_id:
+        dealership = (await db.execute(select(Dealership).where(Dealership.id == d_id))).scalar_one_or_none()
+        if dealership:
+            if dealership_name.strip():
+                dealership.name = dealership_name.strip()[:200]
+            if brand.strip():
+                dealership.brand = brand.strip()[:80]
+            if state.strip():
+                dealership.state = state.strip().upper()[:2]
+    elif dealership_name.strip():
+        import re as _re
+        base_slug = _re.sub(r'[^a-z0-9]+', '-', dealership_name.lower()).strip('-')[:60]
+        slug = base_slug
+        i = 1
+        while (await db.execute(select(Dealership).where(Dealership.slug == slug))).scalar_one_or_none():
+            slug = f"{base_slug}-{i}"
+            i += 1
+        dealership = Dealership(
+            name=dealership_name.strip()[:200], slug=slug,
+            brand=brand.strip()[:80] if brand.strip() else None,
+            state=state.strip().upper()[:2] if state.strip() else None,
+            subscription_status="free",
+        )
+        db.add(dealership)
+        await db.commit()
+        await db.refresh(dealership)
+        user.dealership_id = dealership.id
+        user.role = "admin"
+        d_id = dealership.id
+        from .auth import _cache_delete_user
+        _cache_delete_user(user.id)
+
+    # Update pay plan settings
+    s = await get_or_create_settings(db, uid(request), d_id)
+
+    def _flt(v):
+        try: return float(v.replace("$","").replace(",","")) if v.strip() else None
+        except: return None
+
+    if _flt(unit_comm_le_200) is not None: s.unit_comm_discount_le_200 = _flt(unit_comm_le_200)
+    if _flt(unit_comm_gt_200) is not None: s.unit_comm_discount_gt_200 = _flt(unit_comm_gt_200)
+    if _flt(hourly_offset) is not None: s.hourly_rate_ny_offset = _flt(hourly_offset)
+    if _flt(permaplate) is not None: s.permaplate = _flt(permaplate)
+    if _flt(nitro_fill) is not None: s.nitro_fill = _flt(nitro_fill)
+    if _flt(pulse) is not None: s.pulse = _flt(pulse)
+    if _flt(finance) is not None: s.finance_non_subvented = _flt(finance)
+    if _flt(warranty) is not None: s.warranty = _flt(warranty)
+    if _flt(tire_wheel) is not None: s.tire_wheel = _flt(tire_wheel)
+
+    await db.commit()
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/api/parse-payplan")
+async def api_parse_payplan(request: Request, db: AsyncSession = Depends(get_db)):
+    """AI endpoint: accept a base64 image, return structured pay plan JSON."""
+    try:
+        body = await request.json()
+        image_data = body.get("image", "")
+        media_type = body.get("media_type", "image/jpeg")
+
+        if not image_data:
+            return JSONResponse({"error": "No image provided"}, status_code=400)
+
+        # Use Anthropic API to parse the pay plan image
+        import httpx
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            return JSONResponse({"error": "ANTHROPIC_API_KEY not configured"}, status_code=500)
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "content-type": "application/json",
+                    "anthropic-version": "2023-06-01",
+                },
+                json={
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 1500,
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {"type": "base64", "media_type": media_type, "data": image_data},
+                            },
+                            {
+                                "type": "text",
+                                "text": """Analyze this car dealership pay plan document. Extract the commission structure and return ONLY a JSON object with these fields (use 0 if not found, numbers only no $ signs):
+
+{
+  "unit_comm_le_200": <per-unit commission when discount is $200 or less>,
+  "unit_comm_gt_200": <per-unit commission when discount is over $200>,
+  "hourly_offset": <hourly rate or NY offset amount>,
+  "permaplate": <permaplate/paint protection commission per deal>,
+  "nitro_fill": <nitrogen fill commission per deal>,
+  "pulse": <pulse/GPS commission per deal>,
+  "finance": <finance/non-subvented finance commission per deal>,
+  "warranty": <extended warranty commission per deal>,
+  "tire_wheel": <tire and wheel protection commission per deal>,
+  "pay_type": "flat" or "gross" or "hybrid",
+  "gross_percentage": <if gross-based, the percentage of gross profit>,
+  "notes": "<any important details about the pay structure>"
+}
+
+Return ONLY the JSON, no explanation."""
+                            },
+                        ],
+                    }],
+                },
+            )
+
+        if resp.status_code != 200:
+            return JSONResponse({"error": "AI parsing failed"}, status_code=500)
+
+        data = resp.json()
+        text = ""
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                text += block["text"]
+
+        # Parse JSON from response
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
+        parsed = _json.loads(text)
+        return JSONResponse(parsed)
+
+    except _json.JSONDecodeError:
+        return JSONResponse({"error": "Could not parse AI response as JSON", "raw": text}, status_code=422)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # ════════════════════════════════════════════════

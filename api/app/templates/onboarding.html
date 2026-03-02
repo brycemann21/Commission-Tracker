@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="max-w-lg mx-auto py-4">
+
+  {# ── Progress bar ── #}
+  <div class="flex items-center gap-2 mb-8">
+    <div class="flex items-center gap-1" id="prog-1">
+      <div class="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center text-sm font-bold">1</div>
+      <span class="text-sm font-medium text-slate-900 hidden sm:inline">You</span>
+    </div>
+    <div class="flex-1 h-0.5 bg-slate-200" id="bar-1"><div class="h-full bg-slate-900 transition-all duration-300" style="width:0%" id="fill-1"></div></div>
+    <div class="flex items-center gap-1" id="prog-2">
+      <div class="w-8 h-8 rounded-full bg-slate-200 text-slate-400 flex items-center justify-center text-sm font-bold" id="dot-2">2</div>
+      <span class="text-sm font-medium text-slate-400 hidden sm:inline" id="lbl-2">Dealership</span>
+    </div>
+    <div class="flex-1 h-0.5 bg-slate-200" id="bar-2"><div class="h-full bg-slate-900 transition-all duration-300" style="width:0%" id="fill-2"></div></div>
+    <div class="flex items-center gap-1" id="prog-3">
+      <div class="w-8 h-8 rounded-full bg-slate-200 text-slate-400 flex items-center justify-center text-sm font-bold" id="dot-3">3</div>
+      <span class="text-sm font-medium text-slate-400 hidden sm:inline" id="lbl-3">Pay Plan</span>
+    </div>
+  </div>
+
+  <form method="post" action="/onboarding" id="onboardForm">
+    {{ csrf_hidden|safe }}
+
+    {# ════════════ STEP 1: About You ════════════ #}
+    <div id="step-1" class="step">
+      <h1 class="text-2xl font-bold mb-1">Welcome to Commission Tracker</h1>
+      <p class="text-slate-500 mb-6">Let's get you set up in under a minute.</p>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">What should we call you?</label>
+          <input type="text" name="display_name" id="inp-name" value="{{ user.display_name or '' }}" maxlength="120" placeholder="Your name"
+                 class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" autofocus>
+        </div>
+      </div>
+
+      <button type="button" onclick="goStep(2)" class="w-full mt-5 px-4 py-3 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 active:bg-slate-800 transition">
+        Next →
+      </button>
+    </div>
+
+    {# ════════════ STEP 2: Dealership ════════════ #}
+    <div id="step-2" class="step hidden">
+      <h1 class="text-2xl font-bold mb-1">Where do you work?</h1>
+      <p class="text-slate-500 mb-6">This helps the community — other salespeople can find posts by brand and state.</p>
+
+      <div class="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Dealership Name</label>
+          <input type="text" name="dealership_name" value="{{ dealership.name if dealership and dealership.name != 'Default Dealership' else '' }}" maxlength="200"
+                 placeholder="e.g. DCH Wappinger Falls Toyota"
+                 class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Brand</label>
+          <select name="brand" class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500 bg-white">
+            <option value="">Select brand...</option>
+            {% for b in auto_brands %}
+            <option value="{{ b }}" {{ 'selected' if dealership and dealership.brand == b else '' }}>{{ b }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">State</label>
+          <select name="state" class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500 bg-white">
+            <option value="">Select state...</option>
+            {% for s in us_states %}
+            <option value="{{ s }}" {{ 'selected' if dealership and dealership.state == s else '' }}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="flex gap-3 mt-5">
+        <button type="button" onclick="goStep(1)" class="flex-1 px-4 py-3 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">← Back</button>
+        <button type="button" onclick="goStep(3)" class="flex-1 px-4 py-3 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">Next →</button>
+      </div>
+    </div>
+
+    {# ════════════ STEP 3: Pay Plan ════════════ #}
+    <div id="step-3" class="step hidden">
+      <h1 class="text-2xl font-bold mb-1">Your Pay Plan</h1>
+      <p class="text-slate-500 mb-6">So we can calculate your commissions accurately. You can always change this later.</p>
+
+      {# ── Upload option ── #}
+      <div class="bg-white rounded-xl border border-slate-200 p-5 mb-4">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="w-10 h-10 rounded-lg bg-violet-100 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          </div>
+          <div>
+            <div class="text-sm font-semibold text-slate-900">Upload your pay plan</div>
+            <div class="text-xs text-slate-500">Take a photo or upload a file — AI will read it for you</div>
+          </div>
+        </div>
+        <input type="file" id="payplanFile" accept="image/*,.pdf" class="hidden" onchange="handlePayplanUpload(this)">
+        <button type="button" onclick="document.getElementById('payplanFile').click()" id="uploadBtn"
+                class="w-full px-4 py-2.5 rounded-lg border-2 border-dashed border-slate-300 text-sm text-slate-500 hover:border-violet-400 hover:text-violet-600 transition text-center">
+          Choose file or take photo
+        </button>
+        <div id="uploadStatus" class="hidden mt-3 text-center"></div>
+      </div>
+
+      <div class="flex items-center gap-3 mb-4">
+        <div class="flex-1 h-px bg-slate-200"></div>
+        <span class="text-xs text-slate-400">or enter manually</span>
+        <div class="flex-1 h-px bg-slate-200"></div>
+      </div>
+
+      {# ── Manual entry ── #}
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <h3 class="text-sm font-bold text-slate-700 mb-3">Per-Unit Commission</h3>
+        <div class="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">≤ $200 discount</label>
+            <div class="relative">
+              <span class="absolute left-3 top-2.5 text-slate-400 text-sm">$</span>
+              <input type="text" name="unit_comm_le_200" id="pp-unit-le" value="{{ s.unit_comm_discount_le_200 if s and s.unit_comm_discount_le_200 else '' }}" placeholder="190"
+                     class="w-full border border-slate-200 rounded-lg pl-7 pr-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">> $200 discount</label>
+            <div class="relative">
+              <span class="absolute left-3 top-2.5 text-slate-400 text-sm">$</span>
+              <input type="text" name="unit_comm_gt_200" id="pp-unit-gt" value="{{ s.unit_comm_discount_gt_200 if s and s.unit_comm_discount_gt_200 else '' }}" placeholder="140"
+                     class="w-full border border-slate-200 rounded-lg pl-7 pr-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+            </div>
+          </div>
+        </div>
+
+        <div class="mb-4">
+          <label class="block text-xs text-slate-500 mb-1">Hourly offset</label>
+          <div class="relative">
+            <span class="absolute left-3 top-2.5 text-slate-400 text-sm">$</span>
+            <input type="text" name="hourly_offset" id="pp-hourly" value="{{ s.hourly_rate_ny_offset if s and s.hourly_rate_ny_offset else '' }}" placeholder="16"
+                   class="w-full border border-slate-200 rounded-lg pl-7 pr-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <h3 class="text-sm font-bold text-slate-700 mb-3">Add-On Commissions</h3>
+        <div class="grid grid-cols-3 gap-3">
+          {% for field, label, ph in [
+            ('permaplate','PermaPlate','40'),('nitro_fill','Nitro Fill','40'),('pulse','Pulse/GPS','40'),
+            ('finance','Finance','50'),('warranty','Warranty','25'),('tire_wheel','Tire & Wheel','25')
+          ] %}
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">{{ label }}</label>
+            <div class="relative">
+              <span class="absolute left-2.5 top-2.5 text-slate-400 text-xs">$</span>
+              <input type="text" name="{{ field }}" id="pp-{{ field }}" value="{{ s[field] if s and s[field] else '' }}" placeholder="{{ ph }}"
+                     class="w-full border border-slate-200 rounded-lg pl-6 pr-2 py-2 text-sm focus:outline-none focus:border-emerald-500">
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="flex gap-3 mt-5">
+        <button type="button" onclick="goStep(2)" class="flex-1 px-4 py-3 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">← Back</button>
+        <button type="submit" class="flex-1 px-4 py-3 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 active:bg-emerald-800 transition">Finish Setup ✓</button>
+      </div>
+
+      <button type="submit" class="w-full mt-3 text-sm text-slate-400 hover:text-slate-600 transition py-2">Skip for now →</button>
+    </div>
+  </form>
+</div>
+
+<script>
+var currentStep = 1;
+
+function goStep(n) {
+  // Hide all
+  document.querySelectorAll('.step').forEach(function(s) { s.classList.add('hidden'); });
+  document.getElementById('step-' + n).classList.remove('hidden');
+  currentStep = n;
+
+  // Update progress
+  for (var i = 1; i <= 3; i++) {
+    var dot = document.getElementById('dot-' + i);
+    var lbl = document.getElementById('lbl-' + i);
+    if (dot) {
+      if (i <= n) {
+        dot.className = 'w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center text-sm font-bold';
+        if (lbl) lbl.className = 'text-sm font-medium text-slate-900 hidden sm:inline';
+      } else {
+        dot.className = 'w-8 h-8 rounded-full bg-slate-200 text-slate-400 flex items-center justify-center text-sm font-bold';
+        if (lbl) lbl.className = 'text-sm font-medium text-slate-400 hidden sm:inline';
+      }
+    }
+    var fill = document.getElementById('fill-' + i);
+    if (fill) fill.style.width = (i < n ? '100%' : '0%');
+  }
+
+  // Scroll to top
+  window.scrollTo(0, 0);
+}
+
+function handlePayplanUpload(input) {
+  if (!input.files || !input.files[0]) return;
+  var file = input.files[0];
+  var status = document.getElementById('uploadStatus');
+  var btn = document.getElementById('uploadBtn');
+
+  status.classList.remove('hidden');
+  status.innerHTML = '<div class="flex items-center justify-center gap-2 text-sm text-violet-600"><svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Reading your pay plan...</div>';
+  btn.textContent = file.name;
+  btn.classList.add('border-violet-400', 'text-violet-600');
+
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var base64 = e.target.result.split(',')[1];
+    var mediaType = file.type || 'image/jpeg';
+
+    fetch('/api/parse-payplan', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({image: base64, media_type: mediaType})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) {
+        status.innerHTML = '<div class="text-sm text-amber-600">Could not read the pay plan automatically. Please enter the values below.</div>';
+        return;
+      }
+      // Fill in the fields
+      var map = {
+        'unit_comm_le_200': 'pp-unit-le', 'unit_comm_gt_200': 'pp-unit-gt',
+        'hourly_offset': 'pp-hourly', 'permaplate': 'pp-permaplate',
+        'nitro_fill': 'pp-nitro_fill', 'pulse': 'pp-pulse',
+        'finance': 'pp-finance', 'warranty': 'pp-warranty', 'tire_wheel': 'pp-tire_wheel'
+      };
+      var filled = 0;
+      for (var key in map) {
+        var val = data[key];
+        if (val && val > 0) {
+          var el = document.getElementById(map[key]);
+          if (el) { el.value = val; filled++; }
+        }
+      }
+
+      var msg = '<div class="text-sm text-emerald-600 font-medium">✓ Found ' + filled + ' values from your pay plan!</div>';
+      if (data.pay_type && data.pay_type !== 'flat') {
+        msg += '<div class="text-xs text-amber-600 mt-1">Looks like a ' + data.pay_type + '-based plan. ';
+        if (data.gross_percentage) msg += data.gross_percentage + '% of gross. ';
+        msg += 'You can fine-tune in Pay Plan settings later.</div>';
+      }
+      if (data.notes) {
+        msg += '<div class="text-xs text-slate-500 mt-1">' + data.notes + '</div>';
+      }
+      status.innerHTML = msg;
+    })
+    .catch(function(err) {
+      status.innerHTML = '<div class="text-sm text-amber-600">Could not connect to AI. Enter values manually below.</div>';
+    });
+  };
+  reader.readAsDataURL(file);
+}
+</script>
+
+{% endblock %}

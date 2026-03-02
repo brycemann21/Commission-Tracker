@@ -163,6 +163,13 @@ class Settings(Base):
     quarterly_bonus_threshold_units: Mapped[int] = mapped_column(Integer, default=60)
     quarterly_bonus_amount: Mapped[float] = mapped_column(Float, default=1200.0)
 
+    # Pay structure type: flat | gross | hybrid
+    pay_type: Mapped[str] = mapped_column(String(16), default="flat")
+    gross_front_pct: Mapped[float] = mapped_column(Float, default=0.0)   # e.g. 20.0 = 20%
+    gross_back_pct: Mapped[float] = mapped_column(Float, default=0.0)    # e.g. 20.0 = 20%
+    mini_deal: Mapped[float] = mapped_column(Float, default=0.0)         # minimum commission per deal
+    pack_deduction: Mapped[float] = mapped_column(Float, default=0.0)    # deducted from gross before calc
+
 
 # ════════════════════════════════════════════════
 # GOAL — per-user per-month (within a dealership)
@@ -219,7 +226,13 @@ class Deal(Base):
     is_paid: Mapped[bool] = mapped_column(Boolean, default=False)
     import_batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     commission_override: Mapped[float | None] = mapped_column(Float, nullable=True)
-    on_delivery_board: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Gross-based fields
+    front_gross: Mapped[float] = mapped_column(Float, default=0.0)
+    back_gross: Mapped[float] = mapped_column(Float, default=0.0)
+    # Pay auditor fields
+    expected_commission: Mapped[float] = mapped_column(Float, default=0.0)
+    actual_paid: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Delivery board
     gas_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     inspection_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     insurance_ready: Mapped[bool] = mapped_column(Boolean, default=False)

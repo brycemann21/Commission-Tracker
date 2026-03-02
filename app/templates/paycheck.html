@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="flex items-center justify-between mb-4">
+  <div>
+    <h1 class="text-xl font-bold">Paycheck Audit</h1>
+    <div class="text-sm text-slate-500">Compare what you should make vs what you got paid</div>
+  </div>
+</div>
+
+{# ── Date Range ── #}
+<form method="get" action="/paycheck" class="flex flex-wrap items-center gap-2 mb-5">
+  <label class="text-sm text-slate-500">From</label>
+  <input type="date" name="start" value="{{ start_date.isoformat() }}" class="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white">
+  <label class="text-sm text-slate-500">To</label>
+  <input type="date" name="end" value="{{ end_date.isoformat() }}" class="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white">
+  <button type="submit" class="text-sm px-3 py-1.5 rounded-lg bg-slate-900 text-white hover:bg-slate-700 transition">Go</button>
+</form>
+
+{# ── Summary Cards ── #}
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+  <div class="bg-white rounded-lg border border-slate-200 p-4">
+    <div class="text-[11px] text-slate-400 uppercase font-medium">Expected</div>
+    <div class="text-2xl font-bold mt-1">${{ "{:,.0f}".format(total_expected) }}</div>
+    <div class="text-xs text-slate-400 mt-1">{{ deals|length }} deal{{ 's' if deals|length != 1 else '' }}</div>
+  </div>
+  <div class="bg-white rounded-lg border border-slate-200 p-4">
+    <div class="text-[11px] text-slate-400 uppercase font-medium">Actually Paid</div>
+    <div class="text-2xl font-bold mt-1">
+      {% if deals_with_actual > 0 %} ${{ "{:,.0f}".format(total_actual) }}{% else %}<span class="text-slate-300">—</span>{% endif %}
+    </div>
+    <div class="text-xs text-slate-400 mt-1">{{ deals_with_actual }} of {{ deals|length }} entered</div>
+  </div>
+  <div class="rounded-lg border p-4 {{ 'bg-white border-slate-200' if total_difference is none else 'bg-emerald-50 border-emerald-200' if total_difference >= 0 else 'bg-rose-50 border-rose-200' }}">
+    <div class="text-[11px] uppercase font-medium {{ 'text-slate-400' if total_difference is none else 'text-emerald-700' if total_difference >= 0 else 'text-rose-700' }}">Difference</div>
+    <div class="text-2xl font-bold mt-1 {{ 'text-emerald-700' if total_difference is not none and total_difference >= 0 else 'text-rose-700' if total_difference is not none else '' }}">
+      {% if total_difference is not none %}
+        {{ '+' if total_difference >= 0 else '' }}${{ "{:,.0f}".format(total_difference) }}
+      {% else %}
+        <span class="text-slate-300">—</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="rounded-lg border p-4 {{ 'bg-white border-slate-200' if discrepancy_count == 0 else 'bg-amber-50 border-amber-200' }}">
+    <div class="text-[11px] uppercase font-medium {{ 'text-slate-400' if discrepancy_count == 0 else 'text-amber-700' }}">Discrepancies</div>
+    <div class="text-2xl font-bold mt-1 {{ 'text-amber-700' if discrepancy_count > 0 else '' }}">{{ discrepancy_count }}</div>
+    <div class="text-xs {{ 'text-amber-600' if discrepancy_count > 0 else 'text-slate-400' }} mt-1">{{ 'deals off by $1+' if discrepancy_count > 0 else 'all checks clean' }}</div>
+  </div>
+</div>
+
+{# ── Deal Table ── #}
+<div class="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
+  <table class="min-w-full text-sm">
+    <thead class="bg-slate-900 text-white">
+      <tr>
+        <th class="text-left p-3">Date</th>
+        <th class="text-left p-3">Customer</th>
+        <th class="text-left p-3">Model</th>
+        <th class="text-right p-3">Expected</th>
+        <th class="text-right p-3">Actual</th>
+        <th class="text-right p-3">Diff</th>
+        <th class="p-3"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in deals %}
+      <tr class="border-t {{ 'bg-rose-50' if d._has_discrepancy and d._diff < 0 else 'bg-amber-50' if d._has_discrepancy else '' }} hover:bg-slate-50">
+        <td class="p-3 text-slate-500 whitespace-nowrap">{{ d.delivered_date.strftime('%-m/%-d') if d.delivered_date else '—' }}</td>
+        <td class="p-3 font-medium">{{ d.customer or '—' }}</td>
+        <td class="p-3 text-slate-600">{{ d.model or '—' }}</td>
+        <td class="p-3 text-right font-medium">${{ "{:,.0f}".format(d.expected_commission or d.total_deal_comm or 0) }}</td>
+        <td class="p-3 text-right">
+          {% if d.actual_paid is not none %}
+            <span class="font-medium">${{ "{:,.0f}".format(d.actual_paid) }}</span>
+          {% else %}
+            <form method="post" action="/paycheck/update" class="flex items-center justify-end gap-1">
+              {{ csrf_hidden|safe }}
+              <input type="hidden" name="deal_id" value="{{ d.id }}">
+              <input type="hidden" name="start" value="{{ start_date.isoformat() }}">
+              <input type="hidden" name="end" value="{{ end_date.isoformat() }}">
+              <div class="relative">
+                <span class="absolute left-2 top-1.5 text-slate-400 text-xs">$</span>
+                <input type="text" name="actual_paid" placeholder="0" class="w-20 border border-slate-200 rounded pl-5 pr-1 py-1 text-xs text-right focus:outline-none focus:border-emerald-500">
+              </div>
+              <button type="submit" class="text-xs px-1.5 py-1 rounded bg-slate-100 hover:bg-slate-200 transition">✓</button>
+            </form>
+          {% endif %}
+        </td>
+        <td class="p-3 text-right">
+          {% if d._diff is not none %}
+            <span class="text-xs font-semibold {{ 'text-emerald-600' if d._diff >= 0 else 'text-rose-600' }}">
+              {{ '+' if d._diff >= 0 else '' }}${{ "{:,.0f}".format(d._diff) }}
+            </span>
+          {% else %}
+            <span class="text-xs text-slate-300">—</span>
+          {% endif %}
+        </td>
+        <td class="p-3">
+          {% if d._has_discrepancy and d._diff < 0 %}
+          <span class="inline-block w-2 h-2 rounded-full bg-rose-500" title="Underpaid"></span>
+          {% elif d._has_discrepancy and d._diff > 0 %}
+          <span class="inline-block w-2 h-2 rounded-full bg-emerald-500" title="Overpaid"></span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if deals|length == 0 %}
+      <tr><td class="p-6 text-center text-slate-400" colspan="7">No delivered deals in this period.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+{% if discrepancy_count > 0 %}
+<div class="bg-amber-50 rounded-lg border border-amber-200 p-4 text-sm text-amber-800 mb-6">
+  <span class="font-semibold">{{ discrepancy_count }} discrepanc{{ 'ies' if discrepancy_count != 1 else 'y' }} found.</span>
+  {{ 'You were underpaid' if total_difference < 0 else 'You were overpaid' }} by ${{ "{:,.0f}".format((total_difference or 0)|abs) }} total.
+  {% if total_difference < 0 %}Take this to your manager — you have the receipts.{% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

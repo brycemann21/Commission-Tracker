@@ -147,6 +147,25 @@
     </div>
 
     <div>
+      <label class="text-xs text-slate-500">Front Gross</label>
+      <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="front_gross" value="{{ deal.front_gross if deal and deal.front_gross else 0 }}">
+      <div class="text-xs text-slate-400 mt-1">Gross profit on the car (for gross-based plans)</div>
+    </div>
+
+    <div>
+      <label class="text-xs text-slate-500">Back Gross</label>
+      <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="back_gross" value="{{ deal.back_gross if deal and deal.back_gross else 0 }}">
+      <div class="text-xs text-slate-400 mt-1">F&I / back-end gross profit</div>
+    </div>
+
+    <div>
+      <label class="text-xs text-slate-500">Actual Paid</label>
+      <input type="text" class="w-full border rounded px-3 py-2" name="actual_paid" placeholder="Enter when you get your check"
+             value="{{ deal.actual_paid if deal and deal.actual_paid is not none else '' }}">
+      <div class="text-xs text-slate-400 mt-1">What you actually got paid on this deal</div>
+    </div>
+
+    <div>
       <label class="text-xs text-slate-500">Comments</label>
       <input class="w-full border rounded px-3 py-2" name="notes" value="{{ deal.notes if deal else '' }}">
     </div>
