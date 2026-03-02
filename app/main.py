@@ -1891,10 +1891,19 @@ async def dashboard(
 
     # ── Milestones ────────────────────────────────────────────────────────────
     milestones = []
-    if vol_amt > 0: milestones.append(f"Volume Bonus unlocked — ${vol_amt:,.0f}")
-    if used_amt > 0: milestones.append(f"Used Bonus unlocked — ${used_amt:,.0f}")
-    if spot_total > 0: milestones.append(f"Spot Bonus active — ${spot_total:,.0f}")
-    if q_hit: milestones.append(f"Quarterly target hit — ${q_bonus:,.0f}")
+    if bonus_breakdown.get("custom_list"):
+        for _b in bonus_breakdown["custom_list"]:
+            if _b["hit"] and _b["earned"] > 0:
+                milestones.append(f"{_b['name']} unlocked — ${_b['earned']:,.0f}")
+    else:
+        _va = bonus_breakdown["volume"]["amount"]
+        _ua = bonus_breakdown["used"]["amount"]
+        _sa = bonus_breakdown["spot"]["amount"]
+        _qa = bonus_breakdown["quarterly"]
+        if _va > 0: milestones.append(f"Volume Bonus unlocked — ${_va:,.0f}")
+        if _ua > 0: milestones.append(f"Used Bonus unlocked — ${_ua:,.0f}")
+        if _sa > 0: milestones.append(f"Spot Bonus active — ${_sa:,.0f}")
+        if _qa.get("hit"): milestones.append(f"Quarterly target hit — ${_qa['amount']:,.0f}")
 
     goals = {"unit_goal": goal.unit_goal if goal else 20, "commission_goal": goal.commission_goal if goal else 8000.0, "has_custom": goal is not None}
 
