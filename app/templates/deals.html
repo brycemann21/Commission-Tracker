@@ -184,7 +184,7 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
 
       <td class="p-2 whitespace-nowrap" data-label="Sold">
         <span class="editable" data-field="sold_date" data-id="{{ d.id }}" data-type="date" data-value="{{ d.sold_date.isoformat() if d.sold_date else '' }}">
-          {{ d.sold_date.strftime('%-m/%-d') if d.sold_date else '—' }}
+          {{ d.sold_date.strftime('%-m/%d') if d.sold_date else '—' }}
         </span>
         {% if d.sold_date and (d.sold_date.month != selected_month or d.sold_date.year != selected_year) %}
           <span class="ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">↪ carry</span>
@@ -193,7 +193,7 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
 
       <td class="p-2 whitespace-nowrap" data-label="Delivered">
         <span class="editable" data-field="delivered_date" data-id="{{ d.id }}" data-type="date" data-value="{{ d.delivered_date.isoformat() if d.delivered_date else '' }}">
-          {{ d.delivered_date.strftime('%-m/%-d') if d.delivered_date else '—' }}
+          {{ d.delivered_date.strftime('%-m/%d') if d.delivered_date else '—' }}
         </span>
       </td>
 
@@ -308,7 +308,7 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
   function fmtDate(iso) {
     if (!iso) return '—';
     var p = iso.split('-');
-    return p.length === 3 ? (parseInt(p[1]) + '/' + parseInt(p[2])) : iso;
+    return p.length === 3 ? (parseInt(p[1]) + '/' + p[2].padStart(2,'0')) : iso;
   }
 
   function fmtStatus(val) {
