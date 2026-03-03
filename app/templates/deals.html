@@ -261,21 +261,23 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
         </span>
       </td>
 
-      <td class="p-2 text-right no-label">
-        <a href="/deals/{{ d.id }}/edit" class="text-[11px] px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition whitespace-nowrap inline-block mb-0.5">✎ Edit</a>
-        <button type="button" data-paid="{{ '1' if d.is_paid else '0' }}" onclick="togglePaid(this, {{ d.id }})"
-          class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap mb-0.5
-          {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100
-          {% else %}bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100{% endif %}">
-          {{ "✓ Paid" if d.is_paid else "Pay?" }}
-        </button>
-        {% if d.status not in ('Delivered', 'Dead') %}
-        <button type="button" onclick="pushToBoard({{ d.id }}, this)"
-          class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap
-          {% if d.on_delivery_board %}bg-blue-50 border-blue-200 text-blue-700{% else %}bg-slate-50 border-slate-200 text-slate-500 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700{% endif %}">
-          {{ "✓ Board" if d.on_delivery_board else "→ Board" }}
-        </button>
-        {% endif %}
+      <td class="p-2 no-label" style="overflow:visible;white-space:normal;">
+        <div class="flex flex-col items-end gap-0.5">
+          <a href="/deals/{{ d.id }}/edit" class="text-[11px] px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition whitespace-nowrap">✎ Edit</a>
+          <button type="button" data-paid="{{ '1' if d.is_paid else '0' }}" onclick="togglePaid(this, {{ d.id }})"
+            class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap
+            {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100
+            {% else %}bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100{% endif %}">
+            {{ "✓ Paid" if d.is_paid else "Pay?" }}
+          </button>
+          {% if d.status not in ('Delivered', 'Dead') %}
+          <button type="button" onclick="pushToBoard({{ d.id }}, this)"
+            class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap
+            {% if d.on_delivery_board %}bg-blue-50 border-blue-200 text-blue-700{% else %}bg-slate-50 border-slate-200 text-slate-500 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700{% endif %}">
+            {{ "✓ Board" if d.on_delivery_board else "→ Board" }}
+          </button>
+          {% endif %}
+        </div>
       </td>
     </tr>
     {% endfor %}
