@@ -285,8 +285,8 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
         </span>
       </td>
 
-      <td class="p-2 no-label" style="overflow:visible;white-space:normal;">
-        <div class="flex flex-row items-center justify-end flex-wrap gap-1">
+      <td class="p-2 no-label">
+        <div class="flex flex-row items-center justify-end gap-1">
           <a href="/deals/{{ d.id }}/edit" class="text-[11px] px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition whitespace-nowrap">✎ Edit</a>
           <button type="button" data-paid="{{ '1' if d.is_paid else '0' }}" onclick="togglePaid(this, {{ d.id }})"
             class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap
