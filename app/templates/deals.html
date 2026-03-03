@@ -11,7 +11,9 @@
   .editable.save-err { animation:flash-red 0.6s ease; }
   @keyframes flash-green { 0%,100%{background:transparent} 50%{background:#dcfce7} }
   @keyframes flash-red   { 0%,100%{background:transparent} 50%{background:#fee2e2} }
-  .deals-table { table-layout:auto; }
+  .deals-table { table-layout:fixed; width:100%; }
+  .deals-table td, .deals-table th { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .deals-table td.wrap-cell { white-space:normal; }
   @media (max-width:767px) {
     .deals-table { font-size:0.72rem; }
     .deals-table th, .deals-table td { padding:4px 5px; }
@@ -152,24 +154,24 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
   <button type="button" onclick="clearSelection()" class="px-3 py-1.5 rounded border border-red-300 text-red-600 text-sm hover:bg-red-100 transition">Cancel</button>
 </div>
 
-<div class="overflow-x-auto bg-white rounded-lg border border-slate-200">
-<table class="min-w-full text-sm deals-table">
+<div class="bg-white rounded-lg border border-slate-200 overflow-hidden">
+<table class="text-sm deals-table">
   <thead class="bg-slate-900 text-white">
     <tr>
-      <th class="p-2 w-8"><input type="checkbox" id="selectAll" class="rounded" title="Select all"></th>
-      <th class="text-left p-2">Sold</th>
-      <th class="text-left p-2">Del'd</th>
-      <th class="text-left p-2">Customer</th>
-      <th class="text-left p-2">F&amp;I</th>
-      <th class="text-left p-2">Stock #</th>
-      <th class="text-left p-2">Model</th>
-      <th class="text-left p-2">F/C/L</th>
-      <th class="text-left p-2">N/U</th>
-      <th class="text-left p-2">Comments</th>
-      <th class="text-left p-2">Status</th>
-      <th class="text-left p-2">Tag</th>
-      <th class="text-right p-2">Commission</th>
-      <th class="p-2 w-14"></th>
+      <th class="p-2" style="width:2.5%"><input type="checkbox" id="selectAll" class="rounded" title="Select all"></th>
+      <th class="text-left p-2" style="width:4%">Sold</th>
+      <th class="text-left p-2" style="width:4%">Del'd</th>
+      <th class="text-left p-2" style="width:11%">Customer</th>
+      <th class="text-left p-2" style="width:4%">F&amp;I</th>
+      <th class="text-left p-2" style="width:5%">Stock #</th>
+      <th class="text-left p-2" style="width:10%">Model</th>
+      <th class="text-left p-2" style="width:7%">F/C/L</th>
+      <th class="text-left p-2" style="width:3.5%">N/U</th>
+      <th class="text-left p-2" style="width:11%">Comments</th>
+      <th class="text-left p-2" style="width:8.5%">Status</th>
+      <th class="text-left p-2" style="width:5%">Tag</th>
+      <th class="text-right p-2" style="width:7.5%">Commission</th>
+      <th class="p-2" style="width:12%"></th>
     </tr>
   </thead>
   <tbody>
@@ -259,14 +261,21 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
         </span>
       </td>
 
-      <td class="p-2 text-right no-label" style="min-width:70px">
+      <td class="p-2 text-right no-label">
         <a href="/deals/{{ d.id }}/edit" class="text-[11px] px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition whitespace-nowrap inline-block mb-0.5">✎ Edit</a>
         <button type="button" data-paid="{{ '1' if d.is_paid else '0' }}" onclick="togglePaid(this, {{ d.id }})"
-          class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap
+          class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap mb-0.5
           {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100
           {% else %}bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100{% endif %}">
           {{ "✓ Paid" if d.is_paid else "Pay?" }}
         </button>
+        {% if d.status not in ('Delivered', 'Dead') %}
+        <button type="button" onclick="pushToBoard({{ d.id }}, this)"
+          class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap
+          {% if d.on_delivery_board %}bg-blue-50 border-blue-200 text-blue-700{% else %}bg-slate-50 border-slate-200 text-slate-500 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700{% endif %}">
+          {{ "✓ Board" if d.on_delivery_board else "→ Board" }}
+        </button>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}
@@ -429,6 +438,21 @@ async function togglePaid(btn, dealId) {
       commBadge.className = commBadge.className.replace(/bg-emerald-50 border-emerald-200 text-emerald-800|bg-white border-slate-200 text-slate-900/g, '');
       paid ? commBadge.classList.add('bg-emerald-50','border-emerald-200','text-emerald-800') : commBadge.classList.add('bg-white','border-slate-200','text-slate-900');
     }
+  } catch(e) { btn.textContent = 'Error'; }
+  finally { btn.disabled = false; btn.style.opacity = ''; }
+}
+
+// Push deal to delivery board
+async function pushToBoard(dealId, btn) {
+  btn.disabled = true; btn.style.opacity = '0.6';
+  try {
+    var f = new FormData();
+    f.append('next', window.location.href);
+    var res = await fetch('/delivery/' + dealId + '/push', {method:'POST', body:f, redirect:'manual'});
+    if (res.ok || res.type === 'opaqueredirect' || res.status === 0 || res.status === 303) {
+      btn.textContent = '✓ Board';
+      btn.className = 'text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap bg-blue-50 border-blue-200 text-blue-700';
+    } else { btn.textContent = 'Error'; }
   } catch(e) { btn.textContent = 'Error'; }
   finally { btn.disabled = false; btn.style.opacity = ''; }
 }
