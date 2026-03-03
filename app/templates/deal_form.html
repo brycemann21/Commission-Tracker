@@ -146,7 +146,7 @@
     <div>
       <label class="text-xs text-slate-500">Money Held?</label>
       <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="hold_amount" id="hold_input" value="{{ deal.hold_amount if deal else 0 }}">
-      <div class="text-xs text-slate-400 mt-1">Trade hold comm = floor(Hold/1000)*100</div>
+      <div class="text-xs text-slate-400 mt-1">Trade hold comm = Hold × 10%</div>
       <div class="text-xs text-rose-600 mt-1 hidden" id="err_hold">Money Held can't be negative.</div>
     </div>
 
@@ -492,7 +492,7 @@
           });
 
           const holdAmt = parseFloat(els.hold?.value || '0') || 0;
-          const holdComm = Math.floor(holdAmt / 1000) * 100;
+          const holdComm = holdAmt * 0.10;
 
           const aimAmt = parseFloat(els.aim?.value || '0') || 0;
 
