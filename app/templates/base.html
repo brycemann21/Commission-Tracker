@@ -245,7 +245,7 @@
   </script>
   {% endif %}
 
-  <main class="{{ 'p-4' if (embed|default(false)) else 'max-w-6xl mx-auto px-4 py-6' }}">
+  <main class="{% block main_class %}{% if embed|default(false) %}p-4{% else %}max-w-6xl mx-auto px-4 py-6{% endif %}{% endblock %}">
     {% block content %}{% endblock %}
   </main>
 

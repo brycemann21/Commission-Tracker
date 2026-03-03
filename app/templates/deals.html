@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block main_class %}px-4 py-6{% endblock %}
 {% block content %}
 
 <style>
@@ -259,13 +260,19 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
         </span>
       </td>
 
-      <td class="p-2 text-right no-label" style="min-width:70px">
+      <td class="p-2 text-right no-label" style="min-width:100px">
         <a href="/deals/{{ d.id }}/edit" class="text-[11px] px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition whitespace-nowrap inline-block mb-0.5">✎ Edit</a>
         <button type="button" data-paid="{{ '1' if d.is_paid else '0' }}" onclick="togglePaid(this, {{ d.id }})"
           class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap
           {% if d.is_paid %}bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100
           {% else %}bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100{% endif %}">
           {{ "✓ Paid" if d.is_paid else "Pay?" }}
+        </button>
+        <button type="button" data-on-board="{{ '1' if d.on_delivery_board else '0' }}" onclick="pushToBoard(this, {{ d.id }})"
+          class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap
+          {% if d.on_delivery_board %}bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100
+          {% else %}bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100{% endif %}">
+          {{ "✓ Board" if d.on_delivery_board else "→ Board" }}
         </button>
       </td>
     </tr>
@@ -429,6 +436,20 @@ async function togglePaid(btn, dealId) {
       commBadge.className = commBadge.className.replace(/bg-emerald-50 border-emerald-200 text-emerald-800|bg-white border-slate-200 text-slate-900/g, '');
       paid ? commBadge.classList.add('bg-emerald-50','border-emerald-200','text-emerald-800') : commBadge.classList.add('bg-white','border-slate-200','text-slate-900');
     }
+  } catch(e) { btn.textContent = 'Error'; }
+  finally { btn.disabled = false; btn.style.opacity = ''; }
+}
+
+// Push to delivery board
+async function pushToBoard(btn, dealId) {
+  if (btn.dataset.onBoard === '1') return;
+  btn.disabled = true; btn.style.opacity = '0.6';
+  try {
+    var f = new FormData();
+    await fetch('/delivery/' + dealId + '/push', {method: 'POST', body: f});
+    btn.dataset.onBoard = '1';
+    btn.textContent = '✓ Board';
+    btn.className = 'text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100';
   } catch(e) { btn.textContent = 'Error'; }
   finally { btn.disabled = false; btn.style.opacity = ''; }
 }
