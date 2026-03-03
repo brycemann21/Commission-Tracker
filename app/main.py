@@ -58,6 +58,15 @@ logger = logging.getLogger("main")
 # ─── DB setup ───
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:////tmp/commission.db").strip()
 
+# Warn loudly if SQLite is used on Vercel — /tmp is ephemeral and data will be lost
+_on_vercel = os.environ.get("VERCEL") == "1"
+if _on_vercel and DATABASE_URL.startswith("sqlite"):
+    logger.critical(
+        "CRITICAL: SQLite is not safe on Vercel — /tmp is ephemeral and all data will be "
+        "lost when the serverless function spins down. Set DATABASE_URL to a PostgreSQL "
+        "connection string (e.g. Supabase) in your Vercel project environment variables."
+    )
+
 def _sanitize_url(url: str) -> str:
     try:
         p = urllib.parse.urlsplit(url)
@@ -186,6 +195,22 @@ async def service_worker():
         open(sw_path, "rb"),
         media_type="application/javascript",
         headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+    )
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for uptime monitors and deployment platforms."""
+    db_status = "ok"
+    try:
+        async with SessionLocal() as db:
+            await db.execute(sa_text("SELECT 1"))
+    except Exception as e:
+        logger.error(f"Health check DB error: {e}")
+        db_status = "error"
+    return JSONResponse(
+        content={"status": "ok" if db_status == "ok" else "degraded", "db": db_status},
+        status_code=200 if db_status == "ok" else 503,
     )
 
 
