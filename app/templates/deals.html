@@ -12,11 +12,11 @@
   @keyframes flash-green { 0%,100%{background:transparent} 50%{background:#dcfce7} }
   @keyframes flash-red   { 0%,100%{background:transparent} 50%{background:#fee2e2} }
   .deals-table { table-layout:fixed; width:100%; }
-  .deals-table td, .deals-table th { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .deals-table td, .deals-table th { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:3px 6px !important; }
   .deals-table td.wrap-cell { white-space:normal; }
   @media (max-width:767px) {
     .deals-table { font-size:0.72rem; }
-    .deals-table th, .deals-table td { padding:4px 5px; }
+    .deals-table th, .deals-table td { padding:3px 4px !important; }
     .deals-table .editable { padding:1px 2px; }
   }
 </style>
@@ -154,24 +154,24 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
   <button type="button" onclick="clearSelection()" class="px-3 py-1.5 rounded border border-red-300 text-red-600 text-sm hover:bg-red-100 transition">Cancel</button>
 </div>
 
-<div class="bg-white rounded-lg border border-slate-200 overflow-hidden">
-<table class="text-sm deals-table">
+<div class="bg-white rounded-lg border border-slate-200 overflow-x-auto">
+<table class="text-sm deals-table" style="min-width:900px">
   <thead class="bg-slate-900 text-white">
     <tr>
       <th class="p-2" style="width:2.5%"><input type="checkbox" id="selectAll" class="rounded" title="Select all"></th>
       <th class="text-left p-2" style="width:4%">Sold</th>
       <th class="text-left p-2" style="width:4%">Del'd</th>
-      <th class="text-left p-2" style="width:11%">Customer</th>
+      <th class="text-left p-2" style="width:10%">Customer</th>
       <th class="text-left p-2" style="width:4%">F&amp;I</th>
       <th class="text-left p-2" style="width:5%">Stock #</th>
-      <th class="text-left p-2" style="width:10%">Model</th>
+      <th class="text-left p-2" style="width:9%">Model</th>
       <th class="text-left p-2" style="width:7%">F/C/L</th>
-      <th class="text-left p-2" style="width:3.5%">N/U</th>
-      <th class="text-left p-2" style="width:11%">Comments</th>
-      <th class="text-left p-2" style="width:8.5%">Status</th>
+      <th class="text-left p-2" style="width:3%">N/U</th>
+      <th class="text-left p-2" style="width:9%">Comments</th>
+      <th class="text-left p-2" style="width:8%">Status</th>
       <th class="text-left p-2" style="width:5%">Tag</th>
       <th class="text-right p-2" style="width:7.5%">Commission</th>
-      <th class="p-2" style="width:12%"></th>
+      <th class="p-2" style="width:16%"></th>
     </tr>
   </thead>
   <tbody>
@@ -262,7 +262,7 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
       </td>
 
       <td class="p-2 no-label" style="overflow:visible;white-space:normal;">
-        <div class="flex flex-col items-end gap-0.5">
+        <div class="flex flex-row items-center justify-end flex-wrap gap-1">
           <a href="/deals/{{ d.id }}/edit" class="text-[11px] px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition whitespace-nowrap">✎ Edit</a>
           <button type="button" data-paid="{{ '1' if d.is_paid else '0' }}" onclick="togglePaid(this, {{ d.id }})"
             class="text-[11px] px-1.5 py-0.5 rounded border transition whitespace-nowrap
