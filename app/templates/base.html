@@ -19,14 +19,12 @@
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <style>
     @media(max-width:900px){
-      .nav-links{display:none!important}
-      .hamburger{display:none!important}
-      #userMenuWrap{margin-left:auto}
-      #bottomNav{display:flex!important}
-      main{padding-bottom:72px}
+      .nav-links{display:none}
+      .nav-links.open{display:flex;flex-direction:column;position:absolute;top:100%;left:0;right:0;background:white;border-bottom:1px solid #e2e8f0;padding:12px 16px 16px;gap:2px;z-index:50;box-shadow:0 4px 6px -1px rgb(0 0 0/.1)}
+      .nav-links.open a,.nav-links.open button,.nav-links.open form{padding:12px;border-radius:8px;font-size:15px}
+      .nav-links.open .desktop-only{display:none}
+      .hamburger{display:flex!important}
     }
-    #bottomNav{display:none}
-    @supports(padding:env(safe-area-inset-bottom)){ #bottomNav{padding-bottom:env(safe-area-inset-bottom)} }
     @media(pointer:coarse){button,a,input[type="checkbox"],select{min-height:44px}.touch-row td{padding-top:12px;padding-bottom:12px}}
     /* Community upvote touch target */
     .upvote-btn{min-width:64px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:999px;padding:8px 16px;transition:all .15s}
@@ -44,6 +42,10 @@
         <span class="hidden sm:inline">Commission Tracker</span>
         <span class="sm:hidden">CT</span>
       </a>
+
+      <button class="hamburger ml-auto hidden items-center justify-center w-10 h-10 rounded-lg hover:bg-slate-100 active:bg-slate-200 transition" onclick="document.getElementById('navLinks').classList.toggle('open')" aria-label="Menu">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
 
       <div id="navLinks" class="nav-links flex flex-wrap items-center gap-1 ml-auto">
         <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 text-white' if path=='/' else 'text-slate-600 hover:bg-slate-100' }}" href="/">Dashboard</a>
@@ -70,63 +72,32 @@
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           New Deal
         </a>
-      </div>
-      <!-- User menu – lives outside #navLinks so it stays visible on mobile -->
-      <div class="relative" id="userMenuWrap">
-        <button onclick="document.getElementById('userDropdown').classList.toggle('hidden')"
-                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded text-slate-600 hover:bg-slate-100 transition ml-1">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-          <span class="hidden sm:inline max-w-[100px] truncate">{{ user.display_name if user is defined and user else '' }}</span>
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-        </button>
-        <div id="userDropdown" class="hidden absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-50">
-          {% if user is defined and user %}
-          <div class="px-3 py-2 border-b border-slate-100">
-            <div class="text-sm font-medium text-slate-900 truncate">{{ user.display_name }}</div>
-            <div class="text-xs text-slate-500">@{{ user.username }}</div>
-          </div>
-          {% endif %}
-          <a href="/profile" class="flex items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 transition">
+        <!-- User menu -->
+        <div class="relative" id="userMenuWrap">
+          <button onclick="document.getElementById('userDropdown').classList.toggle('hidden')"
+                  class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded text-slate-600 hover:bg-slate-100 transition ml-1">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-            Profile
-          </a>
-          <a href="/logout" class="flex items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 transition">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
-            Sign Out
-          </a>
+            <span class="hidden sm:inline max-w-[100px] truncate">{{ user.display_name if user is defined and user else '' }}</span>
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div id="userDropdown" class="hidden absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-50">
+            {% if user is defined and user %}
+            <div class="px-3 py-2 border-b border-slate-100">
+              <div class="text-sm font-medium text-slate-900 truncate">{{ user.display_name }}</div>
+              <div class="text-xs text-slate-500">@{{ user.username }}</div>
+            </div>
+            {% endif %}
+            <a href="/profile" class="flex items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 transition">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+              Profile
+            </a>
+            <a href="/logout" class="flex items-center gap-2 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 transition">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+              Sign Out
+            </a>
+          </div>
         </div>
       </div>
-    </div>
-  </nav>
-
-  <!-- Mobile Bottom Navigation -->
-  <nav id="bottomNav" class="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-slate-200">
-    <div class="flex items-stretch h-16">
-      <a href="/" class="flex flex-col items-center justify-center flex-1 gap-0.5 py-2 text-xs font-medium {{ 'text-emerald-600' if path=='/' else 'text-slate-400' }}">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
-        <span>Home</span>
-      </a>
-      <a href="/deals" class="flex flex-col items-center justify-center flex-1 gap-0.5 py-2 text-xs font-medium {{ 'text-emerald-600' if path.startswith('/deals') else 'text-slate-400' }}">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-        <span>Sales</span>
-      </a>
-      <a href="/delivery" class="flex flex-col items-center justify-center flex-1 gap-0.5 py-2 text-xs font-medium {{ 'text-emerald-600' if path.startswith('/delivery') else 'text-slate-400' }}">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
-        <span>Delivery</span>
-      </a>
-      <a href="/payplan" class="flex flex-col items-center justify-center flex-1 gap-0.5 py-2 text-xs font-medium {{ 'text-emerald-600' if path.startswith('/payplan') else 'text-slate-400' }}">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        <span>Pay Plan</span>
-      </a>
-      <a href="/reminders" class="flex flex-col items-center justify-center flex-1 gap-0.5 py-2 text-xs font-medium {{ 'text-emerald-600' if path.startswith('/reminders') else 'text-slate-400' }}">
-        <span class="relative inline-flex">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-          {%- if overdue_reminders is defined and overdue_reminders > 0 %}
-          <span class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{{ overdue_reminders }}</span>
-          {%- endif %}
-        </span>
-        <span>Reminders</span>
-      </a>
     </div>
   </nav>
 
@@ -274,11 +245,28 @@
   </script>
   {% endif %}
 
-  <main class="{% block main_class %}{% if embed|default(false) %}p-4{% else %}max-w-6xl mx-auto px-4 py-6{% endif %}{% endblock %}">
+  <main class="{{ 'p-4' if (embed|default(false)) else 'max-w-6xl mx-auto px-4 py-6' }}">
     {% block content %}{% endblock %}
   </main>
 
-<script>
+  {# ── Mobile Bottom Nav ── #}
+  <script>
+  // Close menus on outside click
+  document.addEventListener('click', function(e) {
+    var nav = document.getElementById('navLinks');
+    var hamburger = document.querySelector('.hamburger');
+    if (nav && nav.classList.contains('open') && !nav.contains(e.target) && !hamburger.contains(e.target)) {
+      nav.classList.remove('open');
+    }
+    var dd = document.getElementById('userDropdown');
+    var wrap = document.getElementById('userMenuWrap');
+    if (dd && !dd.classList.contains('hidden') && wrap && !wrap.contains(e.target)) {
+      dd.classList.add('hidden');
+    }
+  });
+  </script>
+
+  <script>
   // Register PWA service worker
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
