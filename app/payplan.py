@@ -40,8 +40,8 @@ def _calc_flat(deal: DealIn, settings: Settings):
         ] if flag
     )
 
-    # Trade hold: $100 for every full $1,000 of hold amount
-    trade_hold = int((deal.hold_amount or 0.0) // 1000) * 100.0
+    # Trade hold: 10% of hold amount
+    trade_hold = (deal.hold_amount or 0.0) * 0.10
 
     total = float(unit + addons + trade_hold)
     return float(unit), float(addons), float(trade_hold), total
@@ -103,6 +103,6 @@ def _calc_hybrid(deal: DealIn, settings: Settings):
         ] if flag
     )
 
-    trade_hold = int((deal.hold_amount or 0.0) // 1000) * 100.0
+    trade_hold = (deal.hold_amount or 0.0) * 0.10
     total = float(unit + back_comm + addons + trade_hold)
     return float(unit + back_comm), float(addons), float(trade_hold), total
