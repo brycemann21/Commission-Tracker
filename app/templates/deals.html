@@ -12,13 +12,36 @@
   .editable.save-err { animation:flash-red 0.6s ease; }
   @keyframes flash-green { 0%,100%{background:transparent} 50%{background:#dcfce7} }
   @keyframes flash-red   { 0%,100%{background:transparent} 50%{background:#fee2e2} }
-  .deals-table { table-layout:fixed; width:100%; }
-  .deals-table td, .deals-table th { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:2px 4px !important; }
-  .deals-table td.wrap-cell { white-space:normal; }
+  .deals-table { table-layout:auto; width:100%; }
+  .deals-table td, .deals-table th { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:3px 6px !important; }
+  .deals-table .col-comments { width:99%; } /* takes all leftover space */
+
+  /* ── Mobile: card layout ─────────────────────────────── */
   @media (max-width:767px) {
-    .deals-table { font-size:0.72rem; }
-    .deals-table th, .deals-table td { padding:3px 4px !important; }
-    .deals-table .editable { padding:1px 2px; }
+    .deals-table thead { display:none; }
+    .deals-table, .deals-table tbody { display:block; }
+    .deals-table tr.deal-row {
+      display:grid; grid-template-columns:1fr 1fr;
+      gap:2px 16px; border:1px solid #e2e8f0; border-radius:10px;
+      margin-bottom:10px; padding:8px 12px 6px;
+      background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.06);
+    }
+    .deals-table td {
+      display:flex !important; flex-direction:column;
+      padding:3px 0 !important; overflow:visible !important;
+      text-overflow:unset !important; white-space:normal !important;
+      border:none !important; font-size:0.82rem;
+    }
+    .deals-table td::before {
+      content:attr(data-label); font-size:0.62rem; font-weight:600;
+      color:#94a3b8; text-transform:uppercase; letter-spacing:.03em;
+    }
+    .deals-table td.checkbox-cell { display:none !important; }
+    .deals-table td.no-label {
+      grid-column:1/-1; flex-direction:row !important;
+      flex-wrap:wrap; gap:6px; padding:6px 0 !important;
+    }
+    .deals-table tr:not(.deal-row) { display:none; }
   }
 </style>
 
@@ -159,20 +182,20 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
 <table class="text-sm deals-table">
   <thead class="bg-slate-900 text-white">
     <tr>
-      <th class="p-2" style="width:2%"><input type="checkbox" id="selectAll" class="rounded" title="Select all"></th>
-      <th class="text-left p-2" style="width:4%">Sold</th>
-      <th class="text-left p-2" style="width:4%">Del'd</th>
-      <th class="text-left p-2" style="width:10%">Customer</th>
-      <th class="text-left p-2" style="width:4%">F&amp;I</th>
-      <th class="text-left p-2" style="width:6%">Stock #</th>
-      <th class="text-left p-2" style="width:9%">Model</th>
-      <th class="text-left p-2" style="width:12%">F/C/L</th>
-      <th class="text-left p-2" style="width:4%">N/U</th>
-      <th class="text-left p-2" style="width:8%">Comments</th>
-      <th class="text-left p-2" style="width:10%">Status</th>
-      <th class="text-left p-2" style="width:7%">Tag</th>
-      <th class="text-right p-2" style="width:7%">Commission</th>
-      <th class="p-2" style="width:13%"></th>
+      <th class="p-2"><input type="checkbox" id="selectAll" class="rounded" title="Select all"></th>
+      <th class="text-left p-2">Sold</th>
+      <th class="text-left p-2">Del'd</th>
+      <th class="text-left p-2">Customer</th>
+      <th class="text-left p-2">F&amp;I</th>
+      <th class="text-left p-2">Stock #</th>
+      <th class="text-left p-2">Model</th>
+      <th class="text-left p-2">F/C/L</th>
+      <th class="text-left p-2">N/U</th>
+      <th class="text-left p-2 col-comments">Comments</th>
+      <th class="text-left p-2">Status</th>
+      <th class="text-left p-2">Tag</th>
+      <th class="text-right p-2">Commission</th>
+      <th class="p-2"></th>
     </tr>
   </thead>
   <tbody>
@@ -228,7 +251,7 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
         </span>
       </td>
 
-      <td class="p-2 max-w-[180px]" data-label="Comments">
+      <td class="p-2 col-comments" data-label="Comments">
         <span class="editable truncate block" data-field="notes" data-id="{{ d.id }}" data-type="text" data-value="{{ (d.notes or '')|e }}" title="{{ d.notes or '' }}">
           {{ d.notes or '—' }}
         </span>
