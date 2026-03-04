@@ -60,7 +60,7 @@
           <td class="p-3">
             <span class="inline-block px-2 py-0.5 rounded text-[11px] font-semibold
               {% if u.role == 'admin' %}bg-violet-100 text-violet-800
-              {% elif u.role == 'manager' %}bg-blue-100 text-blue-800
+              {% elif u.role == 'manager' %}bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300
               {% else %}bg-slate-100 text-slate-700{% endif %}">
               {{ u.role|capitalize }}
             </span>

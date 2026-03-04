@@ -75,7 +75,7 @@
         <td class="p-3">
           <span class="inline-block px-2 py-0.5 rounded text-[11px] font-semibold
             {% if m.role == 'admin' %}bg-violet-100 text-violet-800
-            {% elif m.role == 'manager' %}bg-blue-100 text-blue-800
+            {% elif m.role == 'manager' %}bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300
             {% else %}bg-slate-100 text-slate-700{% endif %}">
             {{ m.role|capitalize }}
           </span>
@@ -152,10 +152,10 @@
         <td class="p-3">{{ deal.model or '—' }}</td>
         <td class="p-3">
           <span class="inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold
-            {% if deal.status == 'Delivered' %}bg-emerald-100 text-emerald-800
-            {% elif deal.status == 'Dead' %}bg-slate-100 text-slate-500
-            {% elif deal.status == 'Scheduled' %}bg-blue-100 text-blue-800
-            {% else %}bg-amber-100 text-amber-800{% endif %}">
+            {% if deal.status == 'Delivered' %}bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300
+            {% elif deal.status == 'Dead' %}bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400
+            {% elif deal.status == 'Scheduled' %}bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300
+            {% else %}bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300{% endif %}">
             {{ deal.status }}
           </span>
         </td>
@@ -192,17 +192,17 @@
         <div>
           <label class="block text-[11px] text-slate-500 mb-1">Unit Comm (≤$200 disc)</label>
           <input type="number" name="unit_comm_discount_le_200" value="{{ s.unit_comm_discount_le_200 }}" step="0.01"
-                 class="w-full border border-slate-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-slate-100 px-2 py-1.5 text-sm">
+                 class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
         </div>
         <div>
           <label class="block text-[11px] text-slate-500 mb-1">Unit Comm (>$200 disc)</label>
           <input type="number" name="unit_comm_discount_gt_200" value="{{ s.unit_comm_discount_gt_200 }}" step="0.01"
-                 class="w-full border border-slate-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-slate-100 px-2 py-1.5 text-sm">
+                 class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
         </div>
         <div>
           <label class="block text-[11px] text-slate-500 mb-1">Hourly Rate (NY Offset)</label>
           <input type="number" name="hourly_rate_ny_offset" value="{{ s.hourly_rate_ny_offset }}" step="0.01"
-                 class="w-full border border-slate-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-slate-100 px-2 py-1.5 text-sm">
+                 class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
         </div>
       </div>
 
@@ -212,7 +212,7 @@
         <div>
           <label class="block text-[11px] text-slate-500 mb-1">{{ label }}</label>
           <input type="number" name="{{ field }}" value="{{ s[field] }}" step="0.01"
-                 class="w-full border border-slate-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-slate-100 px-2 py-1.5 text-sm">
+                 class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
         </div>
         {% endfor %}
       </div>
@@ -223,7 +223,7 @@
         <div>
           <label class="block text-[11px] text-slate-500 mb-1">{{ label }} units</label>
           <input type="number" name="{{ field }}" value="{{ s[field] }}" step="0.01"
-                 class="w-full border border-slate-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-slate-100 px-2 py-1.5 text-sm">
+                 class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
         </div>
         {% endfor %}
       </div>
@@ -234,7 +234,7 @@
         <div>
           <label class="block text-[11px] text-slate-500 mb-1">{{ label }} units</label>
           <input type="number" name="{{ field }}" value="{{ s[field] }}" step="0.01"
-                 class="w-full border border-slate-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-slate-100 px-2 py-1.5 text-sm">
+                 class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
         </div>
         {% endfor %}
       </div>
@@ -245,7 +245,7 @@
         <div>
           <label class="block text-[11px] text-slate-500 mb-1">{{ label }}</label>
           <input type="number" name="{{ field }}" value="{{ s[field] }}" step="0.01"
-                 class="w-full border border-slate-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-slate-100 px-2 py-1.5 text-sm">
+                 class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
         </div>
         {% endfor %}
       </div>
@@ -255,12 +255,12 @@
         <div>
           <label class="block text-[11px] text-slate-500 mb-1">Threshold (units)</label>
           <input type="number" name="quarterly_bonus_threshold_units" value="{{ s.quarterly_bonus_threshold_units }}"
-                 class="w-full border border-slate-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-slate-100 px-2 py-1.5 text-sm">
+                 class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
         </div>
         <div>
           <label class="block text-[11px] text-slate-500 mb-1">Bonus Amount ($)</label>
           <input type="number" name="quarterly_bonus_amount" value="{{ s.quarterly_bonus_amount }}" step="0.01"
-                 class="w-full border border-slate-300 dark:border-slate-600 rounded dark:bg-slate-700 dark:text-slate-100 px-2 py-1.5 text-sm">
+                 class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
         </div>
       </div>
 

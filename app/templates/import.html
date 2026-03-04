@@ -92,7 +92,7 @@
   <!-- undone notice -->
   {% set undone = request.query_params.get('undone') %}
   {% if undone %}
-  <div class="mb-5 p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium">
+  <div class="mb-5 p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-800 text-sm font-medium">
     ✓ Deleted {{ undone }} deal{{ 's' if undone != '1' else '' }} from that import.
   </div>
   {% endif %}

@@ -3,7 +3,7 @@
 
 {# ── Milestone banner ── #}
 {% if milestones %}
-<div class="mb-4 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+<div class="mb-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3">
   {% for m in milestones %}
     <div class="flex items-center gap-2 text-sm font-medium text-emerald-800 {% if not loop.first %}mt-1{% endif %}">
       <span>🎉</span> {{ m }}
@@ -14,7 +14,7 @@
 
 {# ── Today's Deliveries ── #}
 {% if todays_deliveries %}
-<div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+<div class="mb-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
   <div class="flex items-center gap-2 mb-2">
     <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
     <span class="text-sm font-bold text-blue-800">Today's Deliveries ({{ todays_deliveries|length }})</span>
@@ -83,7 +83,7 @@
 
   {# Units MTD #}
   <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
-    <div class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Units MTD</div>
+    <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Units MTD</div>
     <div class="text-3xl font-bold mt-1">{{ units_mtd | int if units_mtd == units_mtd | int else units_mtd }}</div>
     <div class="text-xs text-slate-500 mt-1">New: {{ new_mtd }} · Used: {{ used_mtd }}</div>
     {% if units_diff != 0 %}
@@ -105,7 +105,7 @@
 
   {# Commission MTD #}
   <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
-    <div class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Commission MTD</div>
+    <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Commission MTD</div>
     <div class="text-3xl font-bold mt-1">${{ "{:,.0f}".format(comm_mtd or 0) }}</div>
     <div class="text-xs text-slate-500 mt-1">Avg/deal: ${{ "{:,.0f}".format(avg_per_deal or 0) }}</div>
     {% if comm_diff != 0 %}
@@ -127,7 +127,7 @@
 
   {# Projected Units #}
   <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
-    <div class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Projected Units</div>
+    <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Projected Units</div>
     <div class="text-3xl font-bold mt-1 text-blue-700">{{ proj_units | int if proj_units == proj_units | int else proj_units }} <span class="text-base font-medium text-slate-400">MTD</span></div>
     <div class="text-xs text-slate-500 mt-1">{{ pending_in_month_count }} pending</div>
     <div class="text-xl font-bold mt-2">{{ units_ytd }} <span class="text-sm font-medium text-slate-400">YTD</span></div>
@@ -135,7 +135,7 @@
 
   {# Bonus #}
   <button type="button" id="openBonusModal" class="text-left bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 hover:border-slate-300 hover:shadow-sm transition">
-    <div class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Total Bonus</div>
+    <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Total Bonus</div>
     <div class="text-3xl font-bold mt-1 text-violet-700">${{ "{:,.0f}".format(current_bonus_total or 0) }}</div>
     <div class="text-xs text-slate-500 mt-1">Click for breakdown</div>
   </button>
@@ -877,7 +877,7 @@
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">Scheduled Delivery Date</label>
           <input type="date" id="dashSchedDate"
-                 class="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 dark:bg-slate-700 dark:text-slate-100 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+                 class="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
         </div>
         <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition">
           <input type="checkbox" id="dashSchedBoard" class="rounded w-4 h-4 text-indigo-600">
