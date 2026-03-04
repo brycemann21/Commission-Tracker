@@ -5,12 +5,27 @@
 <style>
   @media print { body * { visibility: hidden !important; } }
   /* Thin row table styling */
-  .dt th { padding: 5px 8px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
-  .dt td { padding: 3px 8px; font-size: 0.78rem; line-height: 1.25; white-space: nowrap; }
+  .dt th { padding: 5px 6px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+  .dt td { padding: 3px 6px; font-size: 0.78rem; line-height: 1.25; white-space: nowrap; }
   .dt tbody tr { border-top: 1px solid #f1f5f9; }
   .dark .dt tbody tr { border-top-color: #334155; }
   .dt tbody tr:hover { background: rgba(241,245,249,0.6); }
   .dark .dt tbody tr:hover { background: rgba(51,65,85,0.35); }
+  /* Column width hints */
+  .dt .col-sold { width: 60px; min-width: 50px; }
+  .dt .col-deld { width: 52px; min-width: 44px; }
+  .dt .col-cust { width: 120px; min-width: 90px; }
+  .dt .col-fi { width: 44px; min-width: 36px; }
+  .dt .col-stock { width: 72px; min-width: 60px; }
+  .dt .col-model { width: 120px; min-width: 80px; }
+  .dt .col-fcl { width: 56px; min-width: 44px; }
+  .dt .col-nu { width: 40px; min-width: 36px; }
+  .dt .col-comments { min-width: 180px; width: auto; }
+  .dt .col-comments .editable { white-space: normal; word-break: break-word; max-width: 100%; display: block; }
+  .dt .col-status { width: 80px; min-width: 68px; }
+  .dt .col-tag { width: 64px; min-width: 52px; }
+  .dt .col-comm { width: 80px; min-width: 68px; }
+  .dt .col-actions { width: 120px; min-width: 100px; }
   /* Editable cells */
   .editable { cursor: pointer; border-radius: 3px; padding: 1px 3px; display: inline-block; transition: background .1s; }
   .editable:hover { background: #f1f5f9; }
@@ -22,6 +37,8 @@
   .editable.save-err { animation: ferr .5s ease; }
   @keyframes fok  { 0%,100%{background:transparent} 50%{background:#dcfce7} }
   @keyframes ferr { 0%,100%{background:transparent} 50%{background:#fee2e2} }
+  .dark @keyframes fok  { 0%,100%{background:transparent} 50%{background:rgba(22,163,74,0.15)} }
+  .dark @keyframes ferr { 0%,100%{background:transparent} 50%{background:rgba(220,38,38,0.15)} }
   /* Action links */
   .act-link { font-size: 0.68rem; color: #64748b; cursor: pointer; padding: 1px 3px; border-radius: 3px; white-space: nowrap; }
   .act-link:hover { background: #f1f5f9; color: #334155; }
@@ -146,23 +163,23 @@ document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeSche
 
   <!-- THE TABLE -->
   <div class="overflow-x-auto rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
-    <table class="min-w-full dt">
+    <table class="w-full dt" style="table-layout:auto">
       <thead class="bg-slate-900 text-white">
         <tr>
           <th class="w-6 px-2"><input type="checkbox" id="selectAll" class="rounded accent-white" title="Select all"></th>
-          <th class="text-left">Sold</th>
-          <th class="text-left">Del'd</th>
-          <th class="text-left">Customer</th>
-          <th class="text-left">F&amp;I</th>
-          <th class="text-left">Stock #</th>
-          <th class="text-left">Model</th>
-          <th class="text-left">F/C/L</th>
-          <th class="text-left">N/U</th>
-          <th class="text-left">Comments</th>
-          <th class="text-left">Status</th>
-          <th class="text-left">Tag</th>
-          <th class="text-right">Commission</th>
-          <th class="text-right pr-3">Actions</th>
+          <th class="text-left col-sold">Sold</th>
+          <th class="text-left col-deld">Del'd</th>
+          <th class="text-left col-cust">Customer</th>
+          <th class="text-left col-fi">F&amp;I</th>
+          <th class="text-left col-stock">Stock #</th>
+          <th class="text-left col-model">Model</th>
+          <th class="text-left col-fcl">F/C/L</th>
+          <th class="text-left col-nu">N/U</th>
+          <th class="text-left col-comments">Comments</th>
+          <th class="text-left col-status">Status</th>
+          <th class="text-left col-tag">Tag</th>
+          <th class="text-right col-comm">Commission</th>
+          <th class="text-right pr-3 col-actions">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -218,8 +235,8 @@ document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeSche
             </span>
           </td>
 
-          <td style="max-width:160px">
-            <span class="editable truncate block" data-field="notes" data-id="{{ d.id }}" data-type="text" data-value="{{ (d.notes or '')|e }}" title="{{ d.notes or '' }}">
+          <td class="col-comments">
+            <span class="editable" data-field="notes" data-id="{{ d.id }}" data-type="text" data-value="{{ (d.notes or '')|e }}" title="{{ d.notes or '' }}">
               {{ d.notes or '—' }}
             </span>
           </td>

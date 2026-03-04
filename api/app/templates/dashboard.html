@@ -5,7 +5,7 @@
 {% if milestones %}
 <div class="mb-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3">
   {% for m in milestones %}
-    <div class="flex items-center gap-2 text-sm font-medium text-emerald-800 {% if not loop.first %}mt-1{% endif %}">
+    <div class="flex items-center gap-2 text-sm font-medium text-emerald-800 dark:text-emerald-300 {% if not loop.first %}mt-1{% endif %}">
       <span>🎉</span> {{ m }}
     </div>
   {% endfor %}
@@ -17,7 +17,7 @@
 <div class="mb-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
   <div class="flex items-center gap-2 mb-2">
     <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-    <span class="text-sm font-bold text-blue-800">Today's Deliveries ({{ todays_deliveries|length }})</span>
+    <span class="text-sm font-bold text-blue-800 dark:text-blue-300">Today's Deliveries ({{ todays_deliveries|length }})</span>
   </div>
   <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
     {% for d in todays_deliveries %}
@@ -87,7 +87,7 @@
     <div class="text-3xl font-bold mt-1 dark:text-white">{{ units_mtd | int if units_mtd == units_mtd | int else units_mtd }}</div>
     <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">New: {{ new_mtd }} · Used: {{ used_mtd }}</div>
     {% if units_diff != 0 %}
-      <div class="text-xs mt-1 flex items-center gap-1 {{ 'text-emerald-600' if units_diff > 0 else 'text-rose-600' }}">
+      <div class="text-xs mt-1 flex items-center gap-1 {{ 'text-emerald-600 dark:text-emerald-400' if units_diff > 0 else 'text-rose-600 dark:text-rose-400' }}">
         {% if units_diff > 0 %}↑{% else %}↓{% endif %} {{ units_diff|abs }} vs last month
       </div>
     {% endif %}
@@ -109,7 +109,7 @@
     <div class="text-3xl font-bold mt-1 dark:text-white">${{ "{:,.0f}".format(comm_mtd or 0) }}</div>
     <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">Avg/deal: ${{ "{:,.0f}".format(avg_per_deal or 0) }}</div>
     {% if comm_diff != 0 %}
-      <div class="text-xs mt-1 flex items-center gap-1 {{ 'text-emerald-600' if comm_diff > 0 else 'text-rose-600' }}">
+      <div class="text-xs mt-1 flex items-center gap-1 {{ 'text-emerald-600 dark:text-emerald-400' if comm_diff > 0 else 'text-rose-600 dark:text-rose-400' }}">
         {% if comm_diff > 0 %}↑{% else %}↓{% endif %} ${{ "{:,.0f}".format(comm_diff|abs) }} vs last month
       </div>
     {% endif %}
@@ -128,7 +128,7 @@
   {# Projected Units #}
   <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
     <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Projected Units</div>
-    <div class="text-3xl font-bold mt-1 text-blue-700">{{ proj_units | int if proj_units == proj_units | int else proj_units }} <span class="text-base font-medium text-slate-400">MTD</span></div>
+    <div class="text-3xl font-bold mt-1 text-blue-700 dark:text-blue-400">{{ proj_units | int if proj_units == proj_units | int else proj_units }} <span class="text-base font-medium text-slate-400">MTD</span></div>
     <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">{{ pending_in_month_count }} pending</div>
     <div class="text-xl font-bold mt-2 dark:text-white">{{ units_ytd }} <span class="text-sm font-medium text-slate-400">YTD</span></div>
   </div>
@@ -136,7 +136,7 @@
   {# Bonus #}
   <button type="button" id="openBonusModal" class="text-left bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 hover:border-slate-300 hover:shadow-sm transition">
     <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Total Bonus</div>
-    <div class="text-3xl font-bold mt-1 text-violet-700">${{ "{:,.0f}".format(current_bonus_total or 0) }}</div>
+    <div class="text-3xl font-bold mt-1 text-violet-700 dark:text-violet-400">${{ "{:,.0f}".format(current_bonus_total or 0) }}</div>
     <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">Click for breakdown</div>
   </button>
 </div>
@@ -157,7 +157,7 @@
   </div>
   <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
     <div class="text-xs text-slate-500 dark:text-slate-400">Projected Commission</div>
-    <div class="text-xl font-bold text-blue-700">${{ "{:,.0f}".format(proj_comm or 0) }}</div>
+    <div class="text-xl font-bold text-blue-700 dark:text-blue-400">${{ "{:,.0f}".format(proj_comm or 0) }}</div>
   </div>
 </div>
 
@@ -245,7 +245,7 @@
       {% set r = closing_rates[k] %}
       {% set pct = (r.pct if r.pct is not none else 0) %}
       {% set bar_color = 'bg-emerald-500' if r.pct is not none and r.pct >= 60 else 'bg-amber-500' if r.pct is not none and r.pct >= 30 else 'bg-rose-400' if r.pct is not none else 'bg-slate-200' %}
-      {% set text_color = 'text-emerald-700' if r.pct is not none and r.pct >= 60 else 'text-amber-700' if r.pct is not none and r.pct >= 30 else 'text-rose-600' if r.pct is not none else 'text-slate-400' %}
+      {% set text_color = 'text-emerald-700 dark:text-emerald-400' if r.pct is not none and r.pct >= 60 else 'text-amber-700 dark:text-amber-400' if r.pct is not none and r.pct >= 30 else 'text-rose-600 dark:text-rose-400' if r.pct is not none else 'text-slate-400 dark:text-slate-500' %}
       <div>
         <div class="flex items-center justify-between mb-1">
           <div class="text-sm font-medium text-slate-700 dark:text-slate-300">{{ r.label }}</div>
@@ -333,7 +333,7 @@
                 {{ d.sold_date.strftime('%-m/%-d') if d.sold_date else '—' }}
               </span>
               {% if d.days_pending >= 3 %}
-                <span class="ml-1 text-[10px] font-medium {{ 'text-rose-600' if d.days_pending >= 7 else 'text-amber-600' }}">{{ d.days_pending }}d</span>
+                <span class="ml-1 text-[10px] font-medium {{ 'text-rose-600 dark:text-rose-400' if d.days_pending >= 7 else 'text-amber-600 dark:text-amber-400' }}">{{ d.days_pending }}d</span>
               {% endif %}
             </td>
             <td class="p-2 font-medium">
@@ -343,7 +343,7 @@
             <td class="p-2">
               <span class="editable-p" data-field="tag" data-id="{{ d.id }}" data-type="select"
                     data-value="{{ d.tag or '' }}" data-options="|Shop|Title|Inbound|FO|SPOT|LOCATE">
-                {% if d.tag %}<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 dark:text-slate-300">{{ d.tag }}</span>{% else %}—{% endif %}
+                {% if d.tag %}<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300">{{ d.tag }}</span>{% else %}—{% endif %}
               </span>
             </td>
             <td class="p-2">
