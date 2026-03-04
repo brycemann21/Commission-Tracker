@@ -17,7 +17,7 @@
     <h1 class="text-xl font-bold">Reminders</h1>
     <div class="text-xs text-slate-500 dark:text-slate-400">Click a reminder to edit • Check off when done</div>
   </div>
-  <button onclick="openForm()" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">
+  <button onclick="openForm()" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-900 dark:bg-indigo-600 text-white text-sm font-medium hover:bg-slate-700 dark:hover:bg-indigo-700 transition">
     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
     Add Reminder
   </button>
@@ -46,19 +46,19 @@
     </button>
     <div class="flex-1 min-w-0">
       <div class="flex items-center gap-2 flex-wrap">
-        <span class="font-medium text-slate-900 text-sm">{{ d.title }}</span>
+        <span class="font-medium text-slate-900 dark:text-slate-100 text-sm">{{ d.title }}</span>
         {% if d.due_date %}
           <span class="text-[11px] px-2 py-0.5 rounded-full font-medium
-            {% if is_overdue %}bg-red-100 text-red-700
-            {% elif is_today %}bg-amber-100 text-amber-700
-            {% else %}bg-blue-100 text-blue-700{% endif %}">
+            {% if is_overdue %}bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300
+            {% elif is_today %}bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300
+            {% else %}bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300{% endif %}">
             {% if is_overdue %}Overdue · {% endif %}
             {% if is_today %}Today{% else %}{{ d.due_date.strftime('%-m/%-d') }}{% endif %}
           </span>
         {% endif %}
       </div>
       {% if d.body %}
-        <div class="text-xs text-slate-500 mt-0.5 truncate">{{ d.body }}</div>
+        <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">{{ d.body }}</div>
       {% endif %}
     </div>
     <button type="button" onclick="event.stopPropagation(); deleteReminder({{ d.id }})"
@@ -103,29 +103,29 @@
   <div class="flex items-center justify-center min-h-screen p-4">
     <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md">
       <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
-        <h2 id="modalHeading" class="font-semibold text-lg">Add Reminder</h2>
-        <button onclick="closeForm()" class="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>
+        <h2 id="modalHeading" class="font-semibold text-lg dark:text-white">Add Reminder</h2>
+        <button onclick="closeForm()" class="text-slate-400 hover:text-slate-300 dark:hover:text-slate-200 text-xl leading-none">&times;</button>
       </div>
       <div class="p-5 space-y-4">
         <input type="hidden" id="remId" value="">
         <div>
-          <label class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Title *</label>
+          <label class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Title *</label>
           <input id="remTitle" type="text" placeholder="e.g. Follow up on title for BAGLIERI"
-                 class="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900">
+                 class="mt-1 w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 dark:focus:ring-indigo-500">
         </div>
         <div>
-          <label class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Notes</label>
+          <label class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Notes</label>
           <textarea id="remBody" rows="2" placeholder="Any extra details..."
                     class="mt-1 w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-slate-900"></textarea>
         </div>
         <div>
-          <label class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Due Date</label>
-          <input id="remDue" type="date" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900">
+          <label class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Due Date</label>
+          <input id="remDue" type="date" class="mt-1 w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 dark:focus:ring-indigo-500">
         </div>
       </div>
       <div class="flex justify-end gap-2 px-5 pb-5">
-        <button onclick="closeForm()" class="px-4 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 transition">Cancel</button>
-        <button onclick="saveReminder()" class="px-5 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">Save</button>
+        <button onclick="closeForm()" class="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition">Cancel</button>
+        <button onclick="saveReminder()" class="px-5 py-2 rounded-lg bg-slate-900 dark:bg-indigo-600 text-white text-sm font-medium hover:bg-slate-700 dark:hover:bg-indigo-700 transition">Save</button>
       </div>
     </div>
   </div>
@@ -206,9 +206,9 @@
     const isToday   = y===t[0] && m===t[1] && d===t[2];
     const isOverdue = iso < today;
     const disp = isToday ? 'Today' : `${m}/${d}`;
-    if (isOverdue) return `<span class="text-[11px] px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-700">Overdue · ${disp}</span>`;
-    if (isToday)   return `<span class="text-[11px] px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700">Today</span>`;
-    return `<span class="text-[11px] px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700">${disp}</span>`;
+    if (isOverdue) return `<span class="text-[11px] px-2 py-0.5 rounded-full font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">Overdue · ${disp}</span>`;
+    if (isToday)   return `<span class="text-[11px] px-2 py-0.5 rounded-full font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">Today</span>`;
+    return `<span class="text-[11px] px-2 py-0.5 rounded-full font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">${disp}</span>`;
   }
 
   function buildCardHTML(r) {
@@ -221,7 +221,7 @@
       : `<div class="mt-0.5 shrink-0 w-5 h-5 rounded-full border-2 ${isOverdue?'border-red-400':isToday?'border-amber-400':'border-slate-300'} flex items-center justify-center hover:bg-slate-100 transition"></div>`;
     const titleEl = r.is_done
       ? `<span class="text-sm text-slate-400 line-through">${r.title}</span>`
-      : `<span class="font-medium text-slate-900 text-sm">${r.title}</span> ${dateLabel(r.due_date)}`;
+      : `<span class="font-medium text-slate-900 dark:text-slate-100 text-sm">${r.title}</span> ${dateLabel(r.due_date)}`;
     const bodyEl = r.body ? `<div class="text-xs text-${r.is_done?'slate-400':'slate-500'} mt-0.5 truncate">${r.body}</div>` : '';
     return `<div class="reminder-card ${doneCls} bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm flex items-start gap-3 p-3 cursor-pointer hover:border-slate-300 transition ${borderCls}"
          data-id="${r.id}" onclick="handleCardClick(event,${r.id})">

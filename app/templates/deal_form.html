@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 {% if mtd and not embed %}
-  <div class="mb-3 rounded border border-slate-200 bg-white px-4 py-3">
+  <div class="mb-3 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3">
     <div class="text-xs text-slate-500 dark:text-slate-400">This month so far ({{ mtd.month_label }})</div>
     <div class="mt-1 flex flex-wrap gap-x-6 gap-y-2 text-sm">
       <div><span class="text-slate-500 dark:text-slate-400">Cars:</span> <b>{{ mtd.units }}</b></div>
@@ -16,7 +16,7 @@
   Matches your Excel payplan: Unit commission + add-ons + trade hold commission.
 </div>
 
-<form id="dealForm" class="bg-white rounded border border-slate-200 p-4" method="post" action="/deals/save">
+<form id="dealForm" class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4" method="post" action="/deals/save">
         {{ csrf_hidden|safe }}
   <input type="hidden" name="next" value="{{ next_url or '' }}" />
   {% if deal %}<input type="hidden" name="deal_id" value="{{ deal.id }}">{% endif %}
@@ -27,7 +27,7 @@
   <div class="grid md:grid-cols-3 gap-4">
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">Sold Date</label>
-      <input type="date" class="w-full border rounded px-3 py-2" name="sold_date" value="{{ deal.sold_date.isoformat() if deal and deal.sold_date else today().isoformat() }}">
+      <input type="date" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="sold_date" value="{{ deal.sold_date.isoformat() if deal and deal.sold_date else today().isoformat() }}">
     </div>
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">Spot?</label>
@@ -42,7 +42,7 @@
     </div>
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">Status</label>
-      <select class="w-full border rounded px-3 py-2" name="status" id="status_select">
+      <select class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="status" id="status_select">
         {% for s in ["Pending","Scheduled","Delivered","Dead"] %}
           <option value="{{ s }}" {% if deal and deal.status==s %}selected{% endif %}>{{ s }}</option>
         {% endfor %}
@@ -52,7 +52,7 @@
         <label class="text-xs text-slate-500 dark:text-slate-400">Scheduled date</label>
         <input
           type="date"
-          class="w-full border rounded px-3 py-2"
+          class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2"
           name="scheduled_date"
           id="scheduled_date_input"
           value="{{ deal.scheduled_date.isoformat() if deal and deal.scheduled_date else '' }}"
@@ -62,7 +62,7 @@
 
     <div>
   <label class="text-xs text-slate-500 dark:text-slate-400">Tag</label>
-  <select class="w-full border rounded px-3 py-2" name="tag">
+  <select class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="tag">
     {% set current_tag = (deal.tag if deal and deal.tag is not none else "") %}
     <option value="" {% if current_tag == "" %}selected{% endif %}>—</option>
     {% for t in ["Shop","Title","Inbound","FO"] %}
@@ -73,22 +73,22 @@
 
     <div class="md:col-span-2">
       <label class="text-xs text-slate-500 dark:text-slate-400">Customer</label>
-      <input class="w-full border rounded px-3 py-2" name="customer" id="customer_input" value="{{ deal.customer if deal else '' }}" placeholder="Customer name">
+      <input class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="customer" id="customer_input" value="{{ deal.customer if deal else '' }}" placeholder="Customer name">
       <div class="text-xs text-rose-600 mt-1 hidden" id="err_customer">Customer is required.</div>
     </div>
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">Stock #</label>
-      <input class="w-full border rounded px-3 py-2" name="stock_num" value="{{ deal.stock_num if deal else '' }}">
+      <input class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="stock_num" value="{{ deal.stock_num if deal else '' }}">
     </div>
 
     <div class="md:col-span-2">
       <label class="text-xs text-slate-500 dark:text-slate-400">Model</label>
-      <input class="w-full border rounded px-3 py-2" name="model" id="model_input" value="{{ deal.model if deal else '' }}" placeholder="e.g., 2024 Explorer">
+      <input class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="model" id="model_input" value="{{ deal.model if deal else '' }}" placeholder="e.g., 2024 Explorer">
       <div class="text-xs text-amber-600 mt-1 hidden" id="warn_model">Model is blank (you can still save).</div>
     </div>
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">New/Used</label>
-      <select class="w-full border rounded px-3 py-2" name="new_used">
+      <select class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="new_used">
         {% for s in ["","New","Used"] %}
           <option value="{{ s }}" {% if deal and deal.new_used==s %}selected{% endif %}>{{ s or "—" }}</option>
         {% endfor %}
@@ -97,7 +97,7 @@
 
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">F/C/L</label>
-      <select class="w-full border rounded px-3 py-2" name="deal_type">
+      <select class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="deal_type">
         {% set cur = (deal.deal_type if deal and deal.deal_type else "") %}
         {# Back-compat for old saved values: F/C/L #}
         {% if cur == "F" %}{% set cur = "Finance" %}{% endif %}
@@ -112,7 +112,7 @@
     </div>
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">F&I</label>
-      <select class="w-full border rounded px-3 py-2" name="business_manager">
+      <select class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="business_manager">
         {% set cur_bm = (deal.business_manager if deal and deal.business_manager else "") %}
         <option value="" {% if cur_bm=="" %}selected{% endif %}>--</option>
         {% for opt in ["RGO","KMC","DAB","JGA"] %}
@@ -125,7 +125,7 @@
 
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">Discount</label>
-      <select class="w-full border rounded px-3 py-2" name="discount_gt_200">
+      <select class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="discount_gt_200">
         <option value="No" {% if not deal or not deal.discount_gt_200 %}selected{% endif %}>No</option>
         <option value="Yes" {% if deal and deal.discount_gt_200 %}selected{% endif %}>Yes</option>
       </select>
@@ -134,7 +134,7 @@
 
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">Aim Presentation</label>
-      <select class="w-full border rounded px-3 py-2" name="aim_presentation">
+      <select class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="aim_presentation">
         {% set cur_aim = (deal.aim_presentation if deal and deal.aim_presentation else "X") %}
         {% for opt in ["Yes","No","X"] %}
           <option value="{{ opt }}" {% if cur_aim == opt %}selected{% endif %}>{{ opt }}</option>
@@ -145,7 +145,7 @@
 
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">Money Held?</label>
-      <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="hold_amount" id="hold_input" value="{{ deal.hold_amount if deal else 0 }}">
+      <input type="number" step="0.01" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="hold_amount" id="hold_input" value="{{ deal.hold_amount if deal else 0 }}">
       <div class="text-xs text-slate-400 mt-1">Trade hold comm = Hold × 10%</div>
       <div class="text-xs text-rose-600 mt-1 hidden" id="err_hold">Money Held can't be negative.</div>
     </div>
@@ -154,14 +154,14 @@
       <label class="text-xs text-slate-500 dark:text-slate-400">Aim $</label>
       <div class="relative">
         <span class="absolute left-3 top-2.5 text-slate-400">$</span>
-        <input type="number" step="0.01" class="w-full border rounded pl-7 pr-3 py-2" name="aim_amount" id="aim_input" value="{{ deal.aim_amount if deal and deal.aim_amount else 0 }}">
+        <input type="number" step="0.01" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" name="aim_amount" id="aim_input" value="{{ deal.aim_amount if deal and deal.aim_amount else 0 }}">
       </div>
       <div class="text-xs text-slate-400 mt-1">Aim product commission (added to total)</div>
     </div>
 
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">Comments</label>
-      <input class="w-full border rounded px-3 py-2" name="notes" value="{{ deal.notes if deal else '' }}">
+      <input class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="notes" value="{{ deal.notes if deal else '' }}">
     </div>
     <input type="hidden" name="front_gross" value="0">
     <input type="hidden" name="back_gross" value="0">
@@ -171,12 +171,12 @@
 
 
   <div class="mt-5">
-    <div class="font-bold mb-2">Products Sold</div>
+    <div class="font-bold mb-2 dark:text-white">Products Sold</div>
     {% if products is defined and products|length > 0 %}
     <div class="grid md:grid-cols-3 gap-3">
       {% for p in products %}
       {% if p.name != 'Finance' %}
-      <label class="flex items-center gap-2 bg-slate-50 border rounded p-2 cursor-pointer hover:bg-slate-100 transition">
+      <label class="flex items-center gap-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-600 rounded p-2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 transition">
         <input type="checkbox" name="product_{{ p.id }}" value="1" data-comm="{{ p.commission }}" data-name="{{ p.name }}" class="product-cb"
                {% if deal and p.id in deal_product_ids %}checked{% elif not deal and p.default_on %}checked{% endif %}>
         <span class="text-sm">{{ p.name }}</span>
@@ -186,7 +186,7 @@
       {% endfor %}
     </div>
     {% else %}
-    <div class="text-sm text-slate-400 bg-slate-50 rounded p-3">
+    <div class="text-sm text-slate-400 bg-slate-50 dark:bg-slate-900/50 rounded p-3">
       No products configured. <a href="/payplan" class="text-violet-600 hover:underline">Set up your products in Pay Plan</a>.
     </div>
     {% endif %}
@@ -200,8 +200,8 @@
   </div>
 
   <div class="mt-5 flex items-center gap-3">
-    <button class="px-4 py-2 rounded bg-slate-900 text-white">Save</button>
-    <a class="px-4 py-2 rounded border" href="/deals">Cancel</a>
+    <button class="px-4 py-2 rounded bg-slate-900 dark:bg-indigo-600 text-white hover:bg-slate-700 dark:hover:bg-indigo-700 transition">Save</button>
+    <a class="px-4 py-2 rounded border border-slate-200 dark:border-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition" href="/deals">Cancel</a>
     {% if deal %}
       <form method="post" action="/deals/{{ deal.id }}/delete" class="ml-auto">
         {{ csrf_hidden|safe }}
@@ -223,8 +223,8 @@
 
     <!-- Live commission box -->
     <div>
-      <div class="sticky top-4 rounded border border-slate-200 bg-slate-50 p-3">
-        <div class="text-sm font-bold">Live Commission</div>
+      <div class="sticky top-4 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3">
+        <div class="text-sm font-bold dark:text-white">Live Commission</div>
         <div class="text-xs text-slate-500 dark:text-slate-400">Updates as you change fields</div>
 
         <div class="mt-3 space-y-2 text-sm">
@@ -232,8 +232,8 @@
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Add-ons</span><b id="lc_addons">$0</b></div>
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Money Held Comm</span><b id="lc_hold">$0</b></div>
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Aim $</span><b id="lc_aim">$0</b></div>
-          <div class="border-t border-slate-200 pt-2 flex justify-between text-base">
-            <span class="text-slate-700 font-bold">Total</span>
+          <div class="border-t border-slate-200 dark:border-slate-600 pt-2 flex justify-between text-base">
+            <span class="text-slate-700 dark:text-slate-200 font-bold">Total</span>
             <span class="font-bold" id="lc_total">$0</span>
           </div>
         </div>
@@ -241,8 +241,8 @@
         <div class="mt-3 text-xs text-slate-500 dark:text-slate-400" id="lc_hint"></div>
 
         <!-- Commission Override -->
-        <div class="mt-4 border-t border-slate-200 pt-3">
-          <label class="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+        <div class="mt-4 border-t border-slate-200 dark:border-slate-600 pt-3">
+          <label class="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1">
             <svg class="w-3.5 h-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
             Manual Override
           </label>
@@ -257,10 +257,10 @@
               id="commission_override"
               placeholder="e.g. 750"
               value="{{ deal.commission_override if deal and deal.commission_override is not none else '' }}"
-              class="w-full border rounded pl-6 pr-3 py-2 text-sm {% if deal and deal.commission_override is not none %}border-amber-400 bg-amber-50{% else %}border-slate-300{% endif %}"
+              class="w-full border rounded pl-6 pr-3 py-2 text-sm dark:bg-slate-900 dark:text-slate-100 {% if deal and deal.commission_override is not none %}border-amber-400 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-600{% else %}border-slate-300 dark:border-slate-600{% endif %}"
             >
           </div>
-          <div id="override_active_msg" class="mt-1 text-[11px] text-amber-700 font-medium {% if not (deal and deal.commission_override is not none) %}hidden{% endif %}">
+          <div id="override_active_msg" class="mt-1 text-[11px] text-amber-700 dark:text-amber-400 font-medium {% if not (deal and deal.commission_override is not none) %}hidden{% endif %}">
             ⚠ Override active — calculated total ignored
           </div>
         </div>
