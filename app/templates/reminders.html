@@ -15,7 +15,7 @@
 <div class="flex items-center justify-between mb-5">
   <div>
     <h1 class="text-xl font-bold">Reminders</h1>
-    <div class="text-xs text-slate-500">Click a reminder to edit • Check off when done</div>
+    <div class="text-xs text-slate-500 dark:text-slate-400">Click a reminder to edit • Check off when done</div>
   </div>
   <button onclick="openForm()" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">
     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
@@ -39,7 +39,7 @@
   {% for d in active %}
   {% set is_overdue  = d.due_date and d.due_date < today %}
   {% set is_today    = d.due_date and d.due_date == today %}
-  <div class="reminder-card bg-white rounded-lg border border-slate-200 shadow-sm flex items-start gap-3 p-3 cursor-pointer hover:border-slate-300 transition {% if is_overdue %}border-l-4 border-l-red-400{% elif is_today %}border-l-4 border-l-amber-400{% endif %}"
+  <div class="reminder-card bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm flex items-start gap-3 p-3 cursor-pointer hover:border-slate-300 transition {% if is_overdue %}border-l-4 border-l-red-400{% elif is_today %}border-l-4 border-l-amber-400{% endif %}"
        data-id="{{ d.id }}" onclick="handleCardClick(event, {{ d.id }})">
     <button type="button" onclick="event.stopPropagation(); toggleDone({{ d.id }})"
             class="mt-0.5 shrink-0 w-5 h-5 rounded-full border-2 {% if is_overdue %}border-red-400{% elif is_today %}border-amber-400{% else %}border-slate-300{% endif %} flex items-center justify-center hover:bg-slate-100 transition">
@@ -78,7 +78,7 @@
   </div>
   <div id="doneSection" class="hidden space-y-2">
     {% for d in done %}
-    <div class="reminder-card done bg-white rounded-lg border border-slate-200 flex items-start gap-3 p-3 cursor-pointer"
+    <div class="reminder-card done bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 flex items-start gap-3 p-3 cursor-pointer"
          data-id="{{ d.id }}" onclick="handleCardClick(event, {{ d.id }})">
       <button type="button" onclick="event.stopPropagation(); toggleDone({{ d.id }})"
               class="mt-0.5 shrink-0 w-5 h-5 rounded-full border-2 border-emerald-400 bg-emerald-400 flex items-center justify-center hover:bg-emerald-500 transition">
@@ -101,8 +101,8 @@
 <!-- Add/Edit Modal -->
 <div id="reminderModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.45)">
   <div class="flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md">
-      <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
         <h2 id="modalHeading" class="font-semibold text-lg">Add Reminder</h2>
         <button onclick="closeForm()" class="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>
       </div>
@@ -223,7 +223,7 @@
       ? `<span class="text-sm text-slate-400 line-through">${r.title}</span>`
       : `<span class="font-medium text-slate-900 text-sm">${r.title}</span> ${dateLabel(r.due_date)}`;
     const bodyEl = r.body ? `<div class="text-xs text-${r.is_done?'slate-400':'slate-500'} mt-0.5 truncate">${r.body}</div>` : '';
-    return `<div class="reminder-card ${doneCls} bg-white rounded-lg border border-slate-200 shadow-sm flex items-start gap-3 p-3 cursor-pointer hover:border-slate-300 transition ${borderCls}"
+    return `<div class="reminder-card ${doneCls} bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm flex items-start gap-3 p-3 cursor-pointer hover:border-slate-300 transition ${borderCls}"
          data-id="${r.id}" onclick="handleCardClick(event,${r.id})">
       <button type="button" onclick="event.stopPropagation();toggleDone(${r.id})" class="shrink-0">${checkInner}</button>
       <div class="flex-1 min-w-0">

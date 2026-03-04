@@ -22,7 +22,7 @@
 <!-- ─── Schedule Modal ─────────────────────────────────────────────────────── -->
 <div id="scheduleModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
   <div class="flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm p-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-bold">Schedule Delivery</h2>
         <button onclick="closeSchedModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
@@ -30,13 +30,13 @@
       <div class="space-y-4">
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">Delivery Date</label>
-          <input type="date" id="schedDate" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+          <input type="date" id="schedDate" class="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 dark:bg-slate-700 dark:text-slate-100 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
         </div>
         <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition">
           <input type="checkbox" id="schedBoard" class="rounded w-4 h-4 text-indigo-600">
           <div>
             <div class="text-sm font-medium text-slate-800">Add to Delivery Board</div>
-            <div class="text-xs text-slate-500">Track prep status (gas, inspection, insurance)</div>
+            <div class="text-xs text-slate-500 dark:text-slate-400">Track prep status (gas, inspection, insurance)</div>
           </div>
         </label>
       </div>
@@ -101,7 +101,7 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
 <div class="flex flex-col md:flex-row md:items-end gap-3 mb-4">
   <div>
     <h1 class="text-xl font-bold">Deals</h1>
-    <div class="text-xs text-slate-500">{{ selected_month }}/{{ selected_year }} · Shows deals sold <em>or</em> delivered this month · <span class="text-violet-600 font-medium">↪ carry</span> = sold prior month, delivered this month · Click any cell to edit inline</div>
+    <div class="text-xs text-slate-500 dark:text-slate-400">{{ selected_month }}/{{ selected_year }} · Shows deals sold <em>or</em> delivered this month · <span class="text-violet-600 font-medium">↪ carry</span> = sold prior month, delivered this month · Click any cell to edit inline</div>
   </div>
   <form class="md:ml-auto flex flex-wrap gap-2" method="get" action="/deals">
     <div class="flex items-center gap-1 border rounded bg-white">
@@ -152,7 +152,7 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
   <button type="button" onclick="clearSelection()" class="px-3 py-1.5 rounded border border-red-300 text-red-600 text-sm hover:bg-red-100 transition">Cancel</button>
 </div>
 
-<div class="overflow-x-auto bg-white rounded-lg border border-slate-200">
+<div class="overflow-x-auto bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
 <table class="min-w-full text-sm deals-table">
   <thead class="bg-slate-900 text-white">
     <tr>
@@ -309,8 +309,8 @@ document.getElementById('scheduleModal').addEventListener('click', function(e){
     if (field === 'sold_date' || field === 'delivered_date') return fmtDate(value);
     if (field === 'status') return fmtStatus(value);
     if (field === 'commission_override') {
-      if (!value && value !== 0) return '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-sm font-semibold bg-white border-slate-200 text-slate-900">—</span>';
-      return '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-sm font-semibold bg-white border-slate-200 text-slate-900">$' + Number(value).toLocaleString() + ' <span class="text-[9px] text-amber-500">✎</span></span>';
+      if (!value && value !== 0) return '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-sm font-semibold bg-white border-slate-200 text-slate-900 dark:text-slate-100">—</span>';
+      return '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded border text-sm font-semibold bg-white border-slate-200 text-slate-900 dark:text-slate-100">$' + Number(value).toLocaleString() + ' <span class="text-[9px] text-amber-500">✎</span></span>';
     }
     return value || '—';
   }

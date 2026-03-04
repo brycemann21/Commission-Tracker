@@ -4,7 +4,7 @@
   <div>
     <h1 class="text-xl font-bold">Pay Plan</h1>
     {% if is_admin is defined and is_admin %}
-    <div class="text-sm text-slate-500">Edit your dealership's pay plan values. These values drive commission calculations for all salespeople.</div>
+    <div class="text-sm text-slate-500 dark:text-slate-400">Edit your dealership's pay plan values. These values drive commission calculations for all salespeople.</div>
     {% else %}
     <div class="text-sm text-amber-600">View only — only your dealership admin can change the pay plan.</div>
     {% endif %}
@@ -19,7 +19,7 @@
     <div class="font-semibold mb-3">Pay Structure</div>
     <div class="grid md:grid-cols-3 gap-4">
       <div>
-        <label class="text-xs text-slate-500">Pay Type</label>
+        <label class="text-xs text-slate-500 dark:text-slate-400">Pay Type</label>
         <select name="pay_type" class="w-full border rounded px-3 py-2 bg-white" id="payTypeSelect" onchange="togglePayType()">
           <option value="flat" {{ 'selected' if not s.pay_type or s.pay_type == 'flat' else '' }}>Flat Per-Unit</option>
           <option value="gross" {{ 'selected' if s.pay_type == 'gross' else '' }}>% of Gross</option>
@@ -27,21 +27,21 @@
         </select>
       </div>
       <div id="grossFrontWrap" class="{{ 'hidden' if not s.pay_type or s.pay_type == 'flat' else '' }}">
-        <label class="text-xs text-slate-500">Front Gross %</label>
+        <label class="text-xs text-slate-500 dark:text-slate-400">Front Gross %</label>
         <input type="number" step="0.1" class="w-full border rounded px-3 py-2" name="gross_front_pct" value="{{ s.gross_front_pct or 0 }}">
       </div>
       <div id="grossBackWrap" class="{{ 'hidden' if not s.pay_type or s.pay_type == 'flat' else '' }}">
-        <label class="text-xs text-slate-500">Back Gross %</label>
+        <label class="text-xs text-slate-500 dark:text-slate-400">Back Gross %</label>
         <input type="number" step="0.1" class="w-full border rounded px-3 py-2" name="gross_back_pct" value="{{ s.gross_back_pct or 0 }}">
       </div>
     </div>
     <div class="grid md:grid-cols-2 gap-4 mt-3 {{ 'hidden' if not s.pay_type or s.pay_type == 'flat' else '' }}" id="grossExtras">
       <div>
-        <label class="text-xs text-slate-500">Mini Deal (minimum per deal)</label>
+        <label class="text-xs text-slate-500 dark:text-slate-400">Mini Deal (minimum per deal)</label>
         <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="mini_deal" value="{{ s.mini_deal or 0 }}">
       </div>
       <div>
-        <label class="text-xs text-slate-500">Pack Deduction (removed from front before calc)</label>
+        <label class="text-xs text-slate-500 dark:text-slate-400">Pack Deduction (removed from front before calc)</label>
         <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="pack_deduction" value="{{ s.pack_deduction or 0 }}">
       </div>
     </div>
@@ -52,11 +52,11 @@
     <div class="font-semibold mb-3">Per-Deal Values</div>
     <div class="grid md:grid-cols-2 gap-4">
       <div>
-        <label class="text-xs text-slate-500">Unit Commission (Discount ≤ $200)</label>
+        <label class="text-xs text-slate-500 dark:text-slate-400">Unit Commission (Discount ≤ $200)</label>
         <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="unit_comm_discount_le_200" value="{{ s.unit_comm_discount_le_200 }}">
       </div>
       <div>
-        <label class="text-xs text-slate-500">Unit Commission (Discount &gt; $200)</label>
+        <label class="text-xs text-slate-500 dark:text-slate-400">Unit Commission (Discount &gt; $200)</label>
         <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="unit_comm_discount_gt_200" value="{{ s.unit_comm_discount_gt_200 }}">
       </div>
     </div>
@@ -94,7 +94,7 @@
     </div>
     {% if is_admin is defined and is_admin %}
     </form>
-    <form method="post" action="/payplan/product/add" class="flex items-center gap-2 pt-3 border-t border-slate-100">
+    <form method="post" action="/payplan/product/add" class="flex items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
       {{ csrf_hidden|safe }}
       <input type="text" name="product_name" placeholder="Product name" maxlength="100"
              class="flex-1 border rounded px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
@@ -130,7 +130,7 @@
     <div class="font-semibold mb-3">Hourly</div>
     <div class="grid md:grid-cols-2 gap-4">
       <div>
-        <label class="text-xs text-slate-500">Hourly Rate (NY Offset)</label>
+        <label class="text-xs text-slate-500 dark:text-slate-400">Hourly Rate (NY Offset)</label>
         <input type="number" step="0.01" class="w-full border rounded px-3 py-2" name="hourly_rate_ny_offset" value="{{ s.hourly_rate_ny_offset }}">
       </div>
     </div>
@@ -173,7 +173,7 @@
 
     {% if is_admin is defined and is_admin %}
     </form>
-    <form method="post" action="/payplan/bonus/add" class="pt-3 border-t border-slate-100">
+    <form method="post" action="/payplan/bonus/add" class="pt-3 border-t border-slate-100 dark:border-slate-700">
       {{ csrf_hidden|safe }}
       <div class="text-xs font-medium text-slate-600 mb-2">Add Bonus</div>
       <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-2">

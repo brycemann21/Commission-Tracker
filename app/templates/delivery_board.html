@@ -4,7 +4,7 @@
 <div class="flex items-center justify-between mb-5">
   <div>
     <h1 class="text-xl font-bold">Delivery Board</h1>
-    <div class="text-sm text-slate-500">{{ total }} vehicle{{ 's' if total != 1 else '' }} in prep</div>
+    <div class="text-sm text-slate-500 dark:text-slate-400">{{ total }} vehicle{{ 's' if total != 1 else '' }} in prep</div>
   </div>
 </div>
 
@@ -22,7 +22,7 @@
         <div data-deal="{{ d.id }}" class="bg-white rounded-lg border-l-4 border-l-amber-400 border border-slate-200 p-4 shadow-sm hover:shadow transition">
           <div class="flex items-start justify-between mb-2">
             <div>
-              <div class="font-semibold text-slate-900">{{ d.customer }}</div>
+              <div class="font-semibold text-slate-900 dark:text-slate-100">{{ d.customer }}</div>
               <div class="text-xs text-slate-500 mt-0.5">#{{ d.stock_num }}{% if d.model %} · {{ d.model }}{% endif %}</div>
             </div>
             <button type="button" onclick="deliveryFetch('/delivery/{{ d.id }}/remove', this.closest('[data-deal]'))" class="ml-2 text-slate-300 hover:text-slate-500 transition" title="Remove from board">
@@ -64,7 +64,7 @@
                   <span class="check-label text-sm text-slate-400 line-through">{{ label }}</span>
                 {% else %}
                   <div class="check-box w-5 h-5 rounded border-2 border-slate-300 group-hover:border-slate-400 flex-shrink-0 transition"></div>
-                  <span class="check-label text-sm text-slate-700 group-hover:text-slate-900">{{ label }}</span>
+                  <span class="check-label text-sm text-slate-700 group-hover:text-slate-900 dark:text-slate-100">{{ label }}</span>
                 {% endif %}
               </button>
             {% endfor %}
@@ -73,7 +73,7 @@
           {# Progress indicator #}
           {% set done_count = (1 if d.gas_ready else 0) + (1 if d.inspection_ready else 0) + (1 if d.insurance_ready else 0) %}
           <div class="mt-3 flex items-center gap-2">
-            <div class="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+            <div class="flex-1 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
               <div class="h-1.5 rounded-full bg-amber-400 transition-all duration-300" style="width: {{ (done_count / 3 * 100) | round }}%"></div>
             </div>
             <span class="text-[10px] text-slate-400">{{ done_count }}/3</span>
@@ -101,7 +101,7 @@
         <div data-deal="{{ d.id }}" class="bg-emerald-50 rounded-lg border-l-4 border-l-emerald-500 border border-emerald-200 p-4 shadow-sm">
           <div class="flex items-start justify-between mb-2">
             <div>
-              <div class="font-semibold text-slate-900">{{ d.customer }}</div>
+              <div class="font-semibold text-slate-900 dark:text-slate-100">{{ d.customer }}</div>
               <div class="text-xs text-slate-500 mt-0.5">#{{ d.stock_num }}{% if d.model %} · {{ d.model }}{% endif %}</div>
             </div>
             <span class="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full uppercase">

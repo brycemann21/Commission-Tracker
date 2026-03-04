@@ -24,7 +24,7 @@
       <div class="flex items-center gap-3 bg-white rounded-lg px-3 py-2 border border-blue-100">
         <div class="flex-1 min-w-0">
           <div class="font-medium text-sm text-slate-900 truncate">{{ d.customer }}</div>
-          <div class="text-xs text-slate-500">#{{ d.stock_num }}{% if d.model %} · {{ d.model }}{% endif %}{% if d.business_manager %} · {{ d.business_manager }}{% endif %}</div>
+          <div class="text-xs text-slate-500 dark:text-slate-400">#{{ d.stock_num }}{% if d.model %} · {{ d.model }}{% endif %}{% if d.business_manager %} · {{ d.business_manager }}{% endif %}</div>
         </div>
         {% if d.on_delivery_board and d.gas_ready and d.inspection_ready and d.insurance_ready %}
           <span class="shrink-0 text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">READY</span>
@@ -43,10 +43,10 @@
 {% endif %}
 
 {# ── Month/Year Selector ── #}
-<div class="mb-4 bg-white rounded-lg border border-slate-200 p-4">
+<div class="mb-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
   <div class="flex flex-wrap items-end justify-between gap-3">
     <div>
-      <div class="text-xs text-slate-500">Viewing</div>
+      <div class="text-xs text-slate-500 dark:text-slate-400">Viewing</div>
       <div class="text-lg font-bold">
         {% for mo in month_options %}{% if mo.num == selected_month %}{{ mo.label }}{% endif %}{% endfor %}
         {{ selected_year }}
@@ -82,8 +82,8 @@
 <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
 
   {# Units MTD #}
-  <div class="bg-white rounded-lg border border-slate-200 p-4">
-    <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Units MTD</div>
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+    <div class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Units MTD</div>
     <div class="text-3xl font-bold mt-1">{{ units_mtd | int if units_mtd == units_mtd | int else units_mtd }}</div>
     <div class="text-xs text-slate-500 mt-1">New: {{ new_mtd }} · Used: {{ used_mtd }}</div>
     {% if units_diff != 0 %}
@@ -97,15 +97,15 @@
         <span>Goal: {{ goals.unit_goal }}</span>
         <span>{{ unit_pct }}%</span>
       </div>
-      <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
+      <div class="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
         <div class="h-2 rounded-full transition-all duration-500 {{ 'bg-emerald-500' if unit_pct >= 100 else 'bg-amber-500' if unit_pct >= 60 else 'bg-slate-400' }}" style="width: {{ [unit_pct, 100] | min }}%"></div>
       </div>
     </div>
   </div>
 
   {# Commission MTD #}
-  <div class="bg-white rounded-lg border border-slate-200 p-4">
-    <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Commission MTD</div>
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+    <div class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Commission MTD</div>
     <div class="text-3xl font-bold mt-1">${{ "{:,.0f}".format(comm_mtd or 0) }}</div>
     <div class="text-xs text-slate-500 mt-1">Avg/deal: ${{ "{:,.0f}".format(avg_per_deal or 0) }}</div>
     {% if comm_diff != 0 %}
@@ -119,23 +119,23 @@
         <span>Goal: ${{ "{:,.0f}".format(goals.commission_goal) }}</span>
         <span>{{ comm_pct }}%</span>
       </div>
-      <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
+      <div class="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
         <div class="h-2 rounded-full transition-all duration-500 {{ 'bg-emerald-500' if comm_pct >= 100 else 'bg-amber-500' if comm_pct >= 60 else 'bg-slate-400' }}" style="width: {{ [comm_pct, 100] | min }}%"></div>
       </div>
     </div>
   </div>
 
   {# Projected Units #}
-  <div class="bg-white rounded-lg border border-slate-200 p-4">
-    <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Projected Units</div>
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+    <div class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Projected Units</div>
     <div class="text-3xl font-bold mt-1 text-blue-700">{{ proj_units | int if proj_units == proj_units | int else proj_units }} <span class="text-base font-medium text-slate-400">MTD</span></div>
     <div class="text-xs text-slate-500 mt-1">{{ pending_in_month_count }} pending</div>
     <div class="text-xl font-bold mt-2">{{ units_ytd }} <span class="text-sm font-medium text-slate-400">YTD</span></div>
   </div>
 
   {# Bonus #}
-  <button type="button" id="openBonusModal" class="text-left bg-white rounded-lg border border-slate-200 p-4 hover:border-slate-300 hover:shadow-sm transition">
-    <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Total Bonus</div>
+  <button type="button" id="openBonusModal" class="text-left bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 hover:border-slate-300 hover:shadow-sm transition">
+    <div class="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">Total Bonus</div>
     <div class="text-3xl font-bold mt-1 text-violet-700">${{ "{:,.0f}".format(current_bonus_total or 0) }}</div>
     <div class="text-xs text-slate-500 mt-1">Click for breakdown</div>
   </button>
@@ -143,20 +143,20 @@
 
 {# ── Secondary stats ── #}
 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-  <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
-    <div class="text-xs text-slate-500">Commission YTD</div>
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+    <div class="text-xs text-slate-500 dark:text-slate-400">Commission YTD</div>
     <div class="text-xl font-bold">${{ "{:,.0f}".format(comm_ytd or 0) }}</div>
   </div>
-  <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
-    <div class="text-xs text-slate-500">Avg Per Copy</div>
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+    <div class="text-xs text-slate-500 dark:text-slate-400">Avg Per Copy</div>
     <div class="text-xl font-bold">${{ "{:,.0f}".format(avg_per_deal or 0) }}</div>
   </div>
-  <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
-    <div class="text-xs text-slate-500">Spots MTD</div>
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+    <div class="text-xs text-slate-500 dark:text-slate-400">Spots MTD</div>
     <div class="text-xl font-bold">{{ spots_mtd }}</div>
   </div>
-  <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
-    <div class="text-xs text-slate-500">Projected Commission</div>
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+    <div class="text-xs text-slate-500 dark:text-slate-400">Projected Commission</div>
     <div class="text-xl font-bold text-blue-700">${{ "{:,.0f}".format(proj_comm or 0) }}</div>
   </div>
 </div>
@@ -183,9 +183,9 @@
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       {% for b in upcoming %}
       <div class="bg-amber-50 rounded-lg p-3">
-        <div class="text-[11px] text-slate-500">{{ b.name }}</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">{{ b.name }}</div>
         <div class="text-lg font-bold text-amber-800">{{ b.need }} more</div>
-        <div class="text-[11px] text-slate-500">→ {{ b.range }} = ${{ "{:,.0f}".format(b.amount) }}</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">→ {{ b.range }} = ${{ "{:,.0f}".format(b.amount) }}</div>
       </div>
       {% endfor %}
     </div>
@@ -206,30 +206,30 @@
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       {% if vn.need > 0 %}
       <div class="bg-amber-50 rounded-lg p-3">
-        <div class="text-[11px] text-slate-500">Volume Bonus</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">Volume Bonus</div>
         <div class="text-lg font-bold text-amber-800">{{ vn.need }} more</div>
-        <div class="text-[11px] text-slate-500">→ {{ vn.tier }} = ${{ "{:,.0f}".format(vn.amount) }}</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">→ {{ vn.tier }} = ${{ "{:,.0f}".format(vn.amount) }}</div>
       </div>
       {% endif %}
       {% if un.need > 0 %}
       <div class="bg-amber-50 rounded-lg p-3">
-        <div class="text-[11px] text-slate-500">Used Bonus</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">Used Bonus</div>
         <div class="text-lg font-bold text-amber-800">{{ un.need }} more used</div>
-        <div class="text-[11px] text-slate-500">→ {{ un.tier }} = ${{ "{:,.0f}".format(un.amount) }}</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">→ {{ un.tier }} = ${{ "{:,.0f}".format(un.amount) }}</div>
       </div>
       {% endif %}
       {% if sn.need > 0 %}
       <div class="bg-amber-50 rounded-lg p-3">
-        <div class="text-[11px] text-slate-500">Spot Bonus</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">Spot Bonus</div>
         <div class="text-lg font-bold text-amber-800">{{ sn.need }} more spots</div>
-        <div class="text-[11px] text-slate-500">→ {{ sn.tier }} @ ${{ "{:,.0f}".format(sn.per) }}/spot</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">→ {{ sn.tier }} @ ${{ "{:,.0f}".format(sn.per) }}/spot</div>
       </div>
       {% endif %}
       {% if qn.need > 0 %}
       <div class="bg-amber-50 rounded-lg p-3">
-        <div class="text-[11px] text-slate-500">Quarterly ({{ bonus_breakdown.quarterly.q_label }})</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">Quarterly ({{ bonus_breakdown.quarterly.q_label }})</div>
         <div class="text-lg font-bold text-amber-800">{{ qn.need }} more units</div>
-        <div class="text-[11px] text-slate-500">→ ${{ "{:,.0f}".format(qn.amount) }}</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">→ ${{ "{:,.0f}".format(qn.amount) }}</div>
       </div>
       {% endif %}
     </div>
@@ -238,7 +238,7 @@
 {% endif %}
 
 {# ── Closing Rates (color coded) ── #}
-<div class="mb-4 bg-white rounded-lg border border-slate-200 p-4">
+<div class="mb-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
   <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Closing % (Delivered Deals)</div>
   <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
     {% for k in ["pulse","nitro","permaplate","aim"] %}
@@ -248,12 +248,12 @@
       {% set text_color = 'text-emerald-700' if r.pct is not none and r.pct >= 60 else 'text-amber-700' if r.pct is not none and r.pct >= 30 else 'text-rose-600' if r.pct is not none else 'text-slate-400' %}
       <div>
         <div class="flex items-center justify-between mb-1">
-          <div class="text-sm font-medium text-slate-700">{{ r.label }}</div>
+          <div class="text-sm font-medium text-slate-700 dark:text-slate-300">{{ r.label }}</div>
           <div class="text-lg font-bold {{ text_color }}">
             {% if r.pct is none %}--{% else %}{{ "{:.0f}".format(r.pct) }}%{% endif %}
           </div>
         </div>
-        <div class="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+        <div class="h-2.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
           <div class="h-2.5 rounded-full {{ bar_color }} transition-all duration-500" style="width: {{ pct }}%"></div>
         </div>
         <div class="text-[10px] text-slate-400 mt-1">{{ r.yes }}/{{ r.den }}{% if k == "aim" %} (X excluded){% endif %}</div>
@@ -263,7 +263,7 @@
 </div>
 
 {# ── Year Trend ── #}
-<div class="mb-4 bg-white rounded-lg border border-slate-200 p-4">
+<div class="mb-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
   <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">{{ year }} Unit Trend</div>
   <div class="flex items-end gap-1" style="height: 120px;">
     {% set max_units = units_by_month | max %}
@@ -293,7 +293,7 @@
 
 {# ── Pending Deals ── #}
 <div class="flex items-center justify-between mb-2">
-  <h2 class="text-lg font-bold">Pending & Scheduled <span class="text-sm font-normal text-slate-500">({{ pending }})</span></h2>
+  <h2 class="text-lg font-bold">Pending & Scheduled <span class="text-sm font-normal text-slate-500 dark:text-slate-400">({{ pending }})</span></h2>
   <div class="flex items-center gap-2">
     <button id="pendingDeleteBtn" type="button" onclick="submitPendingBulkDelete()" class="hidden text-xs px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-700 text-white font-medium transition">
       Delete Selected (<span id="pendingDeleteCount">0</span>)
@@ -307,7 +307,7 @@
 <form id="pendingBulkForm" method="post" action="/deals/bulk-delete">
         {{ csrf_hidden|safe }}
   <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
-  <div class="overflow-x-auto bg-white rounded-lg border border-slate-200">
+  <div class="overflow-x-auto bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
     <table class="min-w-full text-sm">
       <thead class="bg-slate-900 text-white">
         <tr>
@@ -343,7 +343,7 @@
             <td class="p-2">
               <span class="editable-p" data-field="tag" data-id="{{ d.id }}" data-type="select"
                     data-value="{{ d.tag or '' }}" data-options="|Shop|Title|Inbound|FO|SPOT|LOCATE">
-                {% if d.tag %}<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">{{ d.tag }}</span>{% else %}—{% endif %}
+                {% if d.tag %}<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 dark:text-slate-300">{{ d.tag }}</span>{% else %}—{% endif %}
               </span>
             </td>
             <td class="p-2">
@@ -398,11 +398,11 @@
     <div class="bg-white w-full max-w-3xl rounded-lg shadow-lg overflow-hidden max-h-[85vh] flex flex-col">
       <div class="flex items-center justify-between px-5 py-4 border-b shrink-0">
         <div>
-          <div class="text-sm text-slate-500">Bonus Breakdown</div>
+          <div class="text-sm text-slate-500 dark:text-slate-400">Bonus Breakdown</div>
           <div class="text-lg font-semibold">{{ month_options[selected_month-1].label }} {{ selected_year }}</div>
         </div>
         <div class="flex items-center gap-2">
-          <button type="button" id="printBonus" class="text-sm px-3 py-1 rounded border border-slate-200 hover:bg-slate-50">Print</button>
+          <button type="button" id="printBonus" class="text-sm px-3 py-1 rounded border border-slate-200 hover:bg-slate-50 dark:bg-slate-900">Print</button>
           <button type="button" id="closeBonusModal" class="text-slate-500 hover:text-slate-900 text-2xl leading-none p-2">&times;</button>
         </div>
       </div>
@@ -415,7 +415,7 @@
           {% for b in bonus_breakdown.custom_list %}{% if b.hit %}{% if hit_bonuses.append(b) %}{% endif %}{% endif %}{% endfor %}
 
           {% if hit_bonuses|length > 0 %}
-          <div class="overflow-x-auto rounded border border-slate-200">
+          <div class="overflow-x-auto rounded border border-slate-200 dark:border-slate-700">
             <table class="min-w-full text-sm">
               <thead class="bg-slate-900 text-white">
                 <tr>
@@ -445,7 +445,7 @@
           {# Legacy fallback — only show rows with earned > 0 #}
           {% set has_any = (bonus_breakdown.volume.amount or 0) > 0 or (bonus_breakdown.used.amount or 0) > 0 or (bonus_breakdown.spot.amount or 0) > 0 or bonus_breakdown.quarterly.hit %}
           {% if has_any %}
-          <div class="overflow-x-auto rounded border border-slate-200">
+          <div class="overflow-x-auto rounded border border-slate-200 dark:border-slate-700">
             <table class="min-w-full text-sm">
               <thead class="bg-slate-900 text-white">
                 <tr>
@@ -509,7 +509,7 @@
     <div class="bg-white w-full max-w-6xl rounded-lg shadow-lg overflow-hidden">
       <div class="flex items-center justify-between px-5 py-4 border-b">
         <div>
-          <div class="text-sm text-slate-500">Pending Deals</div>
+          <div class="text-sm text-slate-500 dark:text-slate-400">Pending Deals</div>
           <div class="text-lg font-semibold">All Pending ({{ pending }})</div>
         </div>
         <div class="flex items-center gap-3">
@@ -523,7 +523,7 @@
         <form id="modalBulkForm" method="post" action="/deals/bulk-delete">
         {{ csrf_hidden|safe }}
           <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
-          <div class="overflow-x-auto bg-white rounded border border-slate-200">
+          <div class="overflow-x-auto bg-white rounded border border-slate-200 dark:border-slate-700">
             <table class="min-w-full text-sm">
               <thead class="bg-slate-900 text-white">
                 <tr>
@@ -563,7 +563,7 @@
                   </tr>
                 {% endfor %}
                 {% if pending_deals_all|length == 0 %}
-                  <tr class="border-t"><td class="p-3 text-slate-500" colspan="8">No pending deals.</td></tr>
+                  <tr class="border-t"><td class="p-3 text-slate-500 dark:text-slate-400" colspan="8">No pending deals.</td></tr>
                 {% endif %}
               </tbody>
             </table>
@@ -615,12 +615,12 @@
           <svg class="w-5 h-5 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
         </div>
         <div>
-          <div class="font-semibold text-slate-900">Delete Deals</div>
-          <div class="text-xs text-slate-500" id="bulkDeleteSubtitle"></div>
+          <div class="font-semibold text-slate-900 dark:text-slate-100">Delete Deals</div>
+          <div class="text-xs text-slate-500 dark:text-slate-400" id="bulkDeleteSubtitle"></div>
         </div>
       </div>
       <div class="px-5 py-4">
-        <p class="text-sm text-slate-600">This will permanently delete <strong id="bulkDeleteCountText"></strong>. This action cannot be undone.</p>
+        <p class="text-sm text-slate-600 dark:text-slate-400">This will permanently delete <strong id="bulkDeleteCountText"></strong>. This action cannot be undone.</p>
       </div>
       <div class="px-5 py-3 bg-slate-50 border-t flex justify-end gap-2">
         <button type="button" onclick="closeBulkDeleteModal()" class="px-4 py-2 rounded border text-sm hover:bg-slate-100 transition">Cancel</button>
@@ -693,7 +693,7 @@
     function fmtDate(iso) { if(!iso) return '—'; const p=iso.split('-'); return p.length===3?`${+p[1]}/${+p[2]}`:iso; }
     function render(field, val) {
       if (field==='sold_date') return fmtDate(val);
-      if (field==='tag') return val ? `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">${val}</span>` : '—';
+      if (field==='tag') return val ? `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 dark:text-slate-300">${val}</span>` : '—';
       return val || '—';
     }
     async function save(span, field, id, val) {
@@ -868,7 +868,7 @@
 <!-- ── Schedule / Delivery Board Modal (Dashboard) ───────────────────────── -->
 <div id="dashSchedModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
   <div class="flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm p-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-bold">Schedule Delivery</h2>
         <button onclick="closeDashSchedModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
@@ -877,13 +877,13 @@
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">Scheduled Delivery Date</label>
           <input type="date" id="dashSchedDate"
-                 class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+                 class="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 dark:bg-slate-700 dark:text-slate-100 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
         </div>
         <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition">
           <input type="checkbox" id="dashSchedBoard" class="rounded w-4 h-4 text-indigo-600">
           <div>
             <div class="text-sm font-medium text-slate-800">Add to Delivery Board</div>
-            <div class="text-xs text-slate-500">Track prep status (gas, inspection, insurance)</div>
+            <div class="text-xs text-slate-500 dark:text-slate-400">Track prep status (gas, inspection, insurance)</div>
           </div>
         </label>
       </div>

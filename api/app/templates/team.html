@@ -4,7 +4,7 @@
 <div class="flex items-center justify-between mb-4">
   <div>
     <h1 class="text-xl font-bold">{{ dealership.name if dealership else 'Your Dealership' }}</h1>
-    <div class="text-sm text-slate-500">{{ team|length }} team member{{ 's' if team|length != 1 else '' }}</div>
+    <div class="text-sm text-slate-500 dark:text-slate-400">{{ team|length }} team member{{ 's' if team|length != 1 else '' }}</div>
   </div>
   {% if is_admin %}
   <div class="flex items-center gap-2">
@@ -35,7 +35,7 @@
 {% if tab == "stats" %}
 
 <div class="flex items-center gap-2 mb-5">
-  <span class="text-sm text-slate-500">Viewing</span>
+  <span class="text-sm text-slate-500 dark:text-slate-400">Viewing</span>
   <form method="get" action="/team" class="flex items-center gap-2">
     <input type="hidden" name="tab" value="stats">
     <select name="month" onchange="this.form.submit()" class="text-sm border border-slate-200 rounded px-2 py-1.5 bg-white">
@@ -48,19 +48,19 @@
 
 {# ── Summary Cards ── #}
 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-  <div class="bg-white rounded-lg border border-slate-200 p-4">
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
     <div class="text-[11px] text-slate-400 uppercase font-medium">Units MTD</div>
     <div class="text-2xl font-bold mt-1">{{ total_units }}</div>
     <div class="text-xs mt-1 {{ 'text-emerald-600' if total_units >= prev_units else 'text-rose-500' }}">
       {{ '↑' if total_units >= prev_units else '↓' }} {{ (total_units - prev_units)|abs }} vs last month
     </div>
   </div>
-  <div class="bg-white rounded-lg border border-slate-200 p-4">
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
     <div class="text-[11px] text-slate-400 uppercase font-medium">New / Used</div>
     <div class="text-2xl font-bold mt-1">{{ new_count }} / {{ used_count }}</div>
     <div class="text-xs text-slate-400 mt-1">{{ "{:.0f}".format(new_count / total_units * 100) if total_units else 0 }}% new</div>
   </div>
-  <div class="bg-white rounded-lg border border-slate-200 p-4">
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
     <div class="text-[11px] text-slate-400 uppercase font-medium">Pipeline</div>
     <div class="text-2xl font-bold mt-1">{{ pending_count }}</div>
     {% if aging_30_plus > 0 %}
@@ -69,7 +69,7 @@
     <div class="text-xs text-slate-400 mt-1">pending deals</div>
     {% endif %}
   </div>
-  <div class="bg-white rounded-lg border border-slate-200 p-4">
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
     <div class="text-[11px] text-slate-400 uppercase font-medium">Team Size</div>
     <div class="text-2xl font-bold mt-1">{{ team|length }}</div>
     <div class="text-xs text-slate-400 mt-1">active members</div>
@@ -78,7 +78,7 @@
 
 {# ── Leaderboard ── #}
 <h2 class="text-lg font-bold mb-3">Leaderboard</h2>
-<div class="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
+<div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden mb-6">
   <table class="min-w-full text-sm">
     <thead class="bg-slate-900 text-white">
       <tr>
@@ -95,7 +95,7 @@
     <tbody>
       {% for entry in leaderboard %}
       {% set rank = loop.index %}
-      <tr class="border-t {{ 'bg-amber-50' if rank == 1 and entry.units > 0 else '' }} hover:bg-slate-50">
+      <tr class="border-t {{ 'bg-amber-50' if rank == 1 and entry.units > 0 else '' }} hover:bg-slate-50 dark:bg-slate-900">
         <td class="p-3 text-center">
           {% if rank == 1 and entry.units > 0 %}🥇
           {% elif rank == 2 and entry.units > 0 %}🥈
@@ -115,12 +115,12 @@
           {% elif entry.delta < 0 %}<span class="text-xs font-semibold text-rose-500">{{ entry.delta }}</span>
           {% else %}<span class="text-xs text-slate-300">—</span>{% endif %}
         </td>
-        <td class="p-3 text-center text-slate-600">{{ entry.new }}</td>
-        <td class="p-3 text-center text-slate-600">{{ entry.used }}</td>
-        <td class="p-3 text-center text-slate-600">{{ entry.spots }}</td>
+        <td class="p-3 text-center text-slate-600 dark:text-slate-400">{{ entry.new }}</td>
+        <td class="p-3 text-center text-slate-600 dark:text-slate-400">{{ entry.used }}</td>
+        <td class="p-3 text-center text-slate-600 dark:text-slate-400">{{ entry.spots }}</td>
         <td class="p-3">
           {% if entry.units > 0 %}
-          <div class="w-full bg-slate-100 rounded-full h-2">
+          <div class="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2">
             <div class="bg-emerald-500 h-2 rounded-full" style="width:{{ (entry.units / leaderboard[0].units * 100) if leaderboard[0].units else 0 }}%"></div>
           </div>
           {% endif %}
@@ -159,9 +159,9 @@
         <td class="p-3">
           <span class="inline-block px-1.5 py-0.5 rounded text-[11px] font-bold {{ 'bg-rose-100 text-rose-700' if d.days_pending >= 60 else 'bg-amber-100 text-amber-700' }}">{{ d.days_pending }}d</span>
         </td>
-        <td class="p-3 text-slate-600">{{ d._salesperson.display_name if d._salesperson else '—' }}</td>
+        <td class="p-3 text-slate-600 dark:text-slate-400">{{ d._salesperson.display_name if d._salesperson else '—' }}</td>
         <td class="p-3 font-medium">{{ d.customer or '—' }}</td>
-        <td class="p-3 text-slate-600">{{ d.model or '—' }}</td>
+        <td class="p-3 text-slate-600 dark:text-slate-400">{{ d.model or '—' }}</td>
         <td class="p-3"><span class="inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold bg-amber-100 text-amber-800">{{ d.status }}</span></td>
         <td class="p-3 text-xs text-slate-500 max-w-[150px] truncate">{{ d.notes or '—' }}</td>
       </tr>
@@ -175,12 +175,12 @@
 <h2 class="text-lg font-bold mb-3">Add-On Penetration</h2>
 <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-6">
   {% for name, data in addon_rates.items() %}
-  <div class="bg-white rounded-lg border border-slate-200 p-3">
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-3">
     <div class="flex items-center justify-between mb-2">
-      <span class="text-xs font-medium text-slate-600">{{ name }}</span>
+      <span class="text-xs font-medium text-slate-600 dark:text-slate-400">{{ name }}</span>
       <span class="text-sm font-bold {{ 'text-emerald-600' if data.pct >= 50 else 'text-amber-600' if data.pct >= 25 else 'text-slate-500' }}">{{ data.pct }}%</span>
     </div>
-    <div class="w-full bg-slate-100 rounded-full h-2 mb-1">
+    <div class="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2 mb-1">
       <div class="h-2 rounded-full {{ 'bg-emerald-500' if data.pct >= 50 else 'bg-amber-400' if data.pct >= 25 else 'bg-slate-300' }}" style="width:{{ data.pct }}%"></div>
     </div>
     <div class="text-[11px] text-slate-400">{{ data.yes }} / {{ data.total }}</div>
@@ -190,7 +190,7 @@
 
 {# ── Unit Trend ── #}
 <h2 class="text-lg font-bold mb-3">{{ sel_y }} Unit Trend</h2>
-<div class="bg-white rounded-lg border border-slate-200 p-4 mb-6">
+<div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 mb-6">
   <div class="flex items-end gap-1 h-40">
     {% set max_units = ubm|max if ubm|max > 0 else 1 %}
     {% for i in range(12) %}
@@ -209,7 +209,7 @@
 {# ── MEMBERS TAB ── #}
 {# ════════════════════════════════════ #}
 {% if tab == "members" and is_manager_or_admin %}
-<div class="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
+<div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden mb-6">
   <table class="min-w-full text-sm">
     <thead class="bg-slate-900 text-white">
       <tr>
@@ -227,7 +227,7 @@
           {{ m.display_name or m.username }}
           {% if m.id == user.id %}<span class="text-xs text-slate-400 ml-1">(you)</span>{% endif %}
         </td>
-        <td class="p-3 text-slate-500">{{ m.email or '—' }}</td>
+        <td class="p-3 text-slate-500 dark:text-slate-400">{{ m.email or '—' }}</td>
         <td class="p-3">
           {% if m.is_verified %}
           <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800">
@@ -273,28 +273,28 @@
 {% if is_admin %}
 <h2 class="text-lg font-bold mb-2">Pending Invites</h2>
 {% if invites %}
-<div class="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
+<div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden mb-6">
   <table class="min-w-full text-sm">
-    <thead class="bg-slate-50">
+    <thead class="bg-slate-50 dark:bg-slate-900">
       <tr>
-        <th class="text-left p-3 text-slate-600">Email / Link</th>
-        <th class="text-left p-3 text-slate-600">Role</th>
-        <th class="text-left p-3 text-slate-600">Expires</th>
-        <th class="text-left p-3 text-slate-600"></th>
+        <th class="text-left p-3 text-slate-600 dark:text-slate-400">Email / Link</th>
+        <th class="text-left p-3 text-slate-600 dark:text-slate-400">Role</th>
+        <th class="text-left p-3 text-slate-600 dark:text-slate-400">Expires</th>
+        <th class="text-left p-3 text-slate-600 dark:text-slate-400"></th>
       </tr>
     </thead>
     <tbody>
       {% for inv in invites %}
       <tr class="border-t">
         <td class="p-3">
-          {% if inv.email %}<span class="text-slate-700">{{ inv.email }}</span>{% endif %}
+          {% if inv.email %}<span class="text-slate-700 dark:text-slate-300">{{ inv.email }}</span>{% endif %}
           <div class="flex items-center gap-1 mt-1">
             <input type="text" readonly value="{{ request.base_url }}join/{{ inv.token }}" class="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded px-2 py-1 w-full max-w-xs" id="invite-link-{{ inv.id }}">
             <button type="button" onclick="copyInvite({{ inv.id }})" class="text-xs px-2 py-1 rounded border border-slate-200 hover:bg-slate-50 transition whitespace-nowrap">Copy</button>
           </div>
         </td>
-        <td class="p-3"><span class="inline-block px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-700">{{ inv.role|capitalize }}</span></td>
-        <td class="p-3 text-xs text-slate-500">{{ inv.expires_at.strftime('%m/%d/%Y') }}</td>
+        <td class="p-3"><span class="inline-block px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-700 dark:text-slate-300">{{ inv.role|capitalize }}</span></td>
+        <td class="p-3 text-xs text-slate-500 dark:text-slate-400">{{ inv.expires_at.strftime('%m/%d/%Y') }}</td>
         <td class="p-3"><form method="post" action="/team/invite/{{ inv.id }}/cancel">{{ csrf_hidden|safe }}<button type="submit" class="text-xs text-rose-600 hover:underline">Cancel</button></form></td>
       </tr>
       {% endfor %}
@@ -302,7 +302,7 @@
   </table>
 </div>
 {% else %}
-<div class="text-sm text-slate-400 mb-6 p-4 bg-white rounded-lg border border-slate-200">No pending invites.</div>
+<div class="text-sm text-slate-400 mb-6 p-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">No pending invites.</div>
 {% endif %}
 {% endif %}
 {% endif %}
@@ -311,7 +311,7 @@
 {% if is_admin %}
 <div id="inviteModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
   <div class="flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm p-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-bold">Invite Team Member</h2>
         <button onclick="document.getElementById('inviteModal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
@@ -320,12 +320,12 @@
         <div class="space-y-4">
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1">Email (optional)</label>
-            <input type="email" name="email" placeholder="salesperson@email.com" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+            <input type="email" name="email" placeholder="salesperson@email.com" class="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 dark:bg-slate-700 dark:text-slate-100 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
             <div class="text-xs text-slate-400 mt-1">For your records — the invite link works for anyone</div>
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1">Role</label>
-            <select name="role" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+            <select name="role" class="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 dark:bg-slate-700 dark:text-slate-100 text-sm focus:outline-none focus:border-indigo-500">
               <option value="salesperson">Salesperson</option>
               <option value="manager">Manager</option>
             </select>
@@ -341,7 +341,7 @@
 </div>
 <div id="renameModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
   <div class="flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm p-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-bold">Rename Dealership</h2>
         <button onclick="document.getElementById('renameModal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
@@ -349,7 +349,7 @@
       <form method="post" action="/team/dealership">{{ csrf_hidden|safe }}
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1">Dealership Name</label>
-          <input type="text" name="name" value="{{ dealership.name if dealership else '' }}" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+          <input type="text" name="name" value="{{ dealership.name if dealership else '' }}" required class="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 dark:bg-slate-700 dark:text-slate-100 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
         </div>
         <div class="flex gap-3 mt-6">
           <button type="submit" class="flex-1 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">Save</button>

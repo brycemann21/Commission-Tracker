@@ -49,11 +49,11 @@
     {% endfor %}
     <span class="text-blue-300">|</span>
     <button type="button" onclick="bulkSkip(true)"
-            class="px-3 py-1 rounded text-xs font-medium border border-slate-300 text-slate-600 hover:bg-slate-100">
+            class="px-3 py-1 rounded text-xs font-medium border border-slate-300 text-slate-600 hover:bg-slate-100 dark:bg-slate-700">
       Skip Selected
     </button>
     <button type="button" onclick="bulkSkip(false)"
-            class="px-3 py-1 rounded text-xs font-medium border border-slate-300 text-slate-600 hover:bg-slate-100">
+            class="px-3 py-1 rounded text-xs font-medium border border-slate-300 text-slate-600 hover:bg-slate-100 dark:bg-slate-700">
       Un-skip Selected
     </button>
     <button type="button" onclick="clearSelection()"
@@ -97,7 +97,7 @@
           <!-- Row number -->
           <td class="p-2 text-slate-400 text-xs">{{ loop.index }}</td>
           <!-- Customer (read-only) -->
-          <td class="p-2 font-medium text-slate-900">{{ d.customer }}</td>
+          <td class="p-2 font-medium text-slate-900 dark:text-slate-100">{{ d.customer }}</td>
           <!-- Status dropdown -->
           <td class="p-2">
             <select class="status-select border border-slate-200 rounded px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-slate-900 outline-none"
@@ -123,13 +123,13 @@
                    value="{{ d.scheduled_date }}" onchange="onFieldChange({{ d.idx }}, 'scheduled_date', this.value)">
           </td>
           <!-- Model -->
-          <td class="p-2 text-slate-600">{{ d.model or "—" }}</td>
+          <td class="p-2 text-slate-600 dark:text-slate-400">{{ d.model or "—" }}</td>
           <!-- Stock -->
           <td class="p-2 text-slate-500 font-mono text-xs">{{ d.stock_num or "—" }}</td>
           <!-- New/Used -->
-          <td class="p-2 text-slate-500">{{ d.new_used or "—" }}</td>
+          <td class="p-2 text-slate-500 dark:text-slate-400">{{ d.new_used or "—" }}</td>
           <!-- Deal Type -->
-          <td class="p-2 text-slate-500">{{ d.deal_type or "—" }}</td>
+          <td class="p-2 text-slate-500 dark:text-slate-400">{{ d.deal_type or "—" }}</td>
           <!-- Notes -->
           <td class="p-2">
             <input type="text" class="border border-slate-200 rounded px-2 py-1 text-xs w-44 focus:ring-1 focus:ring-slate-900 outline-none"
@@ -143,7 +143,7 @@
 
   <!-- Bottom action bar -->
   <div class="mt-4 flex items-center justify-between">
-    <div class="text-sm text-slate-500">
+    <div class="text-sm text-slate-500 dark:text-slate-400">
       <span id="skipSummary"></span>
     </div>
     <div class="flex gap-3">

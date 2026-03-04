@@ -13,8 +13,12 @@
     {% endif %} — Commission Tracker
   </title>
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+  <script>
+    (function(){var t=localStorage.getItem('theme'),p=window.matchMedia('(prefers-color-scheme:dark)').matches;if(t==='dark'||(t==null&&p))document.documentElement.classList.add('dark');})();
+  </script>
 </head>
-<body class="bg-slate-50 min-h-screen flex items-center justify-center p-4">
+<body class="bg-slate-50 dark:bg-slate-900 min-h-screen flex items-center justify-center p-4">
   <div class="w-full max-w-sm">
 
     <!-- Logo -->
@@ -25,16 +29,16 @@
             d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
         </svg>
       </div>
-      <h1 class="text-2xl font-bold text-slate-900">Commission Tracker</h1>
-      <p class="text-slate-500 mt-1 text-sm">Track your deals, commissions &amp; bonuses</p>
+      <h1 class="text-2xl font-bold text-slate-900 dark:text-white">Commission Tracker</h1>
+      <p class="text-slate-500 dark:text-slate-400 mt-1 text-sm">Track your deals, commissions &amp; bonuses</p>
     </div>
 
     <!-- Card -->
-    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 p-6">
 
       {% if mode in ("login", "register") %}
       <!-- Tab nav -->
-      <div class="flex mb-6 bg-slate-100 rounded-lg p-1">
+      <div class="flex mb-6 bg-slate-100 dark:bg-slate-700 rounded-lg p-1">
         <a href="/login" class="flex-1 text-center py-2 text-sm font-medium rounded-md transition
           {{ 'bg-white shadow-sm text-slate-900' if mode == 'login' else 'text-slate-500 hover:text-slate-700' }}">
           Sign In
@@ -150,11 +154,11 @@
           <input type="hidden" name="dealership_address" id="dealershipAddress"/>
           <input type="hidden" name="dealership_phone" id="dealershipPhone"/>
           <!-- Selected dealership display -->
-          <div id="selectedDealer" class="hidden mt-2 p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+          <div id="selectedDealer" class="hidden mt-2 p-2.5 bg-slate-50 rounded-lg border border-slate-200 dark:border-slate-700">
             <div class="flex items-start justify-between">
               <div>
-                <div class="text-sm font-medium text-slate-900" id="selectedDealerName"></div>
-                <div class="text-xs text-slate-500" id="selectedDealerAddr"></div>
+                <div class="text-sm font-medium text-slate-900 dark:text-slate-100" id="selectedDealerName"></div>
+                <div class="text-xs text-slate-500 dark:text-slate-400" id="selectedDealerAddr"></div>
               </div>
               <button type="button" onclick="clearDealer()" class="text-xs text-slate-400 hover:text-slate-600 ml-2 shrink-0">✕ Clear</button>
             </div>
@@ -211,7 +215,7 @@
               resultsDiv.innerHTML = places.map(p =>
                 '<button type="button" class="w-full text-left px-3 py-2 hover:bg-slate-50 transition border-b border-slate-100 last:border-0" ' +
                 'onclick="selectPlace(\'' + p.place_id.replace(/'/g, "\\'") + '\',\'' + (p.name||'').replace(/'/g, "\\'") + '\',\'' + (p.description||'').replace(/'/g, "\\'") + '\')">' +
-                '<div class="text-sm font-medium text-slate-900">' + (p.name||'') + '</div>' +
+                '<div class="text-sm font-medium text-slate-900 dark:text-slate-100">' + (p.name||'') + '</div>' +
                 '<div class="text-xs text-slate-500 truncate">' + (p.description||'') + '</div>' +
                 '</button>'
               ).join('');
