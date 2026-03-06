@@ -462,7 +462,6 @@
           backGross: $('input[name="back_gross"]'),
 
           outUnit: $('#lc_unit'),
-          outAddons: $('#lc_addons'),
           outHold: $('#lc_hold'),
           outAim: $('#lc_aim'),
           outBack: $('#lc_back'),
@@ -471,15 +470,12 @@
         };
 
         function calc() {
-          if (!els.outUnit || !els.outAddons || !els.outHold || !els.outTotal) return;
+          if (!els.outUnit || !els.outHold || !els.outTotal) return;
 
           const customer = (els.customer?.value || '').trim();
 
           // Flat per-unit commission ($150)
           const unit = SETTINGS.unit_flat;
-
-          // Products are tracked but don't affect commission
-          let addons = 0;
 
           const holdAmt = parseFloat(els.hold?.value || '0') || 0;
           const holdComm = holdAmt * 0.10;
@@ -490,14 +486,13 @@
           const backGross = parseFloat(els.backGross?.value || '0') || 0;
           const backComm = backGross * (SETTINGS.gross_back_pct / 100);
 
-          let total = unit + backComm + addons + holdComm + aimAmt;
+          let total = unit + backComm + holdComm + aimAmt;
 
           const isSplit = document.getElementById('split_deal_cb')?.checked;
           if (isSplit) total = Math.round(total / 2);
 
           els.outUnit.textContent = fmt(unit);
           if (els.outBack) els.outBack.textContent = fmt(backComm);
-          els.outAddons.textContent = fmt(addons);
           els.outHold.textContent = fmt(holdComm);
           if (els.outAim) els.outAim.textContent = fmt(aimAmt);
           els.outTotal.textContent = fmt(total) + (isSplit ? ' (split)' : '');
