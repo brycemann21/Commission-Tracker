@@ -58,62 +58,6 @@
     <input type="hidden" name="tire_wheel" value="{{ s.tire_wheel }}">
   </div>
 
-  <!-- Custom Products (Tracking Only) -->
-  <div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4">
-    <div class="flex items-center justify-between mb-3">
-      <div class="font-semibold dark:text-white">Products / Add-Ons</div>
-      <div class="text-xs text-slate-400">Tracked for closing rates — no commission</div>
-    </div>
-    <div class="space-y-2 mb-4">
-      {% for p in products %}
-      <div class="flex items-center gap-2 py-1">
-        <span class="flex-1 text-sm font-medium dark:text-slate-200">{{ p.name }}</span>
-        <span class="text-sm text-emerald-600 dark:text-emerald-400 font-medium">${{ "{:,.0f}".format(p.commission) }}</span>
-        {% if is_admin is defined and is_admin %}
-        <form method="post" action="/payplan/product/{{ p.id }}/delete" class="inline" onsubmit="return confirm('Remove {{ p.name }}?')">
-          {{ csrf_hidden|safe }}
-          <button type="submit" class="text-xs text-slate-400 hover:text-rose-500 transition px-1">✕</button>
-        </form>
-        {% endif %}
-      </div>
-      {% endfor %}
-      {% if products|length == 0 %}
-      <div class="text-sm text-slate-400 py-2">No products set up yet.</div>
-      {% endif %}
-    </div>
-    {% if is_admin is defined and is_admin %}
-    </form>
-    <form method="post" action="/payplan/product/add" class="flex items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
-      {{ csrf_hidden|safe }}
-      <input type="text" name="product_name" placeholder="Product name" maxlength="100"
-             class="flex-1 border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
-      <div class="relative">
-        <span class="absolute left-2 top-2 text-slate-400 text-sm">$</span>
-        <input type="number" step="0.01" name="product_commission" value="0" placeholder="Comm"
-               class="w-24 border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-6 pr-2 py-2 text-sm focus:outline-none focus:border-emerald-500">
-      </div>
-      <button type="submit" class="px-3 py-2 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-700 transition">Add</button>
-    </form>
-    <form method="post" action="/payplan">
-      {{ csrf_hidden|safe }}
-      {# Re-include all the hidden fields the main form needs #}
-      <input type="hidden" name="pay_type" value="hybrid">
-      <input type="hidden" name="gross_front_pct" value="0">
-      <input type="hidden" name="gross_back_pct" value="{{ s.gross_back_pct or 7 }}">
-      <input type="hidden" name="mini_deal" value="0">
-      <input type="hidden" name="pack_deduction" value="0">
-      <input type="hidden" name="unit_comm_discount_le_200" value="{{ s.unit_comm_discount_le_200 }}">
-      <input type="hidden" name="unit_comm_discount_gt_200" value="{{ s.unit_comm_discount_le_200 }}">
-      <input type="hidden" name="permaplate" value="{{ s.permaplate }}">
-      <input type="hidden" name="nitro_fill" value="{{ s.nitro_fill }}">
-      <input type="hidden" name="pulse" value="{{ s.pulse }}">
-      <input type="hidden" name="finance_non_subvented" value="{{ s.finance_non_subvented }}">
-      <input type="hidden" name="warranty" value="{{ s.warranty }}">
-      <input type="hidden" name="tire_wheel" value="{{ s.tire_wheel }}">
-      <input type="hidden" name="hourly_rate_ny_offset" value="{{ s.hourly_rate_ny_offset }}">
-    {% endif %}
-  </div>
-
   <!-- Bonuses -->
   <div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4">
     <div class="flex items-center justify-between mb-3">

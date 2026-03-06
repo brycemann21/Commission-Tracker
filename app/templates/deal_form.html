@@ -178,10 +178,9 @@
       {% for p in products %}
       {% if p.name != 'Finance' %}
       <label class="flex items-center gap-2 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-600 rounded p-2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 transition">
-        <input type="checkbox" name="product_{{ p.id }}" value="1" data-comm="{{ p.commission }}" data-name="{{ p.name }}" class="product-cb"
+        <input type="checkbox" name="product_{{ p.id }}" value="1" data-name="{{ p.name }}" class="product-cb"
                {% if deal and p.id in deal_product_ids %}checked{% elif not deal and p.default_on %}checked{% endif %}>
         <span class="text-sm">{{ p.name }}</span>
-        <span class="ml-auto text-xs text-slate-500 dark:text-slate-400">${{ "{:,.0f}".format(p.commission) }}</span>
       </label>
       {% endif %}
       {% endfor %}
