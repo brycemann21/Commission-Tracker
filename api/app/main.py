@@ -1076,11 +1076,18 @@ async def _run_startup_migrations():
         except Exception:
             pass
 
-        # 16. Seed photo_vehicles with initial inventory (one-time)
+        # 16. Seed photo_vehicles with initial inventory (one-time, v2 reset)
         try:
-            count = await conn.fetchval("SELECT COUNT(*) FROM photo_vehicles")
-            if count == 0:
-                # Get the first active dealership (yours)
+            # Use a marker to ensure this only runs once
+            has_marker = False
+            try:
+                has_marker = await conn.fetchval("SELECT COUNT(*) FROM photo_vehicles WHERE notes = '__seed_v2__'") > 0
+            except Exception:
+                pass
+
+            if not has_marker:
+                # Clear old data and reseed with correct statuses
+                await conn.execute("DELETE FROM photo_vehicles")
                 d_id = await conn.fetchval("SELECT id FROM dealerships WHERE is_active = true ORDER BY id LIMIT 1")
                 if d_id:
                     await conn.execute("""
@@ -1157,6 +1164,12 @@ async def _run_startup_migrations():
                         ($1, 'WTP9138', '2022 Subaru Forester Limited', 5, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
                         ($1, 'WTP9140', '2023 Mazda CX-30 2.5 S Preferred Package', 5, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
                         ($1, 'WTP9141', '2024 Subaru Crosstrek Sport', 5, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE)
+                        ON CONFLICT (dealership_id, stock_num) DO NOTHING
+                    """, d_id)
+                    # Add a marker row so this seed doesn't run again
+                    await conn.execute("""
+                        INSERT INTO photo_vehicles (dealership_id, stock_num, year_make_model, age_days, status, notes, first_seen_date, last_seen_date)
+                        VALUES ($1, '__SEED_MARKER__', 'Migration Marker', 0, 'done', '__seed_v2__', CURRENT_DATE, CURRENT_DATE)
                         ON CONFLICT (dealership_id, stock_num) DO NOTHING
                     """, d_id)
         except Exception:
@@ -4782,7 +4795,7 @@ async def photos_page(request: Request, tab: str = "all", db: AsyncSession = Dep
         return RedirectResponse(url="/", status_code=303)
 
     # Query all vehicles
-    q = select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id)
+    q = select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__')
     if tab == "needs_detail":
         q = q.where(PhotoVehicle.status == "needs_detail")
     elif tab == "ready_for_photos":
@@ -4794,7 +4807,7 @@ async def photos_page(request: Request, tab: str = "all", db: AsyncSession = Dep
 
     # Counts
     all_vehicles = (await db.execute(
-        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id)
+        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__')
     )).scalars().all()
     total = len(all_vehicles)
     needs_detail = sum(1 for v in all_vehicles if v.status == "needs_detail")
@@ -4852,14 +4865,22 @@ async def photos_upload(request: Request, csv_file: UploadFile = File(...), db: 
 
         col_stock = _find_col(reader.fieldnames, ["stock", "stk", "stck"])
         col_ymm = _find_col(reader.fieldnames, ["year_make_model", "year/make/model", "vehicle", "ymm", "description"])
-        col_age = _find_col(reader.fieldnames, ["age", "days_in_stock", "days", "dis", "day"])
+        col_age = _find_col(reader.fieldnames, ["age"])
+        if not col_age:
+            col_age = _find_col(reader.fieldnames, ["days_in_stock", "days_on_ground", "dis"])
+
+        # Support separate Year, Make, Model, Trim columns
+        col_year = _find_col(reader.fieldnames, ["year"])
+        col_make = _find_col(reader.fieldnames, ["make"])
+        col_model = _find_col(reader.fieldnames, ["model"])
+        col_trim = _find_col(reader.fieldnames, ["trim"])
 
         if not col_stock:
             return RedirectResponse(url="/photos?msg=Could+not+find+Stock+column+in+CSV&msg_type=error", status_code=303)
 
         # Load existing vehicles into a dict by stock_num
         existing = (await db.execute(
-            select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id)
+            select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__')
         )).scalars().all()
         existing_map = {v.stock_num.strip().upper(): v for v in existing}
 
@@ -4873,7 +4894,22 @@ async def photos_upload(request: Request, csv_file: UploadFile = File(...), db: 
             if not stock:
                 continue
 
-            ymm = (row.get(col_ymm, "") or "").strip() if col_ymm else ""
+            # Build year/make/model from either combined or separate columns
+            if col_ymm:
+                ymm = (row.get(col_ymm, "") or "").strip()
+            elif col_year and col_make and col_model:
+                parts = [
+                    (row.get(col_year, "") or "").strip(),
+                    (row.get(col_make, "") or "").strip(),
+                    (row.get(col_model, "") or "").strip(),
+                ]
+                if col_trim:
+                    t = (row.get(col_trim, "") or "").strip()
+                    if t:
+                        parts.append(t)
+                ymm = " ".join(p for p in parts if p)
+            else:
+                ymm = ""
             try:
                 age = int(float((row.get(col_age, "") or "0").strip().replace(",", "") or "0"))
             except (ValueError, TypeError):
@@ -4901,18 +4937,11 @@ async def photos_upload(request: Request, csv_file: UploadFile = File(...), db: 
                 ))
                 new_count += 1
 
-        # Vehicles NOT in today's CSV → move to done (if not already)
-        auto_done = 0
-        for stock, v in existing_map.items():
-            if stock not in csv_stock_nums and v.status != "done":
-                v.status = "done"
-                auto_done += 1
+        # Vehicles NOT in today's CSV stay where they are — user manually marks Done
 
         await db.commit()
 
         msg = f"Uploaded: {new_count} new, {updated_count} updated"
-        if auto_done > 0:
-            msg += f", {auto_done} completed (not in CSV)"
         return RedirectResponse(url=f"/photos?msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)
 
     except Exception as e:
@@ -4976,6 +5005,7 @@ async def photos_pdf(list_type: str, request: Request, db: AsyncSession = Depend
         select(PhotoVehicle).where(
             PhotoVehicle.dealership_id == d_id,
             PhotoVehicle.status == status_filter,
+            PhotoVehicle.stock_num != '__SEED_MARKER__',
         ).order_by(PhotoVehicle.age_days.desc())
     )).scalars().all()
 
