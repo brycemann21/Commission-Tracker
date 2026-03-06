@@ -1101,6 +1101,49 @@ async def _run_startup_migrations():
         except Exception:
             pass
 
+        # 15c. Recalculate ALL existing deal commissions under new hybrid formula
+        #      $150/unit + 7% back-end F&I + 10% trade hold + aim (no product add-ons)
+        try:
+            has_recalc = False
+            try:
+                has_recalc = await conn.fetchval("SELECT COUNT(*) FROM settings WHERE pay_plan_v2_migrated = true") > 0
+                # Check if we already ran this recalc by looking for a marker
+                try:
+                    await conn.fetchval("SELECT deals_recalculated FROM settings LIMIT 1")
+                    has_recalc_col = True
+                except Exception:
+                    has_recalc_col = False
+
+                if not has_recalc_col:
+                    await conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS deals_recalculated BOOLEAN DEFAULT false")
+                    # Get current pay plan values
+                    row = await conn.fetchrow("SELECT unit_comm_discount_le_200, gross_back_pct FROM settings WHERE pay_plan_v2_migrated = true LIMIT 1")
+                    if row:
+                        unit_flat = float(row['unit_comm_discount_le_200'] or 150)
+                        back_pct = float(row['gross_back_pct'] or 7) / 100.0
+
+                        # Recalculate all deals: unit_comm = flat + back%, add_ons = 0, trade_hold = hold * 10%
+                        await conn.execute(f"""
+                            UPDATE deals SET
+                                unit_comm = {unit_flat} + (COALESCE(back_gross, 0) * {back_pct}),
+                                add_ons = 0,
+                                trade_hold_comm = COALESCE(hold_amount, 0) * 0.10,
+                                total_deal_comm = CASE
+                                    WHEN commission_override IS NOT NULL THEN commission_override
+                                    ELSE {unit_flat} + (COALESCE(back_gross, 0) * {back_pct}) + 0 + (COALESCE(hold_amount, 0) * 0.10) + COALESCE(aim_amount, 0)
+                                END,
+                                expected_commission = CASE
+                                    WHEN commission_override IS NOT NULL THEN commission_override
+                                    ELSE {unit_flat} + (COALESCE(back_gross, 0) * {back_pct}) + 0 + (COALESCE(hold_amount, 0) * 0.10) + COALESCE(aim_amount, 0)
+                                END
+                            WHERE customer IS NOT NULL AND customer != ''
+                        """)
+                        await conn.execute("UPDATE settings SET deals_recalculated = true")
+            except Exception:
+                pass
+        except Exception:
+            pass
+
         # 16. Seed photo_vehicles with initial inventory (one-time, v2 reset)
         try:
             # Use a marker to ensure this only runs once
@@ -2396,9 +2439,7 @@ async def deal_save(
     for op in old_prods:
         await db.delete(op)
 
-    # Add new ones and calculate custom product commission
-    custom_addon_comm = 0.0
-    # Track product names for syncing legacy boolean fields (used by closing % on dashboard)
+    # Add new ones (tracking only — no commission impact)
     sold_product_names = set()
     if product_ids:
         prods = (await db.execute(
@@ -2408,12 +2449,7 @@ async def deal_save(
             if p.name == "Finance":
                 continue  # Skip Finance product; handled by F/C/L
             db.add(DealProduct(deal_id=the_deal.id, product_id=p.id))
-            custom_addon_comm += p.commission
             sold_product_names.add(p.name)
-
-    # Add $50 for Finance or Lease F/C/L
-    if dt in ("Finance", "Lease"):
-        custom_addon_comm += 50.0
 
     # Sync legacy boolean fields from product checkboxes (powers dashboard closing %)
     the_deal.permaplate = "PermaPlate" in sold_product_names
@@ -2422,13 +2458,6 @@ async def deal_save(
     the_deal.warranty = "Warranty" in sold_product_names
     the_deal.tire_wheel = "Tire & Wheel" in sold_product_names
     the_deal.finance_non_subvented = dt in ("Finance", "Lease")
-
-    # Update add_ons and totals with custom product commission
-    if custom_addon_comm > 0:
-        the_deal.add_ons = custom_addon_comm
-        if comm_ov is None:
-            the_deal.total_deal_comm = uc + custom_addon_comm + th + aim_val
-            the_deal.expected_commission = the_deal.total_deal_comm
 
     # Split deal: halve the total commission
     if bool(split_deal):
