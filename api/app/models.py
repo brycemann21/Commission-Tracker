@@ -169,6 +169,7 @@ class Settings(Base):
     gross_back_pct: Mapped[float] = mapped_column(Float, default=7.0)    # 7% of back-end F&I gross
     mini_deal: Mapped[float] = mapped_column(Float, default=0.0)         # not used in hybrid
     pack_deduction: Mapped[float] = mapped_column(Float, default=0.0)    # not used in hybrid
+    pay_plan_v2_migrated: Mapped[bool] = mapped_column(Boolean, default=False)  # migration marker
 
 
 # ════════════════════════════════════════════════

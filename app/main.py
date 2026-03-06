@@ -1012,6 +1012,49 @@ async def _run_startup_migrations():
         except Exception:
             pass
 
+        # 14. Migrate existing settings to new hybrid pay plan (March 2026)
+        #     $150/unit + 7% back-end F&I, $16/hr, updated bonus tiers
+        try:
+            # Check if migration already ran by looking for a marker column
+            try:
+                await conn.execute("SELECT pay_plan_v2_migrated FROM settings LIMIT 1")
+            except Exception:
+                # Column doesn't exist — add it and run migration
+                await conn.execute("ALTER TABLE settings ADD COLUMN IF NOT EXISTS pay_plan_v2_migrated BOOLEAN DEFAULT false")
+
+                # Update ALL settings rows to new pay plan values
+                await conn.execute("""
+                    UPDATE settings SET
+                        pay_type = 'hybrid',
+                        unit_comm_discount_le_200 = 150.0,
+                        unit_comm_discount_gt_200 = 150.0,
+                        gross_front_pct = 0.0,
+                        gross_back_pct = 7.0,
+                        mini_deal = 0.0,
+                        pack_deduction = 0.0,
+                        hourly_rate_ny_offset = 16.0,
+                        new_volume_bonus_15_16 = 1000.0,
+                        new_volume_bonus_17_18 = 1400.0,
+                        new_volume_bonus_19_20 = 2000.0,
+                        new_volume_bonus_21_24 = 2800.0,
+                        new_volume_bonus_25_plus = 3500.0,
+                        used_volume_bonus_8_10 = 0.0,
+                        used_volume_bonus_11_12 = 0.0,
+                        used_volume_bonus_13_plus = 0.0,
+                        spot_bonus_5_9 = 50.0,
+                        spot_bonus_10_12 = 80.0,
+                        spot_bonus_13_plus = 100.0,
+                        quarterly_bonus_threshold_units = 60,
+                        quarterly_bonus_amount = 750.0,
+                        pay_plan_v2_migrated = true
+                    WHERE pay_plan_v2_migrated = false OR pay_plan_v2_migrated IS NULL
+                """)
+
+                # Delete ALL old dealer_bonuses so they re-seed with new tiers
+                await conn.execute("DELETE FROM dealer_bonuses")
+        except Exception:
+            pass
+
     finally:
         # Clean up expired sessions via raw asyncpg (avoids pgBouncer prepared stmt issue)
         try:
