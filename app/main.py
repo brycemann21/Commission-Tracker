@@ -1076,6 +1076,92 @@ async def _run_startup_migrations():
         except Exception:
             pass
 
+        # 16. Seed photo_vehicles with initial inventory (one-time)
+        try:
+            count = await conn.fetchval("SELECT COUNT(*) FROM photo_vehicles")
+            if count == 0:
+                # Get the first active dealership (yours)
+                d_id = await conn.fetchval("SELECT id FROM dealerships WHERE is_active = true ORDER BY id LIMIT 1")
+                if d_id:
+                    await conn.execute("""
+                        INSERT INTO photo_vehicles (dealership_id, stock_num, year_make_model, age_days, status, first_seen_date, last_seen_date) VALUES
+                        ($1, '623795A', '2020 Mazda MAZDA6 Touring', 30, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9101', '2018 Toyota Prius Prime Plus', 20, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9106', '2024 Toyota RAV4 XLE', 16, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '623996A', '2016 Ford F-150 XLT', 15, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9125', '2024 Chevrolet Trax 2RS', 13, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9127', '2024 GMC Savana', 13, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9128', '2022 Subaru Outback Premium', 13, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624018A', '2020 Jeep Grand Cherokee North', 12, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '623966A', '2015 Toyota Tacoma', 12, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624028A', '2023 Toyota Tundra 1794 Edition', 12, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624043A', '2014 Toyota Camry SE Sport', 9, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624061A', '2019 Hyundai Tucson SE', 9, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624022A', '2007 Toyota Camry Hybrid', 9, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624044A', '2018 Ram 1500 Express', 8, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624054A', '2016 Honda CR-V SE', 6, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '623904A', '2015 Ford Escape Titanium', 6, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624097A', '2020 Toyota Corolla SE', 6, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9129', '2024 Toyota Highlander XSE', 5, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9130', '2024 Hyundai Sonata SEL', 5, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9136', '2022 Ram 1500 Big Horn', 5, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9137', '2018 Toyota Prius Prime Premium', 5, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9144', '2022 Toyota RAV4 Limited', 5, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9134', '2021 Toyota RAV4 XLE', 5, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9139', '2023 Honda Civic Hatchback Sport', 5, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9143', '2026 Toyota Corolla LE', 5, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '623319A', '2019 INFINITI QX50 LUXE', 5, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '623881T', '2023 Toyota RAV4 Hybrid SE', 5, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624069A', '2019 Toyota Avalon XLE', 5, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9145', '2020 Honda Accord LX', 3, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624145A', '2023 Toyota Corolla Cross XLE', 3, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '623468A', '2024 Toyota Grand Highlander Hybrid Limited', 3, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9154', '2025 Honda CR-V EX-L', 2, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9150', '2019 Hyundai Kona SEL', 2, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9153', '2023 Honda CR-V EX-L', 2, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9151', '2023 Jeep Grand Cherokee Altitude', 2, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9147', '2024 Nissan Sentra SV', 2, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9149', '2023 Honda Ridgeline RTL', 2, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9148', '2023 Chevrolet Equinox LT', 2, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9152', '2024 Honda Ridgeline RTL', 2, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9146', '2025 Toyota Corolla LE', 2, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624150T', '2023 Toyota Highlander LE', 2, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9155', '2016 Toyota Tundra LTD', 1, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9156', '2025 Ford Bronco Sport Big Bend', 1, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9157', '2025 Chrysler Pacifica Select', 1, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9161', '2021 Subaru Ascent Touring', 1, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9158', '2023 Audi A4 Premium', 1, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9163', '2024 Chevrolet Colorado 4WD Z71', 1, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9159', '2023 Chevrolet Silverado 1500 LT', 1, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9162', '2024 Ford Edge SEL', 1, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9160', '2024 Honda CR-V Hybrid Sport Touring', 1, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624132A', '2026 Toyota Corolla LE', 1, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624159A', '2019 Toyota Highlander XLE', 1, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624012A', '2018 Chevrolet Silverado 2500HD LT', 1, 'needs_detail', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '623798A', '2016 Honda CR-V EX-L', 28, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '623896A', '2024 Chevrolet Trax 2RS', 20, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9113', '2018 Ford Focus S', 16, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9114', '2023 Toyota Tacoma TRD Off Road', 16, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '623983T', '2023 Toyota Corolla LE', 16, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9124', '2024 Chevrolet Silverado 1500 LT', 15, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9126', '2020 Toyota Camry Hybrid XLE', 13, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '623991A', '2017 Toyota RAV4 LE', 12, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '623959A', '2016 Toyota Camry LE', 12, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '622228A', '2022 Toyota Sienna XSE', 12, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '623950A', '2020 Toyota RAV4 XLE', 12, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '623580A', '2019 Ram 1500 Laramie', 9, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '624094T', '2022 Toyota Corolla SE', 6, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, '623964A', '2021 Toyota 4Runner SR5 Premium', 6, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9131', '2021 Toyota Tacoma TRD Off Road', 5, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9135', '2024 Subaru Crosstrek Limited', 5, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9138', '2022 Subaru Forester Limited', 5, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9140', '2023 Mazda CX-30 2.5 S Preferred Package', 5, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE),
+                        ($1, 'WTP9141', '2024 Subaru Crosstrek Sport', 5, 'ready_for_photos', CURRENT_DATE, CURRENT_DATE)
+                        ON CONFLICT (dealership_id, stock_num) DO NOTHING
+                    """, d_id)
+        except Exception:
+            pass
+
     finally:
         # Clean up expired sessions via raw asyncpg (avoids pgBouncer prepared stmt issue)
         try:
