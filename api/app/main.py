@@ -4813,6 +4813,9 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
         query = query.where(PhotoVehicle.status == "ready_for_photos")
     elif tab == "done":
         query = query.where(PhotoVehicle.status == "done")
+    elif tab == "not_in_csv":
+        # We'll filter in Python after computing last_upload_date
+        pass
     query = query.order_by(PhotoVehicle.age_days.desc())
     vehicles = (await db.execute(query)).scalars().all()
 
@@ -4826,6 +4829,14 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
     done_count = sum(1 for v in all_vehicles if v.status == "done")
     new_today = sum(1 for v in all_vehicles if v.first_seen_date == today())
 
+    # Determine the most recent upload date (max last_seen_date across all vehicles)
+    last_upload_date = max((v.last_seen_date for v in all_vehicles if v.last_seen_date), default=None)
+    not_in_csv = sum(1 for v in all_vehicles if last_upload_date and v.last_seen_date and v.last_seen_date < last_upload_date) if last_upload_date else 0
+
+    # Apply not_in_csv filter after we know last_upload_date
+    if tab == "not_in_csv" and last_upload_date:
+        vehicles = [v for v in vehicles if v.last_seen_date and v.last_seen_date < last_upload_date]
+
     msg = request.query_params.get("msg", "")
     msg_type = request.query_params.get("msg_type", "success")
 
@@ -4838,6 +4849,8 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
         "ready_for_photos": ready,
         "done": done_count,
         "new_today": new_today,
+        "not_in_csv": not_in_csv,
+        "last_upload_date": last_upload_date,
         "today_date": today(),
         "current_tab": tab,
         "search": search,

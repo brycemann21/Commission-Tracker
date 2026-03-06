@@ -23,7 +23,7 @@
 {% endif %}
 
 <!-- Summary counters -->
-<div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-5">
+<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-{{ 6 if not_in_csv > 0 else 5 }} gap-3 mb-5">
   <div class="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-center">
     <div class="text-2xl font-bold dark:text-white">{{ total }}</div>
     <div class="text-xs text-slate-500 dark:text-slate-400">Total</div>
@@ -44,6 +44,12 @@
     <div class="text-2xl font-bold text-violet-700 dark:text-violet-400">{{ new_today }}</div>
     <div class="text-xs text-violet-600 dark:text-violet-400">New Today</div>
   </div>
+  {% if not_in_csv > 0 %}
+  <div class="rounded border border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-900/20 px-4 py-3 text-center">
+    <div class="text-2xl font-bold text-orange-700 dark:text-orange-400">{{ not_in_csv }}</div>
+    <div class="text-xs text-orange-600 dark:text-orange-400">Not in CSV</div>
+  </div>
+  {% endif %}
 </div>
 
 <!-- PDF buttons -->
@@ -64,7 +70,7 @@
 <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
   <div class="flex gap-1 border-b border-slate-200 dark:border-slate-700">
     {% set tab = current_tab or 'all' %}
-    {% for t, label, cnt in [('all','All',total),('needs_detail','Needs Detail',needs_detail),('ready_for_photos','Ready for Photos',ready_for_photos),('done','Done',done)] %}
+    {% for t, label, cnt in [('all','All',total),('needs_detail','Needs Detail',needs_detail),('ready_for_photos','Ready for Photos',ready_for_photos),('done','Done',done),('not_in_csv','Not in CSV',not_in_csv)] %}
     <a href="/photos?tab={{ t }}{% if search %}&q={{ search }}{% endif %}" class="px-3 py-2 text-sm border-b-2 transition {{ 'border-slate-900 dark:border-indigo-400 text-slate-900 dark:text-white font-semibold' if tab == t else 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300' }}">
       {{ label }} <span class="text-xs">({{ cnt }})</span>
     </a>
@@ -104,6 +110,8 @@
           {{ v.stock_num }}
           {% if v.first_seen_date and v.first_seen_date == today_date %}
           <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300">NEW</span>
+          {% elif last_upload_date and v.last_seen_date and v.last_seen_date < last_upload_date %}
+          <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300">NOT IN CSV</span>
           {% endif %}
         </td>
         <td class="px-4 py-3 dark:text-slate-200">{{ v.year_make_model }}</td>
