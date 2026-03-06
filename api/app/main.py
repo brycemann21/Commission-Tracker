@@ -4837,8 +4837,8 @@ async def photos_page(request: Request, tab: str = "all", db: AsyncSession = Dep
 
 
 @app.post("/photos/upload")
-async def photos_upload(request: Request, csv_file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
-    """Upload a CSV of vehicles with <26 photos. Cross-references with existing data."""
+async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...), db: AsyncSession = Depends(get_db)):
+    """Upload one or more CSVs of vehicles with <26 photos. Cross-references with existing data."""
     _require_super_admin(request)
     d_id = user_dealership_id(request)
     if not d_id:
@@ -4847,105 +4847,107 @@ async def photos_upload(request: Request, csv_file: UploadFile = File(...), db: 
     import csv as _csv_mod
     import io
 
-    try:
-        content = (await csv_file.read()).decode("utf-8-sig")
-        reader = _csv_mod.DictReader(io.StringIO(content))
+    def _find_col(names, candidates):
+        for n in names:
+            nl = n.strip().lower().replace(" ", "_").replace("#", "")
+            for c in candidates:
+                if c in nl:
+                    return n
+        return None
 
-        # Normalize column names
-        if not reader.fieldnames:
-            return RedirectResponse(url="/photos?msg=Empty+CSV&msg_type=error", status_code=303)
+    # Load existing vehicles into a dict by stock_num
+    existing = (await db.execute(
+        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__')
+    )).scalars().all()
+    existing_map = {v.stock_num.strip().upper(): v for v in existing}
 
-        def _find_col(names, candidates):
-            for n in names:
-                nl = n.strip().lower().replace(" ", "_").replace("#", "")
-                for c in candidates:
-                    if c in nl:
-                        return n
-            return None
+    total_new = 0
+    total_updated = 0
+    files_processed = 0
+    today_d = today()
 
-        col_stock = _find_col(reader.fieldnames, ["stock", "stk", "stck"])
-        col_ymm = _find_col(reader.fieldnames, ["year_make_model", "year/make/model", "vehicle", "ymm", "description"])
-        col_age = _find_col(reader.fieldnames, ["age"])
-        if not col_age:
-            col_age = _find_col(reader.fieldnames, ["days_in_stock", "days_on_ground", "dis"])
+    for csv_file in csv_files:
+        try:
+            content = (await csv_file.read()).decode("utf-8-sig")
+            reader = _csv_mod.DictReader(io.StringIO(content))
 
-        # Support separate Year, Make, Model, Trim columns
-        col_year = _find_col(reader.fieldnames, ["year"])
-        col_make = _find_col(reader.fieldnames, ["make"])
-        col_model = _find_col(reader.fieldnames, ["model"])
-        col_trim = _find_col(reader.fieldnames, ["trim"])
-
-        if not col_stock:
-            return RedirectResponse(url="/photos?msg=Could+not+find+Stock+column+in+CSV&msg_type=error", status_code=303)
-
-        # Load existing vehicles into a dict by stock_num
-        existing = (await db.execute(
-            select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__')
-        )).scalars().all()
-        existing_map = {v.stock_num.strip().upper(): v for v in existing}
-
-        csv_stock_nums = set()
-        new_count = 0
-        updated_count = 0
-        today_d = today()
-
-        for row in reader:
-            stock = (row.get(col_stock, "") or "").strip().upper()
-            if not stock:
+            if not reader.fieldnames:
                 continue
 
-            # Build year/make/model from either combined or separate columns
-            if col_ymm:
-                ymm = (row.get(col_ymm, "") or "").strip()
-            elif col_year and col_make and col_model:
-                parts = [
-                    (row.get(col_year, "") or "").strip(),
-                    (row.get(col_make, "") or "").strip(),
-                    (row.get(col_model, "") or "").strip(),
-                ]
-                if col_trim:
-                    t = (row.get(col_trim, "") or "").strip()
-                    if t:
-                        parts.append(t)
-                ymm = " ".join(p for p in parts if p)
-            else:
-                ymm = ""
-            try:
-                age = int(float((row.get(col_age, "") or "0").strip().replace(",", "") or "0"))
-            except (ValueError, TypeError):
-                age = 0
+            col_stock = _find_col(reader.fieldnames, ["stock", "stk", "stck"])
+            col_ymm = _find_col(reader.fieldnames, ["year_make_model", "year/make/model", "vehicle", "ymm", "description"])
+            col_age = _find_col(reader.fieldnames, ["age"])
+            if not col_age:
+                col_age = _find_col(reader.fieldnames, ["days_in_stock", "days_on_ground", "dis"])
 
-            csv_stock_nums.add(stock)
+            # Support separate Year, Make, Model, Trim columns
+            col_year = _find_col(reader.fieldnames, ["year"])
+            col_make = _find_col(reader.fieldnames, ["make"])
+            col_model = _find_col(reader.fieldnames, ["model"])
+            col_trim = _find_col(reader.fieldnames, ["trim"])
 
-            if stock in existing_map:
-                # Update existing
-                v = existing_map[stock]
-                v.year_make_model = ymm or v.year_make_model
-                v.age_days = age
-                v.last_seen_date = today_d
-                updated_count += 1
-            else:
-                # New vehicle
-                db.add(PhotoVehicle(
-                    dealership_id=d_id,
-                    stock_num=stock,
-                    year_make_model=ymm,
-                    age_days=age,
-                    status="needs_detail",
-                    first_seen_date=today_d,
-                    last_seen_date=today_d,
-                ))
-                new_count += 1
+            if not col_stock:
+                continue
 
-        # Vehicles NOT in today's CSV stay where they are — user manually marks Done
+            for row in reader:
+                stock = (row.get(col_stock, "") or "").strip().upper()
+                if not stock:
+                    continue
 
-        await db.commit()
+                # Build year/make/model from either combined or separate columns
+                if col_ymm:
+                    ymm = (row.get(col_ymm, "") or "").strip()
+                elif col_year and col_make and col_model:
+                    parts = [
+                        (row.get(col_year, "") or "").strip(),
+                        (row.get(col_make, "") or "").strip(),
+                        (row.get(col_model, "") or "").strip(),
+                    ]
+                    if col_trim:
+                        t = (row.get(col_trim, "") or "").strip()
+                        if t:
+                            parts.append(t)
+                    ymm = " ".join(p for p in parts if p)
+                else:
+                    ymm = ""
+                try:
+                    age = int(float((row.get(col_age, "") or "0").strip().replace(",", "") or "0"))
+                except (ValueError, TypeError):
+                    age = 0
 
-        msg = f"Uploaded: {new_count} new, {updated_count} updated"
-        return RedirectResponse(url=f"/photos?msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)
+                if stock in existing_map:
+                    # Update existing — keep the higher age if already seen today
+                    v = existing_map[stock]
+                    v.year_make_model = ymm or v.year_make_model
+                    if age > 0:
+                        v.age_days = max(v.age_days, age)
+                    v.last_seen_date = today_d
+                    total_updated += 1
+                else:
+                    # New vehicle
+                    new_v = PhotoVehicle(
+                        dealership_id=d_id,
+                        stock_num=stock,
+                        year_make_model=ymm,
+                        age_days=age,
+                        status="needs_detail",
+                        first_seen_date=today_d,
+                        last_seen_date=today_d,
+                    )
+                    db.add(new_v)
+                    existing_map[stock] = new_v  # so second CSV doesn't duplicate
+                    total_new += 1
 
-    except Exception as e:
-        return RedirectResponse(url=f"/photos?msg=Error:+{str(e)[:80].replace(' ', '+')}&msg_type=error", status_code=303)
+            files_processed += 1
+        except Exception:
+            continue
+
+    # Vehicles NOT in today's CSV stay where they are — user manually marks Done
+
+    await db.commit()
+
+    msg = f"{files_processed} file{'s' if files_processed != 1 else ''} processed: {total_new} new, {total_updated} updated"
+    return RedirectResponse(url=f"/photos?msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)
 
 
 @app.post("/photos/{vehicle_id}/status")
