@@ -5104,6 +5104,57 @@ async def photos_bulk_not_in_csv_done(request: Request, db: AsyncSession = Depen
     return RedirectResponse(url="/photos?msg=Moved+to+Done&msg_type=success", status_code=303)
 
 
+@app.post("/photos/add")
+async def photos_add_manual(
+    request: Request,
+    stock_num: str = Form(...),
+    year_make_model: str = Form(""),
+    age_days: int = Form(0),
+    status: str = Form("needs_detail"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually add a single vehicle to the photo tracker."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+    if not d_id or not stock_num.strip():
+        return RedirectResponse(url="/photos", status_code=303)
+
+    stock = stock_num.strip().upper()
+    if status not in ("needs_detail", "ready_for_photos"):
+        status = "needs_detail"
+
+    # Check if already exists (including dismissed)
+    existing = (await db.execute(
+        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num == stock)
+    )).scalar_one_or_none()
+
+    if existing:
+        if existing.dismissed:
+            # Un-dismiss and update
+            existing.dismissed = False
+            existing.status = status
+            existing.year_make_model = year_make_model.strip() or existing.year_make_model
+            existing.age_days = age_days
+            existing.last_seen_date = today()
+            msg = f"{stock}+restored+from+dismissed"
+        else:
+            msg = f"{stock}+already+exists"
+    else:
+        db.add(PhotoVehicle(
+            dealership_id=d_id,
+            stock_num=stock,
+            year_make_model=year_make_model.strip(),
+            age_days=age_days,
+            status=status,
+            first_seen_date=today(),
+            last_seen_date=today(),
+        ))
+        msg = f"{stock}+added"
+
+    await db.commit()
+    return RedirectResponse(url=f"/photos?msg={msg}&msg_type=success", status_code=303)
+
+
 @app.post("/photos/{vehicle_id}/status")
 async def photos_update_status(vehicle_id: int, request: Request, new_status: str = Form(...), db: AsyncSession = Depends(get_db)):
     """Toggle a vehicle's status."""
