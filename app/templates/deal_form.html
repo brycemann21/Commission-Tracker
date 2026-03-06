@@ -13,14 +13,7 @@
 
 <h1 class="text-xl font-bold mb-1">{{ "Edit Deal" if deal else "New Deal" }}</h1>
 <div class="text-sm text-slate-500 mb-4">
-  {% set pay_type = settings.pay_type or 'flat' %}
-  {% if pay_type == 'hybrid' %}
   ${{ "{:,.0f}".format(settings.unit_comm_discount_le_200) }} per unit + {{ settings.gross_back_pct }}% of back-end F&amp;I gross + add-ons.
-  {% elif pay_type == 'gross' %}
-  {{ settings.gross_front_pct }}% front + {{ settings.gross_back_pct }}% back gross + add-ons.
-  {% else %}
-  Unit commission + add-ons + trade hold commission.
-  {% endif %}
 </div>
 
 <form id="dealForm" class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4" method="post" action="/deals/save">
@@ -129,15 +122,8 @@
     </div>
     {# Pay Date + Mark as Paid intentionally removed from New Deal screen (handled elsewhere) #}
 
-
-    <div>
-      <label class="text-xs text-slate-500 dark:text-slate-400">Discount</label>
-      <select class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="discount_gt_200">
-        <option value="No" {% if not deal or not deal.discount_gt_200 %}selected{% endif %}>No</option>
-        <option value="Yes" {% if deal and deal.discount_gt_200 %}selected{% endif %}>Yes</option>
-      </select>
-      <div class="text-xs text-slate-400 mt-1">Unit comm = {{ settings.unit_comm_discount_le_200 }} (No) / {{ settings.unit_comm_discount_gt_200 }} (Yes)</div>
-    </div>
+    {# Discount field hidden — flat $150 per unit regardless of discount #}
+    <input type="hidden" name="discount_gt_200" value="No">
 
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">Aim Presentation</label>
@@ -171,19 +157,14 @@
       <input class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="notes" value="{{ deal.notes if deal else '' }}">
     </div>
     <input type="hidden" name="front_gross" value="{{ deal.front_gross if deal else 0 }}">
-    {% set pay_type = settings.pay_type or 'flat' %}
-    {% if pay_type in ('hybrid', 'gross') %}
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">Back-End F&amp;I Gross</label>
       <div class="relative">
         <span class="absolute left-3 top-2.5 text-slate-400">$</span>
         <input type="number" step="0.01" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" name="back_gross" id="back_gross_input" value="{{ deal.back_gross if deal and deal.back_gross else 0 }}">
       </div>
-      <div class="text-xs text-slate-400 mt-1">{{ settings.gross_back_pct or 0 }}% of this goes to your commission</div>
+      <div class="text-xs text-slate-400 mt-1">{{ settings.gross_back_pct or 7 }}% of this goes to your commission</div>
     </div>
-    {% else %}
-    <input type="hidden" name="back_gross" value="{{ deal.back_gross if deal else 0 }}">
-    {% endif %}
     <input type="hidden" name="actual_paid" value="">
   </div>
 
@@ -248,9 +229,7 @@
 
         <div class="mt-3 space-y-2 text-sm">
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Unit</span><b id="lc_unit">$0</b></div>
-          {% if (settings.pay_type or 'flat') in ('hybrid', 'gross') %}
-          <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Back-End {{ settings.gross_back_pct or 0 }}%</span><b id="lc_back">$0</b></div>
-          {% endif %}
+          <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Back-End {{ settings.gross_back_pct or 7 }}%</span><b id="lc_back">$0</b></div>
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Add-ons</span><b id="lc_addons">$0</b></div>
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Money Held Comm</span><b id="lc_hold">$0</b></div>
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Aim $</span><b id="lc_aim">$0</b></div>
@@ -457,14 +436,11 @@
         validate();
       }
 
-      // Live commission calculator (mirrors app/payplan.py)
+      // Live commission calculator — Hybrid: $150/unit + 7% back-end F&I
       {
         const SETTINGS = {
-          pay_type: '{{ settings.pay_type or "flat" }}',
-          unit_le: {{ settings.unit_comm_discount_le_200 or 0 }},
-          unit_gt: {{ settings.unit_comm_discount_gt_200 or 0 }},
-          gross_back_pct: {{ settings.gross_back_pct or 0 }},
-          gross_front_pct: {{ settings.gross_front_pct or 0 }},
+          unit_flat: {{ settings.unit_comm_discount_le_200 or 150 }},
+          gross_back_pct: {{ settings.gross_back_pct or 7 }},
           permaplate: {{ settings.permaplate or 0 }},
           nitro_fill: {{ settings.nitro_fill or 0 }},
           pulse: {{ settings.pulse or 0 }},
@@ -482,7 +458,6 @@
 
         const els = {
           customer: $('input[name="customer"]'),
-          discount: $('select[name="discount_gt_200"]'),
           hold: $('input[name="hold_amount"]'),
           dealType: $('select[name="deal_type"]'),
           aim: $('input[name="aim_amount"]'),
@@ -498,23 +473,20 @@
         };
 
         function calc() {
-          // If the live box isn't on the page, don't do anything.
           if (!els.outUnit || !els.outAddons || !els.outHold || !els.outTotal) return;
 
           const customer = (els.customer?.value || '').trim();
 
-          const discYes = (els.discount?.value || 'No').toLowerCase() === 'yes';
-          const unit = discYes ? SETTINGS.unit_gt : SETTINGS.unit_le;
+          // Flat per-unit commission ($150)
+          const unit = SETTINGS.unit_flat;
 
           const dt = (els.dealType?.value || '').trim();
           const autoFinNonSub = (dt === 'Finance' || dt === 'Lease');
 
           let addons = 0;
-          // Add $50 for Finance or Lease F/C/L
           if (autoFinNonSub) addons += 50;
-          // Sum commission from all checked custom product checkboxes (excluding Finance)
           document.querySelectorAll('.product-cb').forEach(function(cb) {
-            if (cb.getAttribute('data-name') === 'Finance') return; // skip Finance product
+            if (cb.getAttribute('data-name') === 'Finance') return;
             if (cb.checked) addons += parseFloat(cb.getAttribute('data-comm') || '0');
           });
 
@@ -523,13 +495,12 @@
 
           const aimAmt = parseFloat(els.aim?.value || '0') || 0;
 
-          // Back-end F&I gross commission (hybrid/gross pay types)
+          // Back-end F&I gross commission (7%)
           const backGross = parseFloat(els.backGross?.value || '0') || 0;
           const backComm = backGross * (SETTINGS.gross_back_pct / 100);
 
           let total = unit + backComm + addons + holdComm + aimAmt;
 
-          // Split deal: halve the total commission
           const isSplit = document.getElementById('split_deal_cb')?.checked;
           if (isSplit) total = Math.round(total / 2);
 
@@ -549,7 +520,7 @@
         window.__ct_calc_live_comm = calc;
 
         const watch = [
-          els.customer, els.discount, els.hold, els.dealType, els.aim, els.backGross,
+          els.customer, els.hold, els.dealType, els.aim, els.backGross,
         ].filter(Boolean);
 
         watch.forEach((el) => {

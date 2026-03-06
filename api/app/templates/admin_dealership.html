@@ -190,14 +190,10 @@
 
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-4">
         <div>
-          <label class="block text-[11px] text-slate-500 mb-1">Unit Comm (≤$200 disc)</label>
+          <label class="block text-[11px] text-slate-500 mb-1">Per-Unit Commission</label>
           <input type="number" name="unit_comm_discount_le_200" value="{{ s.unit_comm_discount_le_200 }}" step="0.01"
                  class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
-        </div>
-        <div>
-          <label class="block text-[11px] text-slate-500 mb-1">Unit Comm (>$200 disc)</label>
-          <input type="number" name="unit_comm_discount_gt_200" value="{{ s.unit_comm_discount_gt_200 }}" step="0.01"
-                 class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
+          <input type="hidden" name="unit_comm_discount_gt_200" value="{{ s.unit_comm_discount_le_200 }}">
         </div>
         <div>
           <label class="block text-[11px] text-slate-500 mb-1">Hourly Rate (NY Offset)</label>

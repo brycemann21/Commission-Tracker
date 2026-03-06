@@ -112,23 +112,24 @@
 
       {# ── Manual entry ── #}
       <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
-        <h3 class="text-sm font-bold text-slate-700 mb-3">Per-Unit Commission</h3>
+        <h3 class="text-sm font-bold text-slate-700 mb-3">Commission Structure</h3>
         <div class="grid grid-cols-2 gap-3 mb-4">
           <div>
-            <label class="block text-xs text-slate-500 mb-1">≤ $200 discount</label>
+            <label class="block text-xs text-slate-500 mb-1">Per-Unit Commission</label>
             <div class="relative">
               <span class="absolute left-3 top-2.5 text-slate-400 text-sm">$</span>
-              <input type="text" name="unit_comm_le_200" id="pp-unit-le" value="{{ s.unit_comm_discount_le_200 if s and s.unit_comm_discount_le_200 else '' }}" placeholder="190"
+              <input type="text" name="unit_comm_le_200" id="pp-unit-le" value="{{ s.unit_comm_discount_le_200 if s and s.unit_comm_discount_le_200 else '' }}" placeholder="150"
                      class="w-full border border-slate-200 rounded-lg pl-7 pr-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
             </div>
+            <div class="text-[10px] text-slate-400 mt-0.5">Per New &amp; Used unit sold</div>
           </div>
           <div>
-            <label class="block text-xs text-slate-500 mb-1">> $200 discount</label>
+            <label class="block text-xs text-slate-500 mb-1">Back-End F&amp;I %</label>
             <div class="relative">
-              <span class="absolute left-3 top-2.5 text-slate-400 text-sm">$</span>
-              <input type="text" name="unit_comm_gt_200" id="pp-unit-gt" value="{{ s.unit_comm_discount_gt_200 if s and s.unit_comm_discount_gt_200 else '' }}" placeholder="140"
-                     class="w-full border border-slate-200 rounded-lg pl-7 pr-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+              <input type="text" name="unit_comm_gt_200" id="pp-unit-gt" value="7" placeholder="7"
+                     class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" disabled>
             </div>
+            <div class="text-[10px] text-slate-400 mt-0.5">Set in Pay Plan after setup</div>
           </div>
         </div>
 
@@ -228,7 +229,7 @@ function handlePayplanUpload(input) {
       }
       // Fill in the fields
       var map = {
-        'unit_comm_le_200': 'pp-unit-le', 'unit_comm_gt_200': 'pp-unit-gt',
+        'unit_comm_le_200': 'pp-unit-le',
         'hourly_offset': 'pp-hourly', 'permaplate': 'pp-permaplate',
         'nitro_fill': 'pp-nitro_fill', 'pulse': 'pp-pulse',
         'finance': 'pp-finance', 'warranty': 'pp-warranty', 'tire_wheel': 'pp-tire_wheel'
@@ -243,10 +244,8 @@ function handlePayplanUpload(input) {
       }
 
       var msg = '<div class="text-sm text-emerald-600 font-medium">✓ Found ' + filled + ' values from your pay plan!</div>';
-      if (data.pay_type && data.pay_type !== 'flat') {
-        msg += '<div class="text-xs text-amber-600 mt-1">Looks like a ' + data.pay_type + '-based plan. ';
-        if (data.gross_percentage) msg += data.gross_percentage + '% of gross. ';
-        msg += 'You can fine-tune in Pay Plan settings later.</div>';
+      if (data.gross_back_pct && data.gross_back_pct > 0) {
+        msg += '<div class="text-xs text-amber-600 mt-1">' + data.gross_back_pct + '% back-end F&I gross detected. You can fine-tune in Pay Plan settings later.</div>';
       }
       if (data.notes) {
         msg += '<div class="text-xs text-slate-500 mt-1">' + data.notes + '</div>';

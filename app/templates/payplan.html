@@ -14,52 +14,41 @@
 <form method="post" action="/payplan" class="space-y-6">
         {{ csrf_hidden|safe }}
 
-  <!-- Pay Structure Type -->
+  <!-- Pay Structure — Hybrid: $150/unit + 7% Back-End F&I -->
   <div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4">
-    <div class="font-semibold mb-3 dark:text-white">Pay Structure</div>
+    <div class="font-semibold mb-1 dark:text-white">Commission Structure</div>
+    <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">Flat per-unit + percentage of back-end F&amp;I gross on each unit sold</div>
+    <input type="hidden" name="pay_type" value="hybrid">
+    <input type="hidden" name="gross_front_pct" value="0">
+    <input type="hidden" name="mini_deal" value="0">
+    <input type="hidden" name="pack_deduction" value="0">
     <div class="grid md:grid-cols-3 gap-4">
       <div>
-        <label class="text-xs text-slate-500 dark:text-slate-400">Pay Type</label>
-        <select name="pay_type" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" id="payTypeSelect" onchange="togglePayType()">
-          <option value="flat" {{ 'selected' if not s.pay_type or s.pay_type == 'flat' else '' }}>Flat Per-Unit</option>
-          <option value="gross" {{ 'selected' if s.pay_type == 'gross' else '' }}>% of Gross</option>
-          <option value="hybrid" {{ 'selected' if s.pay_type == 'hybrid' else '' }}>Hybrid (Flat + % Back)</option>
-        </select>
+        <label class="text-xs text-slate-500 dark:text-slate-400">Per-Unit Commission</label>
+        <div class="relative">
+          <span class="absolute left-3 top-2.5 text-slate-400">$</span>
+          <input type="number" step="0.01" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" name="unit_comm_discount_le_200" value="{{ s.unit_comm_discount_le_200 }}">
+        </div>
+        <div class="text-xs text-slate-400 mt-1">Per New &amp; Used unit sold</div>
       </div>
-      <div id="grossFrontWrap" class="{{ 'hidden' if not s.pay_type or s.pay_type == 'flat' else '' }}">
-        <label class="text-xs text-slate-500 dark:text-slate-400">Front Gross %</label>
-        <input type="number" step="0.1" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="gross_front_pct" value="{{ s.gross_front_pct or 0 }}">
+      <div>
+        <label class="text-xs text-slate-500 dark:text-slate-400">Back-End F&amp;I Gross %</label>
+        <div class="relative">
+          <input type="number" step="0.1" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="gross_back_pct" value="{{ s.gross_back_pct or 7 }}">
+        </div>
+        <div class="text-xs text-slate-400 mt-1">% of back-end F&amp;I gross on each unit</div>
       </div>
-      <div id="grossBackWrap" class="{{ 'hidden' if not s.pay_type or s.pay_type == 'flat' else '' }}">
-        <label class="text-xs text-slate-500 dark:text-slate-400">Back Gross %</label>
-        <input type="number" step="0.1" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="gross_back_pct" value="{{ s.gross_back_pct or 0 }}">
+      <div>
+        <label class="text-xs text-slate-500 dark:text-slate-400">Hourly Rate (NY Offset)</label>
+        <div class="relative">
+          <span class="absolute left-3 top-2.5 text-slate-400">$</span>
+          <input type="number" step="0.01" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" name="hourly_rate_ny_offset" value="{{ s.hourly_rate_ny_offset }}">
+        </div>
+        <div class="text-xs text-slate-400 mt-1">Per clocked hour</div>
       </div>
     </div>
-    <div class="grid md:grid-cols-2 gap-4 mt-3 {{ 'hidden' if not s.pay_type or s.pay_type == 'flat' else '' }}" id="grossExtras">
-      <div>
-        <label class="text-xs text-slate-500 dark:text-slate-400">Mini Deal (minimum per deal)</label>
-        <input type="number" step="0.01" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="mini_deal" value="{{ s.mini_deal or 0 }}">
-      </div>
-      <div>
-        <label class="text-xs text-slate-500 dark:text-slate-400">Pack Deduction (removed from front before calc)</label>
-        <input type="number" step="0.01" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="pack_deduction" value="{{ s.pack_deduction or 0 }}">
-      </div>
-    </div>
-  </div>
-
-  <!-- Core per-deal values -->
-  <div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4">
-    <div class="font-semibold mb-3 dark:text-white">Per-Deal Values</div>
-    <div class="grid md:grid-cols-2 gap-4">
-      <div>
-        <label class="text-xs text-slate-500 dark:text-slate-400">Unit Commission (Discount ≤ $200)</label>
-        <input type="number" step="0.01" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="unit_comm_discount_le_200" value="{{ s.unit_comm_discount_le_200 }}">
-      </div>
-      <div>
-        <label class="text-xs text-slate-500 dark:text-slate-400">Unit Commission (Discount &gt; $200)</label>
-        <input type="number" step="0.01" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="unit_comm_discount_gt_200" value="{{ s.unit_comm_discount_gt_200 }}">
-      </div>
-    </div>
+    {# Keep unit_comm_discount_gt_200 synced to le_200 (no discount tiers) #}
+    <input type="hidden" name="unit_comm_discount_gt_200" value="{{ s.unit_comm_discount_le_200 }}">
     {# Hidden legacy fields so the form still submits valid data #}
     <input type="hidden" name="permaplate" value="{{ s.permaplate }}">
     <input type="hidden" name="nitro_fill" value="{{ s.nitro_fill }}">
@@ -108,13 +97,13 @@
     <form method="post" action="/payplan">
       {{ csrf_hidden|safe }}
       {# Re-include all the hidden fields the main form needs #}
-      <input type="hidden" name="pay_type" value="{{ s.pay_type or 'flat' }}">
-      <input type="hidden" name="gross_front_pct" value="{{ s.gross_front_pct or 0 }}">
-      <input type="hidden" name="gross_back_pct" value="{{ s.gross_back_pct or 0 }}">
-      <input type="hidden" name="mini_deal" value="{{ s.mini_deal or 0 }}">
-      <input type="hidden" name="pack_deduction" value="{{ s.pack_deduction or 0 }}">
+      <input type="hidden" name="pay_type" value="hybrid">
+      <input type="hidden" name="gross_front_pct" value="0">
+      <input type="hidden" name="gross_back_pct" value="{{ s.gross_back_pct or 7 }}">
+      <input type="hidden" name="mini_deal" value="0">
+      <input type="hidden" name="pack_deduction" value="0">
       <input type="hidden" name="unit_comm_discount_le_200" value="{{ s.unit_comm_discount_le_200 }}">
-      <input type="hidden" name="unit_comm_discount_gt_200" value="{{ s.unit_comm_discount_gt_200 }}">
+      <input type="hidden" name="unit_comm_discount_gt_200" value="{{ s.unit_comm_discount_le_200 }}">
       <input type="hidden" name="permaplate" value="{{ s.permaplate }}">
       <input type="hidden" name="nitro_fill" value="{{ s.nitro_fill }}">
       <input type="hidden" name="pulse" value="{{ s.pulse }}">
@@ -123,17 +112,6 @@
       <input type="hidden" name="tire_wheel" value="{{ s.tire_wheel }}">
       <input type="hidden" name="hourly_rate_ny_offset" value="{{ s.hourly_rate_ny_offset }}">
     {% endif %}
-  </div>
-
-  <!-- Hourly -->
-  <div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4">
-    <div class="font-semibold mb-3 dark:text-white">Hourly</div>
-    <div class="grid md:grid-cols-2 gap-4">
-      <div>
-        <label class="text-xs text-slate-500 dark:text-slate-400">Hourly Rate (NY Offset)</label>
-        <input type="number" step="0.01" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="hourly_rate_ny_offset" value="{{ s.hourly_rate_ny_offset }}">
-      </div>
-    </div>
   </div>
 
   <!-- Bonuses -->
@@ -209,10 +187,13 @@
       <input type="hidden" name="pay_type" value="{{ s.pay_type or 'flat' }}">
       <input type="hidden" name="gross_front_pct" value="{{ s.gross_front_pct or 0 }}">
       <input type="hidden" name="gross_back_pct" value="{{ s.gross_back_pct or 0 }}">
-      <input type="hidden" name="mini_deal" value="{{ s.mini_deal or 0 }}">
-      <input type="hidden" name="pack_deduction" value="{{ s.pack_deduction or 0 }}">
+      <input type="hidden" name="pay_type" value="hybrid">
+      <input type="hidden" name="gross_front_pct" value="0">
+      <input type="hidden" name="gross_back_pct" value="{{ s.gross_back_pct or 7 }}">
+      <input type="hidden" name="mini_deal" value="0">
+      <input type="hidden" name="pack_deduction" value="0">
       <input type="hidden" name="unit_comm_discount_le_200" value="{{ s.unit_comm_discount_le_200 }}">
-      <input type="hidden" name="unit_comm_discount_gt_200" value="{{ s.unit_comm_discount_gt_200 }}">
+      <input type="hidden" name="unit_comm_discount_gt_200" value="{{ s.unit_comm_discount_le_200 }}">
       <input type="hidden" name="permaplate" value="{{ s.permaplate }}">
       <input type="hidden" name="nitro_fill" value="{{ s.nitro_fill }}">
       <input type="hidden" name="pulse" value="{{ s.pulse }}">
@@ -254,13 +235,4 @@
   document.querySelectorAll('form[action="/payplan"] input, form[action="/payplan"] select').forEach(function(el){ el.disabled = true; el.classList.add('bg-slate-50', 'dark:bg-slate-900/30', 'text-slate-500', 'dark:text-slate-500'); });
 </script>
 {% endif %}
-<script>
-function togglePayType() {
-  var v = document.getElementById('payTypeSelect').value;
-  var show = v !== 'flat';
-  document.getElementById('grossFrontWrap').classList.toggle('hidden', !show);
-  document.getElementById('grossBackWrap').classList.toggle('hidden', !show);
-  document.getElementById('grossExtras').classList.toggle('hidden', !show);
-}
-</script>
 {% endblock %}

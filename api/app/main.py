@@ -3048,8 +3048,8 @@ async def payplan_get(request: Request, db: AsyncSession = Depends(get_db)):
 @app.post("/payplan")
 async def payplan_post(
     request: Request,
-    pay_type: str = Form("flat"),
-    gross_front_pct: float = Form(0.0), gross_back_pct: float = Form(0.0),
+    pay_type: str = Form("hybrid"),
+    gross_front_pct: float = Form(0.0), gross_back_pct: float = Form(7.0),
     mini_deal: float = Form(0.0), pack_deduction: float = Form(0.0),
     unit_comm_discount_le_200: float = Form(...), unit_comm_discount_gt_200: float = Form(...),
     permaplate: float = Form(...), nitro_fill: float = Form(...), pulse: float = Form(...),
@@ -3068,12 +3068,13 @@ async def payplan_post(
     # Only admins can change the pay plan — it affects the entire dealership
     _require_admin(request)
     s = await get_or_create_settings(db, uid(request), user_dealership_id(request))
-    if pay_type in ("flat", "gross", "hybrid"):
-        s.pay_type = pay_type
-    s.gross_front_pct = gross_front_pct
+    s.pay_type = "hybrid"
+    s.gross_front_pct = 0.0
     s.gross_back_pct = gross_back_pct
-    s.mini_deal = mini_deal
-    s.pack_deduction = pack_deduction
+    s.mini_deal = 0.0
+    s.pack_deduction = 0.0
+    # Keep both unit comm fields synced (no discount tiers)
+    unit_comm_discount_gt_200 = unit_comm_discount_le_200
     for f in ["unit_comm_discount_le_200","unit_comm_discount_gt_200","permaplate","nitro_fill","pulse",
               "finance_non_subvented","warranty","tire_wheel","hourly_rate_ny_offset",
               "new_volume_bonus_15_16","new_volume_bonus_17_18","new_volume_bonus_19_20",
@@ -3808,13 +3809,16 @@ async def onboarding_submit(
 
     # Update pay plan settings
     s = await get_or_create_settings(db, uid(request), d_id)
+    s.pay_type = "hybrid"
+    s.gross_back_pct = 7.0
 
     def _flt(v):
         try: return float(v.replace("$","").replace(",","")) if v.strip() else None
         except: return None
 
-    if _flt(unit_comm_le_200) is not None: s.unit_comm_discount_le_200 = _flt(unit_comm_le_200)
-    if _flt(unit_comm_gt_200) is not None: s.unit_comm_discount_gt_200 = _flt(unit_comm_gt_200)
+    if _flt(unit_comm_le_200) is not None:
+        s.unit_comm_discount_le_200 = _flt(unit_comm_le_200)
+        s.unit_comm_discount_gt_200 = _flt(unit_comm_le_200)  # keep synced
     if _flt(hourly_offset) is not None: s.hourly_rate_ny_offset = _flt(hourly_offset)
     if _flt(permaplate) is not None: s.permaplate = _flt(permaplate)
     if _flt(nitro_fill) is not None: s.nitro_fill = _flt(nitro_fill)
@@ -4646,6 +4650,9 @@ async def admin_override_payplan(
         # Create settings for this dealership
         s = Settings(dealership_id=dealership_id)
         db.add(s)
+    s.pay_type = "hybrid"
+    # Keep both unit comm fields synced (no discount tiers)
+    unit_comm_discount_gt_200 = unit_comm_discount_le_200
     for f in ["unit_comm_discount_le_200","unit_comm_discount_gt_200","permaplate","nitro_fill","pulse",
               "finance_non_subvented","warranty","tire_wheel","hourly_rate_ny_offset",
               "new_volume_bonus_15_16","new_volume_bonus_17_18","new_volume_bonus_19_20",

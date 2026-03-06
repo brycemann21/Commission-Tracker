@@ -163,12 +163,12 @@ class Settings(Base):
     quarterly_bonus_threshold_units: Mapped[int] = mapped_column(Integer, default=60)
     quarterly_bonus_amount: Mapped[float] = mapped_column(Float, default=750.0)
 
-    # Pay structure type: flat | gross | hybrid
+    # Pay structure type: hybrid only ($150/unit + 7% back-end F&I)
     pay_type: Mapped[str] = mapped_column(String(16), default="hybrid")
-    gross_front_pct: Mapped[float] = mapped_column(Float, default=0.0)   # e.g. 20.0 = 20%
-    gross_back_pct: Mapped[float] = mapped_column(Float, default=7.0)    # e.g. 7.0 = 7%
-    mini_deal: Mapped[float] = mapped_column(Float, default=0.0)         # minimum commission per deal
-    pack_deduction: Mapped[float] = mapped_column(Float, default=0.0)    # deducted from gross before calc
+    gross_front_pct: Mapped[float] = mapped_column(Float, default=0.0)   # not used in hybrid
+    gross_back_pct: Mapped[float] = mapped_column(Float, default=7.0)    # 7% of back-end F&I gross
+    mini_deal: Mapped[float] = mapped_column(Float, default=0.0)         # not used in hybrid
+    pack_deduction: Mapped[float] = mapped_column(Float, default=0.0)    # not used in hybrid
 
 
 # ════════════════════════════════════════════════
