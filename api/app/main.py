@@ -31,7 +31,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import select, func, or_, and_, text as sa_text
 
-from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder, Dealership, Invite, Post, PostUpvote, PollOption, PollVote, DealerProduct, DealProduct, DealerBonus, PhotoVehicle
+from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder, Dealership, Invite, Post, PostUpvote, PollOption, PollVote, DealerProduct, DealProduct, DealerBonus, PhotoVehicle, PhotoSnapshot
 from .schemas import DealIn
 from .payplan import calc_commission
 from .utils import parse_date, today
@@ -1078,6 +1078,26 @@ async def _run_startup_migrations():
                 await conn.execute("ALTER TABLE photo_vehicles ADD COLUMN IF NOT EXISTS dismissed BOOLEAN DEFAULT false")
             except Exception:
                 pass
+        except Exception:
+            pass
+
+        # 15b. Photo snapshots table (daily trend tracking)
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS photo_snapshots (
+                    id SERIAL PRIMARY KEY,
+                    dealership_id INTEGER NOT NULL,
+                    snapshot_date DATE NOT NULL,
+                    total INTEGER DEFAULT 0,
+                    needs_detail INTEGER DEFAULT 0,
+                    ready_for_photos INTEGER DEFAULT 0,
+                    done_count INTEGER DEFAULT 0,
+                    new_today INTEGER DEFAULT 0,
+                    dismissed_today INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_photo_snap_dlr_date ON photo_snapshots(dealership_id, snapshot_date)")
         except Exception:
             pass
 
@@ -4816,7 +4836,15 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
     elif tab == "not_in_csv":
         # We'll filter in Python after computing last_upload_date
         pass
-    query = query.order_by(PhotoVehicle.age_days.desc())
+    # Sort: status priority (needs_detail → ready_for_photos → done), then oldest first
+    from sqlalchemy import case as sa_case
+    status_order = sa_case(
+        (PhotoVehicle.status == "needs_detail", 1),
+        (PhotoVehicle.status == "ready_for_photos", 2),
+        (PhotoVehicle.status == "done", 3),
+        else_=4,
+    )
+    query = query.order_by(status_order, PhotoVehicle.age_days.desc())
     vehicles = (await db.execute(query)).scalars().all()
 
     # Counts
@@ -4983,6 +5011,26 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
 
     await db.commit()
 
+    # Record daily snapshot for trend tracking
+    try:
+        all_v = (await db.execute(
+            select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == False)
+        )).scalars().all()
+        snap = (await db.execute(
+            select(PhotoSnapshot).where(PhotoSnapshot.dealership_id == d_id, PhotoSnapshot.snapshot_date == today_d)
+        )).scalar_one_or_none()
+        if not snap:
+            snap = PhotoSnapshot(dealership_id=d_id, snapshot_date=today_d)
+            db.add(snap)
+        snap.total = len(all_v)
+        snap.needs_detail = sum(1 for v in all_v if v.status == "needs_detail")
+        snap.ready_for_photos = sum(1 for v in all_v if v.status == "ready_for_photos")
+        snap.done_count = sum(1 for v in all_v if v.status == "done")
+        snap.new_today = total_new
+        await db.commit()
+    except Exception:
+        pass
+
     msg = f"{files_processed} file{'s' if files_processed != 1 else ''} processed: {total_new} new, {total_updated} updated"
     if total_skipped > 0:
         msg += f", {total_skipped} skipped (dismissed)"
@@ -5028,6 +5076,44 @@ async def photos_remove(vehicle_id: int, request: Request, db: AsyncSession = De
         v.status = "done"
         await db.commit()
     return RedirectResponse(url="/photos", status_code=303)
+
+
+@app.post("/photos/bulk/status")
+async def photos_bulk_status(request: Request, new_status: str = Form(""), db: AsyncSession = Depends(get_db)):
+    """Bulk change status for selected vehicles."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+    if new_status not in ("needs_detail", "ready_for_photos", "done"):
+        return RedirectResponse(url="/photos", status_code=303)
+    form = await request.form()
+    ids = [int(v) for v in form.getlist("vehicle_ids") if v.isdigit()]
+    if ids:
+        vehicles = (await db.execute(
+            select(PhotoVehicle).where(PhotoVehicle.id.in_(ids), PhotoVehicle.dealership_id == d_id)
+        )).scalars().all()
+        for v in vehicles:
+            v.status = new_status
+        await db.commit()
+    return RedirectResponse(url="/photos", status_code=303)
+
+
+@app.post("/photos/bulk/not-in-csv-done")
+async def photos_bulk_not_in_csv_done(request: Request, db: AsyncSession = Depends(get_db)):
+    """Move all 'Not in CSV' vehicles to Done."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+    all_v = (await db.execute(
+        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == False)
+    )).scalars().all()
+    last_upload = max((v.last_seen_date for v in all_v if v.last_seen_date), default=None)
+    if last_upload:
+        count = 0
+        for v in all_v:
+            if v.last_seen_date and v.last_seen_date < last_upload:
+                v.status = "done"
+                count += 1
+        await db.commit()
+    return RedirectResponse(url="/photos?msg=Moved+to+Done&msg_type=success", status_code=303)
 
 
 @app.get("/photos/pdf/{list_type}")

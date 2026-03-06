@@ -13,7 +13,7 @@
 
 <h1 class="text-xl font-bold mb-1">{{ "Edit Deal" if deal else "New Deal" }}</h1>
 <div class="text-sm text-slate-500 mb-4">
-  ${{ "{:,.0f}".format(settings.unit_comm_discount_le_200) }} per unit + {{ settings.gross_back_pct }}% of back-end F&amp;I gross + add-ons.
+  ${{ "{:,.0f}".format(settings.unit_comm_discount_le_200) }} per unit + {{ settings.gross_back_pct }}% of back-end F&amp;I gross + aim $ + trade hold.
 </div>
 
 <form id="dealForm" class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4" method="post" action="/deals/save">
@@ -171,7 +171,8 @@
 
 
   <div class="mt-5">
-    <div class="font-bold mb-2 dark:text-white">Products Sold</div>
+    <div class="font-bold mb-1 dark:text-white">Products Sold</div>
+    <div class="text-xs text-slate-400 dark:text-slate-500 mb-2">Tracked for closing rates — does not affect commission</div>
     {% if products is defined and products|length > 0 %}
     <div class="grid md:grid-cols-3 gap-3">
       {% for p in products %}
@@ -212,8 +213,7 @@
 
   {% if deal %}
     <div class="mt-4 text-sm text-slate-500 dark:text-slate-400">
-      Current calc: Unit <b>${{ "{:,.0f}".format(deal.unit_comm or 0) }}</b> +
-      Add-ons <b>${{ "{:,.0f}".format(deal.add_ons or 0) }}</b> +
+      Current calc: Unit + Back-End <b>${{ "{:,.0f}".format(deal.unit_comm or 0) }}</b> +
       Trade Hold <b>${{ "{:,.0f}".format(deal.trade_hold_comm or 0) }}</b>
       = <b>${{ "{:,.0f}".format(deal.total_deal_comm or 0) }}</b>
     </div>
@@ -230,7 +230,6 @@
         <div class="mt-3 space-y-2 text-sm">
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Unit</span><b id="lc_unit">$0</b></div>
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Back-End {{ settings.gross_back_pct or 7 }}%</span><b id="lc_back">$0</b></div>
-          <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Add-ons</span><b id="lc_addons">$0</b></div>
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Money Held Comm</span><b id="lc_hold">$0</b></div>
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Aim $</span><b id="lc_aim">$0</b></div>
           <div class="border-t border-slate-200 dark:border-slate-600 pt-2 flex justify-between text-base">
@@ -480,15 +479,8 @@
           // Flat per-unit commission ($150)
           const unit = SETTINGS.unit_flat;
 
-          const dt = (els.dealType?.value || '').trim();
-          const autoFinNonSub = (dt === 'Finance' || dt === 'Lease');
-
+          // Products are tracked but don't affect commission
           let addons = 0;
-          if (autoFinNonSub) addons += 50;
-          document.querySelectorAll('.product-cb').forEach(function(cb) {
-            if (cb.getAttribute('data-name') === 'Finance') return;
-            if (cb.checked) addons += parseFloat(cb.getAttribute('data-comm') || '0');
-          });
 
           const holdAmt = parseFloat(els.hold?.value || '0') || 0;
           const holdComm = holdAmt * 0.10;

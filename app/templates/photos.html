@@ -22,6 +22,16 @@
 </div>
 {% endif %}
 
+<!-- Daily summary banner -->
+{% if last_upload_date %}
+<div class="mb-4 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 text-sm flex flex-wrap items-center gap-x-4 gap-y-1">
+  <span class="text-slate-500 dark:text-slate-400">Last upload: <b class="text-slate-700 dark:text-slate-200">{{ last_upload_date.strftime('%b %-d, %Y') }}</b></span>
+  {% if new_today > 0 %}<span class="text-violet-600 dark:text-violet-400">{{ new_today }} new</span>{% endif %}
+  {% if not_in_csv > 0 %}<span class="text-orange-600 dark:text-orange-400">{{ not_in_csv }} dropped off</span>{% endif %}
+  <span class="text-slate-400 dark:text-slate-500">{{ total }} tracked</span>
+</div>
+{% endif %}
+
 <!-- Summary counters -->
 <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-{{ 6 if not_in_csv > 0 else 5 }} gap-3 mb-5">
   <div class="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-center">
@@ -52,9 +62,9 @@
   {% endif %}
 </div>
 
-<!-- PDF buttons -->
+<!-- Action buttons row -->
 {% if total > 0 %}
-<div class="flex gap-2 mb-5">
+<div class="flex flex-wrap gap-2 mb-5">
   <a href="/photos/pdf/detail" class="inline-flex items-center gap-1.5 px-4 py-2 rounded bg-amber-600 text-white text-sm hover:bg-amber-700 transition">
     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
     Detail List PDF ({{ needs_detail }})
@@ -63,15 +73,24 @@
     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
     Photo List PDF ({{ ready_for_photos }})
   </a>
+  {% if not_in_csv > 0 %}
+  <form method="post" action="/photos/bulk/not-in-csv-done" class="inline" onsubmit="return confirm('Move all {{ not_in_csv }} vehicles not in CSV to Done?')">
+    {{ csrf_hidden|safe }}
+    <button class="inline-flex items-center gap-1.5 px-4 py-2 rounded bg-orange-600 text-white text-sm hover:bg-orange-700 transition">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+      Move Not in CSV → Done ({{ not_in_csv }})
+    </button>
+  </form>
+  {% endif %}
 </div>
 {% endif %}
 
 <!-- Filter tabs + Search -->
 <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
-  <div class="flex gap-1 border-b border-slate-200 dark:border-slate-700">
+  <div class="flex gap-1 border-b border-slate-200 dark:border-slate-700 overflow-x-auto">
     {% set tab = current_tab or 'all' %}
     {% for t, label, cnt in [('all','All',total),('needs_detail','Needs Detail',needs_detail),('ready_for_photos','Ready for Photos',ready_for_photos),('done','Done',done),('not_in_csv','Not in CSV',not_in_csv)] %}
-    <a href="/photos?tab={{ t }}{% if search %}&q={{ search }}{% endif %}" class="px-3 py-2 text-sm border-b-2 transition {{ 'border-slate-900 dark:border-indigo-400 text-slate-900 dark:text-white font-semibold' if tab == t else 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300' }}">
+    <a href="/photos?tab={{ t }}{% if search %}&q={{ search }}{% endif %}" class="px-3 py-2 text-sm border-b-2 transition whitespace-nowrap {{ 'border-slate-900 dark:border-indigo-400 text-slate-900 dark:text-white font-semibold' if tab == t else 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300' }}">
       {{ label }} <span class="text-xs">({{ cnt }})</span>
     </a>
     {% endfor %}
@@ -89,95 +108,85 @@
   </form>
 </div>
 
-<!-- Vehicle table -->
+<!-- Vehicle table with bulk actions -->
 {% if vehicles|length > 0 %}
-<div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 overflow-x-auto">
-  <table class="w-full text-sm">
-    <thead>
-      <tr class="bg-slate-50 dark:bg-slate-900/50 text-left text-xs text-slate-500 dark:text-slate-400 uppercase">
-        <th class="px-4 py-3">Stock #</th>
-        <th class="px-4 py-3">Year / Make / Model</th>
-        <th class="px-4 py-3 text-center">Age</th>
-        <th class="px-4 py-3 text-center">Status</th>
-        <th class="px-4 py-3">Notes</th>
-        <th class="px-4 py-3 text-center w-20">Remove</th>
-      </tr>
-    </thead>
-    <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
-      {% for v in vehicles %}
-      <tr class="{{ 'bg-red-50 dark:bg-red-900/10' if v.age_days >= 30 else '' }}">
-        <td class="px-4 py-3 font-mono font-medium dark:text-white">
-          {{ v.stock_num }}
-          {% if v.first_seen_date and v.first_seen_date == today_date %}
-          <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300">NEW</span>
-          {% elif last_upload_date and v.last_seen_date and v.last_seen_date < last_upload_date %}
-          <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300">NOT IN CSV</span>
-          {% endif %}
-        </td>
-        <td class="px-4 py-3 dark:text-slate-200">{{ v.year_make_model }}</td>
-        <td class="px-4 py-3 text-center {{ 'text-red-600 dark:text-red-400 font-bold' if v.age_days >= 30 else 'dark:text-slate-300' }}">{{ v.age_days }}d</td>
-        <td class="px-4 py-3 text-center">
-          <div class="inline-flex items-center gap-1">
-            {% if v.status == 'needs_detail' %}
-            <form method="post" action="/photos/{{ v.id }}/status" class="inline">
-              {{ csrf_hidden|safe }}
-              <input type="hidden" name="new_status" value="ready_for_photos">
-              <button class="px-2.5 py-1 rounded text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/60 transition" title="Click to mark Ready for Photos">
-                Needs Detail →
-              </button>
-            </form>
-            {% elif v.status == 'ready_for_photos' %}
-            <form method="post" action="/photos/{{ v.id }}/status" class="inline">
-              {{ csrf_hidden|safe }}
-              <input type="hidden" name="new_status" value="needs_detail">
-              <button class="px-1.5 py-1 rounded text-xs text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:text-amber-400 dark:hover:bg-amber-900/30 transition" title="Undo → back to Needs Detail">
-                ←
-              </button>
-            </form>
-            <form method="post" action="/photos/{{ v.id }}/status" class="inline">
-              {{ csrf_hidden|safe }}
-              <input type="hidden" name="new_status" value="done">
-              <button class="px-2.5 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/60 transition" title="Click to mark Done">
-                Ready for Photos →
-              </button>
-            </form>
-            {% else %}
-            <form method="post" action="/photos/{{ v.id }}/status" class="inline">
-              {{ csrf_hidden|safe }}
-              <input type="hidden" name="new_status" value="ready_for_photos">
-              <button class="px-1.5 py-1 rounded text-xs text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:text-blue-400 dark:hover:bg-blue-900/30 transition" title="Undo → back to Ready for Photos">
-                ←
-              </button>
-            </form>
-            <form method="post" action="/photos/{{ v.id }}/status" class="inline">
-              {{ csrf_hidden|safe }}
-              <input type="hidden" name="new_status" value="done">
-              <button class="px-2.5 py-1 rounded text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 transition">
-                Done ✓
-              </button>
-            </form>
+<form method="post" action="/photos/bulk/status" id="bulkForm">
+  {{ csrf_hidden|safe }}
+  <input type="hidden" name="new_status" value="" id="bulkStatus">
+
+  <!-- Bulk action bar (hidden until checkboxes selected) -->
+  <div class="hidden mb-3 rounded border border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 px-4 py-2.5 flex items-center gap-3" id="bulkBar">
+    <span class="text-sm text-indigo-700 dark:text-indigo-300"><b id="bulkCount">0</b> selected</span>
+    <button type="submit" onclick="document.getElementById('bulkStatus').value='needs_detail'" class="px-3 py-1 rounded text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 transition">→ Needs Detail</button>
+    <button type="submit" onclick="document.getElementById('bulkStatus').value='ready_for_photos'" class="px-3 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 transition">→ Ready for Photos</button>
+    <button type="submit" onclick="document.getElementById('bulkStatus').value='done'" class="px-3 py-1 rounded text-xs font-medium bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition">→ Done</button>
+    <button type="button" onclick="toggleAll(false)" class="ml-auto text-xs text-slate-400 hover:text-slate-600">Deselect all</button>
+  </div>
+
+  <div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="bg-slate-50 dark:bg-slate-900/50 text-left text-xs text-slate-500 dark:text-slate-400 uppercase">
+          <th class="px-3 py-3 w-8"><input type="checkbox" id="selectAll" onchange="toggleAll(this.checked)" class="h-3.5 w-3.5"></th>
+          <th class="px-3 py-3">Stock #</th>
+          <th class="px-3 py-3">Year / Make / Model</th>
+          <th class="px-3 py-3 text-center">Age</th>
+          <th class="px-3 py-3 text-center">Status</th>
+          <th class="px-3 py-3">Notes</th>
+          <th class="px-3 py-3 text-center w-16">Remove</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+        {% for v in vehicles %}
+        <tr class="{{ 'bg-red-50 dark:bg-red-900/10' if v.age_days >= 30 else '' }}">
+          <td class="px-3 py-3"><input type="checkbox" name="vehicle_ids" value="{{ v.id }}" class="bulk-cb h-3.5 w-3.5" onchange="updateBulkBar()"></td>
+          <td class="px-3 py-3 font-mono font-medium dark:text-white">
+            {{ v.stock_num }}
+            {% if v.first_seen_date and v.first_seen_date == today_date %}
+            <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300">NEW</span>
+            {% elif last_upload_date and v.last_seen_date and v.last_seen_date < last_upload_date %}
+            <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300">NOT IN CSV</span>
             {% endif %}
-          </div>
-        </td>
-        <td class="px-4 py-2">
-          <form method="post" action="/photos/{{ v.id }}/note" class="flex gap-1">
-            {{ csrf_hidden|safe }}
-            <input type="text" name="notes" value="{{ v.notes or '' }}" placeholder="Add note…"
-                   class="flex-1 min-w-0 border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-xs focus:outline-none focus:border-indigo-400">
-            <button class="text-xs text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition px-1">Save</button>
-          </form>
-        </td>
-        <td class="px-4 py-3 text-center">
-          <form method="post" action="/photos/{{ v.id }}/remove" class="inline" onsubmit="return confirm('Remove {{ v.stock_num }}?')">
-            {{ csrf_hidden|safe }}
-            <button class="text-xs text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 transition">✕</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+          </td>
+          <td class="px-3 py-3 dark:text-slate-200">{{ v.year_make_model }}</td>
+          <td class="px-3 py-3 text-center {{ 'text-red-600 dark:text-red-400 font-bold' if v.age_days >= 30 else 'dark:text-slate-300' }}">{{ v.age_days }}d</td>
+          <td class="px-3 py-3 text-center">
+            <div class="inline-flex items-center gap-1">
+              {% if v.status == 'needs_detail' %}
+              <a href="/photos/{{ v.id }}/status?new_status=ready_for_photos" onclick="event.preventDefault();fetch('/photos/{{ v.id }}/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'new_status=ready_for_photos&csrf_token={{ csrf_token }}'}).then(()=>location.reload())" class="px-2.5 py-1 rounded text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/60 transition cursor-pointer" title="Click to mark Ready for Photos">
+                Needs Detail →
+              </a>
+              {% elif v.status == 'ready_for_photos' %}
+              <a href="#" onclick="event.preventDefault();fetch('/photos/{{ v.id }}/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'new_status=needs_detail&csrf_token={{ csrf_token }}'}).then(()=>location.reload())" class="px-1.5 py-1 rounded text-xs text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:text-amber-400 dark:hover:bg-amber-900/30 transition cursor-pointer" title="Undo → back to Needs Detail">←</a>
+              <a href="#" onclick="event.preventDefault();fetch('/photos/{{ v.id }}/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'new_status=done&csrf_token={{ csrf_token }}'}).then(()=>location.reload())" class="px-2.5 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/60 transition cursor-pointer" title="Click to mark Done">
+                Ready for Photos →
+              </a>
+              {% else %}
+              <a href="#" onclick="event.preventDefault();fetch('/photos/{{ v.id }}/status',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'new_status=ready_for_photos&csrf_token={{ csrf_token }}'}).then(()=>location.reload())" class="px-1.5 py-1 rounded text-xs text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:text-blue-400 dark:hover:bg-blue-900/30 transition cursor-pointer" title="Undo → back to Ready for Photos">←</a>
+              <span class="px-2.5 py-1 rounded text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">Done ✓</span>
+              {% endif %}
+            </div>
+          </td>
+          <td class="px-3 py-2">
+            <form method="post" action="/photos/{{ v.id }}/note" class="flex gap-1">
+              {{ csrf_hidden|safe }}
+              <input type="text" name="notes" value="{{ v.notes or '' }}" placeholder="Add note…"
+                     class="flex-1 min-w-0 border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-xs focus:outline-none focus:border-indigo-400">
+              <button class="text-xs text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition px-1">Save</button>
+            </form>
+          </td>
+          <td class="px-3 py-3 text-center">
+            <form method="post" action="/photos/{{ v.id }}/remove" class="inline" onsubmit="return confirm('Remove {{ v.stock_num }}?')">
+              {{ csrf_hidden|safe }}
+              <button class="text-xs text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 transition">✕</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</form>
 {% else %}
 <div class="text-center py-16 text-slate-400 dark:text-slate-500">
   <svg class="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><circle cx="12" cy="13" r="3"/></svg>
@@ -185,5 +194,20 @@
   <div class="text-sm">Upload a CSV of vehicles with &lt;26 photos to get started.</div>
 </div>
 {% endif %}
+
+<script>
+function updateBulkBar() {
+  const checked = document.querySelectorAll('.bulk-cb:checked').length;
+  const bar = document.getElementById('bulkBar');
+  document.getElementById('bulkCount').textContent = checked;
+  bar.classList.toggle('hidden', checked === 0);
+  bar.classList.toggle('flex', checked > 0);
+}
+function toggleAll(on) {
+  document.querySelectorAll('.bulk-cb').forEach(cb => cb.checked = on);
+  document.getElementById('selectAll').checked = on;
+  updateBulkBar();
+}
+</script>
 
 {% endblock %}

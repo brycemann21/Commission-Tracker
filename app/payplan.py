@@ -9,8 +9,10 @@ def calc_commission(deal: DealIn, settings: Settings):
 
     Pay structure: $150 flat per New & Used unit sold
                  + 7% of back-end F&I gross on each unit sold
-                 + add-on product commissions
                  + trade hold commission (10% of hold amount)
+                 + aim $ (added separately in the save handler)
+
+    Products and deal type are tracked but do NOT affect commission.
     """
     if not deal.customer:
         return 0.0, 0.0, 0.0, 0.0
@@ -23,17 +25,8 @@ def calc_commission(deal: DealIn, settings: Settings):
     back_pct = getattr(settings, "gross_back_pct", 7.0) or 0.0
     back_comm = back * (back_pct / 100.0)
 
-    # Legacy add-on commissions (kept for backward compat, but custom products are primary)
-    addons = sum(
-        getattr(settings, field) for field, flag in [
-            ("permaplate", deal.permaplate),
-            ("nitro_fill", deal.nitro_fill),
-            ("pulse", deal.pulse),
-            ("finance_non_subvented", deal.finance_non_subvented),
-            ("warranty", deal.warranty),
-            ("tire_wheel", deal.tire_wheel),
-        ] if flag
-    )
+    # No add-on product commissions — products are tracked but don't pay
+    addons = 0.0
 
     # Trade hold: 10% of hold amount
     trade_hold = (deal.hold_amount or 0.0) * 0.10

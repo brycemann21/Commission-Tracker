@@ -383,3 +383,23 @@ class PhotoVehicle(Base):
     first_seen_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     last_seen_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+# ════════════════════════════════════════════════
+# PHOTO TRACKER — daily snapshots for trend tracking
+# ════════════════════════════════════════════════
+
+class PhotoSnapshot(Base):
+    """Daily snapshot of photo tracker counts for trend charts.
+    One row per day, recorded on each CSV upload."""
+    __tablename__ = "photo_snapshots"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dealership_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot_date: Mapped[Date] = mapped_column(Date, nullable=False)
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    needs_detail: Mapped[int] = mapped_column(Integer, default=0)
+    ready_for_photos: Mapped[int] = mapped_column(Integer, default=0)
+    done_count: Mapped[int] = mapped_column(Integer, default=0)
+    new_today: Mapped[int] = mapped_column(Integer, default=0)
+    dismissed_today: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
