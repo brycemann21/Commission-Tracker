@@ -168,18 +168,14 @@
             </div>
           </td>
           <td class="px-3 py-2">
-            <form method="post" action="/photos/{{ v.id }}/note" class="flex gap-1">
-              {{ csrf_hidden|safe }}
-              <input type="text" name="notes" value="{{ v.notes or '' }}" placeholder="Add note…"
+            <div class="flex gap-1">
+              <input type="text" id="note_{{ v.id }}" value="{{ v.notes or '' }}" placeholder="Add note…"
                      class="flex-1 min-w-0 border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-xs focus:outline-none focus:border-indigo-400">
-              <button class="text-xs text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition px-1">Save</button>
-            </form>
+              <button onclick="saveNote({{ v.id }})" class="text-xs text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition px-1">Save</button>
+            </div>
           </td>
           <td class="px-3 py-3 text-center">
-            <form method="post" action="/photos/{{ v.id }}/remove" class="inline" onsubmit="return confirm('Remove {{ v.stock_num }}?')">
-              {{ csrf_hidden|safe }}
-              <button class="text-xs text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 transition">✕</button>
-            </form>
+            <button onclick="if(confirm('Remove {{ v.stock_num }}?')) removeVehicle({{ v.id }})" class="text-xs text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 transition">✕</button>
           </td>
         </tr>
         {% endfor %}
@@ -207,6 +203,25 @@ function toggleAll(on) {
   document.querySelectorAll('.bulk-cb').forEach(cb => cb.checked = on);
   document.getElementById('selectAll').checked = on;
   updateBulkBar();
+}
+function saveNote(id) {
+  const val = document.getElementById('note_' + id).value;
+  fetch('/photos/' + id + '/note', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'notes=' + encodeURIComponent(val) + '&csrf_token={{ csrf_token }}'
+  }).then(() => {
+    const btn = event.target;
+    btn.textContent = '✓';
+    setTimeout(() => btn.textContent = 'Save', 1500);
+  });
+}
+function removeVehicle(id) {
+  fetch('/photos/' + id + '/remove', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'csrf_token={{ csrf_token }}'
+  }).then(() => location.reload());
 }
 </script>
 

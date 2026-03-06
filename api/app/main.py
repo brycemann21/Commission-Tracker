@@ -5066,6 +5066,44 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
     return RedirectResponse(url=f"/photos?msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)
 
 
+@app.post("/photos/bulk/status")
+async def photos_bulk_status(request: Request, new_status: str = Form(""), db: AsyncSession = Depends(get_db)):
+    """Bulk change status for selected vehicles."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+    if new_status not in ("needs_detail", "ready_for_photos", "done"):
+        return RedirectResponse(url="/photos", status_code=303)
+    form = await request.form()
+    ids = [int(v) for v in form.getlist("vehicle_ids") if v.isdigit()]
+    if ids:
+        vehicles = (await db.execute(
+            select(PhotoVehicle).where(PhotoVehicle.id.in_(ids), PhotoVehicle.dealership_id == d_id)
+        )).scalars().all()
+        for v in vehicles:
+            v.status = new_status
+        await db.commit()
+    return RedirectResponse(url="/photos", status_code=303)
+
+
+@app.post("/photos/bulk/not-in-csv-done")
+async def photos_bulk_not_in_csv_done(request: Request, db: AsyncSession = Depends(get_db)):
+    """Move all 'Not in CSV' vehicles to Done."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+    all_v = (await db.execute(
+        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == False)
+    )).scalars().all()
+    last_upload = max((v.last_seen_date for v in all_v if v.last_seen_date), default=None)
+    if last_upload:
+        count = 0
+        for v in all_v:
+            if v.last_seen_date and v.last_seen_date < last_upload:
+                v.status = "done"
+                count += 1
+        await db.commit()
+    return RedirectResponse(url="/photos?msg=Moved+to+Done&msg_type=success", status_code=303)
+
+
 @app.post("/photos/{vehicle_id}/status")
 async def photos_update_status(vehicle_id: int, request: Request, new_status: str = Form(...), db: AsyncSession = Depends(get_db)):
     """Toggle a vehicle's status."""
@@ -5105,44 +5143,6 @@ async def photos_remove(vehicle_id: int, request: Request, db: AsyncSession = De
         v.status = "done"
         await db.commit()
     return RedirectResponse(url="/photos", status_code=303)
-
-
-@app.post("/photos/bulk/status")
-async def photos_bulk_status(request: Request, new_status: str = Form(""), db: AsyncSession = Depends(get_db)):
-    """Bulk change status for selected vehicles."""
-    _require_super_admin(request)
-    d_id = user_dealership_id(request)
-    if new_status not in ("needs_detail", "ready_for_photos", "done"):
-        return RedirectResponse(url="/photos", status_code=303)
-    form = await request.form()
-    ids = [int(v) for v in form.getlist("vehicle_ids") if v.isdigit()]
-    if ids:
-        vehicles = (await db.execute(
-            select(PhotoVehicle).where(PhotoVehicle.id.in_(ids), PhotoVehicle.dealership_id == d_id)
-        )).scalars().all()
-        for v in vehicles:
-            v.status = new_status
-        await db.commit()
-    return RedirectResponse(url="/photos", status_code=303)
-
-
-@app.post("/photos/bulk/not-in-csv-done")
-async def photos_bulk_not_in_csv_done(request: Request, db: AsyncSession = Depends(get_db)):
-    """Move all 'Not in CSV' vehicles to Done."""
-    _require_super_admin(request)
-    d_id = user_dealership_id(request)
-    all_v = (await db.execute(
-        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == False)
-    )).scalars().all()
-    last_upload = max((v.last_seen_date for v in all_v if v.last_seen_date), default=None)
-    if last_upload:
-        count = 0
-        for v in all_v:
-            if v.last_seen_date and v.last_seen_date < last_upload:
-                v.status = "done"
-                count += 1
-        await db.commit()
-    return RedirectResponse(url="/photos?msg=Moved+to+Done&msg_type=success", status_code=303)
 
 
 @app.get("/photos/pdf/{list_type}")
