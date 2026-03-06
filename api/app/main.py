@@ -31,7 +31,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import select, func, or_, and_, text as sa_text
 
-from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder, Dealership, Invite, Post, PostUpvote, PollOption, PollVote, DealerProduct, DealProduct, DealerBonus
+from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder, Dealership, Invite, Post, PostUpvote, PollOption, PollVote, DealerProduct, DealProduct, DealerBonus, PhotoVehicle
 from .schemas import DealIn
 from .payplan import calc_commission
 from .utils import parse_date, today
@@ -1052,6 +1052,27 @@ async def _run_startup_migrations():
 
                 # Delete ALL old dealer_bonuses so they re-seed with new tiers
                 await conn.execute("DELETE FROM dealer_bonuses")
+        except Exception:
+            pass
+
+        # 15. Photo tracker table
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS photo_vehicles (
+                    id SERIAL PRIMARY KEY,
+                    dealership_id INTEGER NOT NULL,
+                    stock_num VARCHAR(40) NOT NULL,
+                    year_make_model VARCHAR(200) DEFAULT '',
+                    age_days INTEGER DEFAULT 0,
+                    status VARCHAR(24) DEFAULT 'needs_detail',
+                    notes TEXT DEFAULT '',
+                    first_seen_date DATE,
+                    last_seen_date DATE,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_photo_vehicles_dlr ON photo_vehicles(dealership_id)")
+            await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_photo_vehicles_stock ON photo_vehicles(dealership_id, stock_num)")
         except Exception:
             pass
 
@@ -4660,6 +4681,280 @@ async def admin_verify_user(user_id: int, request: Request, db: AsyncSession = D
     if target and target.dealership_id:
         return RedirectResponse(url=f"/admin/dealership/{target.dealership_id}", status_code=303)
     return RedirectResponse(url="/admin", status_code=303)
+
+
+# ════════════════════════════════════════════════
+# PHOTO TRACKER — vehicles needing photos
+# ════════════════════════════════════════════════
+
+@app.get("/photos", response_class=HTMLResponse)
+async def photos_page(request: Request, tab: str = "all", db: AsyncSession = Depends(get_db)):
+    """Photo tracker board — upload CSV, triage vehicles, generate PDFs."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+    if not d_id:
+        return RedirectResponse(url="/", status_code=303)
+
+    # Query all vehicles
+    q = select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id)
+    if tab == "needs_detail":
+        q = q.where(PhotoVehicle.status == "needs_detail")
+    elif tab == "ready_for_photos":
+        q = q.where(PhotoVehicle.status == "ready_for_photos")
+    elif tab == "done":
+        q = q.where(PhotoVehicle.status == "done")
+    q = q.order_by(PhotoVehicle.age_days.desc())
+    vehicles = (await db.execute(q)).scalars().all()
+
+    # Counts
+    all_vehicles = (await db.execute(
+        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id)
+    )).scalars().all()
+    total = len(all_vehicles)
+    needs_detail = sum(1 for v in all_vehicles if v.status == "needs_detail")
+    ready = sum(1 for v in all_vehicles if v.status == "ready_for_photos")
+    done_count = sum(1 for v in all_vehicles if v.status == "done")
+    new_today = sum(1 for v in all_vehicles if v.first_seen_date == today())
+
+    msg = request.query_params.get("msg", "")
+    msg_type = request.query_params.get("msg_type", "success")
+
+    return templates.TemplateResponse("photos.html", {
+        "request": request,
+        "user": await _user(request, db),
+        "vehicles": vehicles,
+        "total": total,
+        "needs_detail": needs_detail,
+        "ready_for_photos": ready,
+        "done": done_count,
+        "new_today": new_today,
+        "today_date": today(),
+        "current_tab": tab,
+        "message": msg,
+        "msg_type": msg_type,
+        "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+        "has_new_posts": await get_new_community_posts(db, uid(request)),
+    })
+
+
+@app.post("/photos/upload")
+async def photos_upload(request: Request, csv_file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+    """Upload a CSV of vehicles with <26 photos. Cross-references with existing data."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+    if not d_id:
+        return RedirectResponse(url="/photos", status_code=303)
+
+    import csv as _csv_mod
+    import io
+
+    try:
+        content = (await csv_file.read()).decode("utf-8-sig")
+        reader = _csv_mod.DictReader(io.StringIO(content))
+
+        # Normalize column names
+        if not reader.fieldnames:
+            return RedirectResponse(url="/photos?msg=Empty+CSV&msg_type=error", status_code=303)
+
+        def _find_col(names, candidates):
+            for n in names:
+                nl = n.strip().lower().replace(" ", "_").replace("#", "")
+                for c in candidates:
+                    if c in nl:
+                        return n
+            return None
+
+        col_stock = _find_col(reader.fieldnames, ["stock", "stk", "stck"])
+        col_ymm = _find_col(reader.fieldnames, ["year_make_model", "year/make/model", "vehicle", "ymm", "description"])
+        col_age = _find_col(reader.fieldnames, ["age", "days_in_stock", "days", "dis", "day"])
+
+        if not col_stock:
+            return RedirectResponse(url="/photos?msg=Could+not+find+Stock+column+in+CSV&msg_type=error", status_code=303)
+
+        # Load existing vehicles into a dict by stock_num
+        existing = (await db.execute(
+            select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id)
+        )).scalars().all()
+        existing_map = {v.stock_num.strip().upper(): v for v in existing}
+
+        csv_stock_nums = set()
+        new_count = 0
+        updated_count = 0
+        today_d = today()
+
+        for row in reader:
+            stock = (row.get(col_stock, "") or "").strip().upper()
+            if not stock:
+                continue
+
+            ymm = (row.get(col_ymm, "") or "").strip() if col_ymm else ""
+            try:
+                age = int(float((row.get(col_age, "") or "0").strip().replace(",", "") or "0"))
+            except (ValueError, TypeError):
+                age = 0
+
+            csv_stock_nums.add(stock)
+
+            if stock in existing_map:
+                # Update existing
+                v = existing_map[stock]
+                v.year_make_model = ymm or v.year_make_model
+                v.age_days = age
+                v.last_seen_date = today_d
+                updated_count += 1
+            else:
+                # New vehicle
+                db.add(PhotoVehicle(
+                    dealership_id=d_id,
+                    stock_num=stock,
+                    year_make_model=ymm,
+                    age_days=age,
+                    status="needs_detail",
+                    first_seen_date=today_d,
+                    last_seen_date=today_d,
+                ))
+                new_count += 1
+
+        # Vehicles NOT in today's CSV → move to done (if not already)
+        auto_done = 0
+        for stock, v in existing_map.items():
+            if stock not in csv_stock_nums and v.status != "done":
+                v.status = "done"
+                auto_done += 1
+
+        await db.commit()
+
+        msg = f"Uploaded: {new_count} new, {updated_count} updated"
+        if auto_done > 0:
+            msg += f", {auto_done} completed (not in CSV)"
+        return RedirectResponse(url=f"/photos?msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)
+
+    except Exception as e:
+        return RedirectResponse(url=f"/photos?msg=Error:+{str(e)[:80].replace(' ', '+')}&msg_type=error", status_code=303)
+
+
+@app.post("/photos/{vehicle_id}/status")
+async def photos_update_status(vehicle_id: int, request: Request, new_status: str = Form(...), db: AsyncSession = Depends(get_db)):
+    """Toggle a vehicle's status."""
+    _require_super_admin(request)
+    v = (await db.execute(
+        select(PhotoVehicle).where(PhotoVehicle.id == vehicle_id, PhotoVehicle.dealership_id == user_dealership_id(request))
+    )).scalar_one_or_none()
+    if v and new_status in ("needs_detail", "ready_for_photos", "done"):
+        v.status = new_status
+        await db.commit()
+    tab = request.query_params.get("tab", "all")
+    return RedirectResponse(url=f"/photos?tab={tab}", status_code=303)
+
+
+@app.post("/photos/{vehicle_id}/note")
+async def photos_update_note(vehicle_id: int, request: Request, notes: str = Form(""), db: AsyncSession = Depends(get_db)):
+    """Update notes on a vehicle."""
+    _require_super_admin(request)
+    v = (await db.execute(
+        select(PhotoVehicle).where(PhotoVehicle.id == vehicle_id, PhotoVehicle.dealership_id == user_dealership_id(request))
+    )).scalar_one_or_none()
+    if v:
+        v.notes = notes.strip()[:500]
+        await db.commit()
+    return RedirectResponse(url="/photos", status_code=303)
+
+
+@app.post("/photos/{vehicle_id}/remove")
+async def photos_remove(vehicle_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Manually remove a vehicle from the board."""
+    _require_super_admin(request)
+    v = (await db.execute(
+        select(PhotoVehicle).where(PhotoVehicle.id == vehicle_id, PhotoVehicle.dealership_id == user_dealership_id(request))
+    )).scalar_one_or_none()
+    if v:
+        await db.delete(v)
+        await db.commit()
+    return RedirectResponse(url="/photos", status_code=303)
+
+
+@app.get("/photos/pdf/{list_type}")
+async def photos_pdf(list_type: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Generate a PDF checklist for detail or photo list."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+
+    if list_type == "detail":
+        status_filter = "needs_detail"
+        title = "Detail Checklist"
+    else:
+        status_filter = "ready_for_photos"
+        title = "Photo Checklist"
+
+    vehicles = (await db.execute(
+        select(PhotoVehicle).where(
+            PhotoVehicle.dealership_id == d_id,
+            PhotoVehicle.status == status_filter,
+        ).order_by(PhotoVehicle.age_days.desc())
+    )).scalars().all()
+
+    # Generate PDF using reportlab
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import inch
+    import tempfile
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    doc = SimpleDocTemplate(tmp.name, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+    styles = getSampleStyleSheet()
+    story = []
+
+    # Title
+    story.append(Paragraph(f"{title} — {today().strftime('%m/%d/%Y')}", styles['Title']))
+    story.append(Paragraph(f"{len(vehicles)} vehicles", styles['Normal']))
+    story.append(Spacer(1, 12))
+
+    if vehicles:
+        # Table header
+        data = [["☐", "Stock #", "Year / Make / Model", "Age"]]
+        for v in vehicles:
+            age_str = f"{v.age_days}d"
+            notes_str = f" — {v.notes}" if v.notes else ""
+            data.append(["☐", v.stock_num, f"{v.year_make_model}{notes_str}", age_str])
+
+        t = Table(data, colWidths=[0.4*inch, 1.2*inch, 4.5*inch, 0.7*inch])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e293b')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('FONTSIZE', (0, 0), (0, -1), 14),
+            ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+            ('ALIGN', (3, 0), (3, -1), 'CENTER'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+
+        # Highlight 30+ day vehicles in red
+        for i, v in enumerate(vehicles, start=1):
+            if v.age_days >= 30:
+                t.setStyle(TableStyle([
+                    ('BACKGROUND', (0, i), (-1, i), colors.HexColor('#fef2f2')),
+                    ('TEXTCOLOR', (3, i), (3, i), colors.HexColor('#dc2626')),
+                    ('FONTNAME', (3, i), (3, i), 'Helvetica-Bold'),
+                ]))
+
+        story.append(t)
+    else:
+        story.append(Paragraph("No vehicles in this list.", styles['Normal']))
+
+    doc.build(story)
+
+    from starlette.responses import FileResponse
+    filename = f"{list_type}_checklist_{today().strftime('%Y%m%d')}.pdf"
+    return FileResponse(tmp.name, media_type="application/pdf", filename=filename)
 
 
 # ════════════════════════════════════════════════

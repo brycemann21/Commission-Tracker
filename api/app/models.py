@@ -360,3 +360,24 @@ class PollVote(Base):
     option_id: Mapped[int] = mapped_column(Integer, nullable=False)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+# ════════════════════════════════════════════════
+# PHOTO TRACKER — vehicles needing photos
+# ════════════════════════════════════════════════
+
+class PhotoVehicle(Base):
+    """A vehicle that needs professional photos (<26 photos on website).
+    Imported daily via CSV. Status tracks the detail→photo→done pipeline."""
+    __tablename__ = "photo_vehicles"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dealership_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    stock_num: Mapped[str] = mapped_column(String(40), nullable=False)
+    year_make_model: Mapped[str] = mapped_column(String(200), default="")
+    age_days: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(24), default="needs_detail")
+    # needs_detail | ready_for_photos | done
+    notes: Mapped[str] = mapped_column(Text, default="")
+    first_seen_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
+    last_seen_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
