@@ -377,6 +377,8 @@ class PhotoVehicle(Base):
     age_days: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(24), default="needs_detail")
     # needs_detail | ready_for_photos | done
+    dismissed: Mapped[bool] = mapped_column(Boolean, default=False)
+    # dismissed = removed from board, CSV upload will skip it
     notes: Mapped[str] = mapped_column(Text, default="")
     first_seen_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     last_seen_date: Mapped[Date | None] = mapped_column(Date, nullable=True)

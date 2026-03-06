@@ -1073,6 +1073,11 @@ async def _run_startup_migrations():
             """)
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_photo_vehicles_dlr ON photo_vehicles(dealership_id)")
             await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_photo_vehicles_stock ON photo_vehicles(dealership_id, stock_num)")
+            # Add dismissed column if missing
+            try:
+                await conn.execute("ALTER TABLE photo_vehicles ADD COLUMN IF NOT EXISTS dismissed BOOLEAN DEFAULT false")
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -4787,27 +4792,33 @@ async def admin_verify_user(user_id: int, request: Request, db: AsyncSession = D
 # ════════════════════════════════════════════════
 
 @app.get("/photos", response_class=HTMLResponse)
-async def photos_page(request: Request, tab: str = "all", db: AsyncSession = Depends(get_db)):
+async def photos_page(request: Request, tab: str = "all", q: str = "", db: AsyncSession = Depends(get_db)):
     """Photo tracker board — upload CSV, triage vehicles, generate PDFs."""
     _require_super_admin(request)
     d_id = user_dealership_id(request)
     if not d_id:
         return RedirectResponse(url="/", status_code=303)
 
-    # Query all vehicles
-    q = select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__')
+    search = q.strip().upper() if q else ""
+
+    # Query vehicles with optional search and tab filter
+    query = select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == False)
+    if search:
+        query = query.where(
+            (PhotoVehicle.stock_num.ilike(f"%{search}%")) | (PhotoVehicle.year_make_model.ilike(f"%{search}%"))
+        )
     if tab == "needs_detail":
-        q = q.where(PhotoVehicle.status == "needs_detail")
+        query = query.where(PhotoVehicle.status == "needs_detail")
     elif tab == "ready_for_photos":
-        q = q.where(PhotoVehicle.status == "ready_for_photos")
+        query = query.where(PhotoVehicle.status == "ready_for_photos")
     elif tab == "done":
-        q = q.where(PhotoVehicle.status == "done")
-    q = q.order_by(PhotoVehicle.age_days.desc())
-    vehicles = (await db.execute(q)).scalars().all()
+        query = query.where(PhotoVehicle.status == "done")
+    query = query.order_by(PhotoVehicle.age_days.desc())
+    vehicles = (await db.execute(query)).scalars().all()
 
     # Counts
     all_vehicles = (await db.execute(
-        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__')
+        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == False)
     )).scalars().all()
     total = len(all_vehicles)
     needs_detail = sum(1 for v in all_vehicles if v.status == "needs_detail")
@@ -4829,6 +4840,7 @@ async def photos_page(request: Request, tab: str = "all", db: AsyncSession = Dep
         "new_today": new_today,
         "today_date": today(),
         "current_tab": tab,
+        "search": search,
         "message": msg,
         "msg_type": msg_type,
         "overdue_reminders": await get_overdue_reminders(db, uid(request)),
@@ -4857,12 +4869,19 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
 
     # Load existing vehicles into a dict by stock_num
     existing = (await db.execute(
-        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__')
+        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == False)
     )).scalars().all()
     existing_map = {v.stock_num.strip().upper(): v for v in existing}
 
+    # Load dismissed stock numbers so we don't re-add them
+    dismissed = (await db.execute(
+        select(PhotoVehicle.stock_num).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.dismissed == True)
+    )).scalars().all()
+    dismissed_set = {s.strip().upper() for s in dismissed}
+
     total_new = 0
     total_updated = 0
+    total_skipped = 0
     files_processed = 0
     today_d = today()
 
@@ -4915,6 +4934,11 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
                 except (ValueError, TypeError):
                     age = 0
 
+                # Skip dismissed vehicles — they were manually removed
+                if stock in dismissed_set:
+                    total_skipped += 1
+                    continue
+
                 if stock in existing_map:
                     # Update existing — keep the higher age if already seen today
                     v = existing_map[stock]
@@ -4947,6 +4971,8 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
     await db.commit()
 
     msg = f"{files_processed} file{'s' if files_processed != 1 else ''} processed: {total_new} new, {total_updated} updated"
+    if total_skipped > 0:
+        msg += f", {total_skipped} skipped (dismissed)"
     return RedirectResponse(url=f"/photos?msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)
 
 
@@ -4979,13 +5005,14 @@ async def photos_update_note(vehicle_id: int, request: Request, notes: str = For
 
 @app.post("/photos/{vehicle_id}/remove")
 async def photos_remove(vehicle_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    """Manually remove a vehicle from the board."""
+    """Dismiss a vehicle from the board — CSV uploads will skip it going forward."""
     _require_super_admin(request)
     v = (await db.execute(
         select(PhotoVehicle).where(PhotoVehicle.id == vehicle_id, PhotoVehicle.dealership_id == user_dealership_id(request))
     )).scalar_one_or_none()
     if v:
-        await db.delete(v)
+        v.dismissed = True
+        v.status = "done"
         await db.commit()
     return RedirectResponse(url="/photos", status_code=303)
 
@@ -5007,7 +5034,7 @@ async def photos_pdf(list_type: str, request: Request, db: AsyncSession = Depend
         select(PhotoVehicle).where(
             PhotoVehicle.dealership_id == d_id,
             PhotoVehicle.status == status_filter,
-            PhotoVehicle.stock_num != '__SEED_MARKER__',
+            PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == False,
         ).order_by(PhotoVehicle.age_days.desc())
     )).scalars().all()
 

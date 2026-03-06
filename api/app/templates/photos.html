@@ -60,14 +60,27 @@
 </div>
 {% endif %}
 
-<!-- Filter tabs -->
-<div class="flex gap-1 mb-4 border-b border-slate-200 dark:border-slate-700">
-  {% set tab = current_tab or 'all' %}
-  {% for t, label, cnt in [('all','All',total),('needs_detail','Needs Detail',needs_detail),('ready_for_photos','Ready for Photos',ready_for_photos),('done','Done',done)] %}
-  <a href="/photos?tab={{ t }}" class="px-3 py-2 text-sm border-b-2 transition {{ 'border-slate-900 dark:border-indigo-400 text-slate-900 dark:text-white font-semibold' if tab == t else 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300' }}">
-    {{ label }} <span class="text-xs">({{ cnt }})</span>
-  </a>
-  {% endfor %}
+<!-- Filter tabs + Search -->
+<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
+  <div class="flex gap-1 border-b border-slate-200 dark:border-slate-700">
+    {% set tab = current_tab or 'all' %}
+    {% for t, label, cnt in [('all','All',total),('needs_detail','Needs Detail',needs_detail),('ready_for_photos','Ready for Photos',ready_for_photos),('done','Done',done)] %}
+    <a href="/photos?tab={{ t }}{% if search %}&q={{ search }}{% endif %}" class="px-3 py-2 text-sm border-b-2 transition {{ 'border-slate-900 dark:border-indigo-400 text-slate-900 dark:text-white font-semibold' if tab == t else 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300' }}">
+      {{ label }} <span class="text-xs">({{ cnt }})</span>
+    </a>
+    {% endfor %}
+  </div>
+  <form method="get" action="/photos" class="flex items-center gap-2">
+    <input type="hidden" name="tab" value="{{ current_tab or 'all' }}">
+    <div class="relative">
+      <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      <input type="text" name="q" value="{{ search or '' }}" placeholder="Search stock #…"
+             class="w-44 border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-8 pr-3 py-1.5 text-sm focus:outline-none focus:border-indigo-400">
+    </div>
+    {% if search %}
+    <a href="/photos?tab={{ current_tab or 'all' }}" class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">Clear</a>
+    {% endif %}
+  </form>
 </div>
 
 <!-- Vehicle table -->
