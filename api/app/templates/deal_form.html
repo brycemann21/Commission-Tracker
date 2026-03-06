@@ -13,7 +13,14 @@
 
 <h1 class="text-xl font-bold mb-1">{{ "Edit Deal" if deal else "New Deal" }}</h1>
 <div class="text-sm text-slate-500 mb-4">
-  Matches your Excel payplan: Unit commission + add-ons + trade hold commission.
+  {% set pay_type = settings.pay_type or 'flat' %}
+  {% if pay_type == 'hybrid' %}
+  ${{ "{:,.0f}".format(settings.unit_comm_discount_le_200) }} per unit + {{ settings.gross_back_pct }}% of back-end F&amp;I gross + add-ons.
+  {% elif pay_type == 'gross' %}
+  {{ settings.gross_front_pct }}% front + {{ settings.gross_back_pct }}% back gross + add-ons.
+  {% else %}
+  Unit commission + add-ons + trade hold commission.
+  {% endif %}
 </div>
 
 <form id="dealForm" class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4" method="post" action="/deals/save">
@@ -163,8 +170,20 @@
       <label class="text-xs text-slate-500 dark:text-slate-400">Comments</label>
       <input class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="notes" value="{{ deal.notes if deal else '' }}">
     </div>
-    <input type="hidden" name="front_gross" value="0">
-    <input type="hidden" name="back_gross" value="0">
+    <input type="hidden" name="front_gross" value="{{ deal.front_gross if deal else 0 }}">
+    {% set pay_type = settings.pay_type or 'flat' %}
+    {% if pay_type in ('hybrid', 'gross') %}
+    <div>
+      <label class="text-xs text-slate-500 dark:text-slate-400">Back-End F&amp;I Gross</label>
+      <div class="relative">
+        <span class="absolute left-3 top-2.5 text-slate-400">$</span>
+        <input type="number" step="0.01" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" name="back_gross" id="back_gross_input" value="{{ deal.back_gross if deal and deal.back_gross else 0 }}">
+      </div>
+      <div class="text-xs text-slate-400 mt-1">{{ settings.gross_back_pct or 0 }}% of this goes to your commission</div>
+    </div>
+    {% else %}
+    <input type="hidden" name="back_gross" value="{{ deal.back_gross if deal else 0 }}">
+    {% endif %}
     <input type="hidden" name="actual_paid" value="">
   </div>
 
@@ -229,6 +248,9 @@
 
         <div class="mt-3 space-y-2 text-sm">
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Unit</span><b id="lc_unit">$0</b></div>
+          {% if (settings.pay_type or 'flat') in ('hybrid', 'gross') %}
+          <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Back-End {{ settings.gross_back_pct or 0 }}%</span><b id="lc_back">$0</b></div>
+          {% endif %}
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Add-ons</span><b id="lc_addons">$0</b></div>
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Money Held Comm</span><b id="lc_hold">$0</b></div>
           <div class="flex justify-between"><span class="text-slate-600 dark:text-slate-400">Aim $</span><b id="lc_aim">$0</b></div>
@@ -438,8 +460,11 @@
       // Live commission calculator (mirrors app/payplan.py)
       {
         const SETTINGS = {
+          pay_type: '{{ settings.pay_type or "flat" }}',
           unit_le: {{ settings.unit_comm_discount_le_200 or 0 }},
-          unit_gt: {{ settings.unit_comm_discount_gt_200 or 0 }}, // used below
+          unit_gt: {{ settings.unit_comm_discount_gt_200 or 0 }},
+          gross_back_pct: {{ settings.gross_back_pct or 0 }},
+          gross_front_pct: {{ settings.gross_front_pct or 0 }},
           permaplate: {{ settings.permaplate or 0 }},
           nitro_fill: {{ settings.nitro_fill or 0 }},
           pulse: {{ settings.pulse or 0 }},
@@ -461,11 +486,13 @@
           hold: $('input[name="hold_amount"]'),
           dealType: $('select[name="deal_type"]'),
           aim: $('input[name="aim_amount"]'),
+          backGross: $('input[name="back_gross"]'),
 
           outUnit: $('#lc_unit'),
           outAddons: $('#lc_addons'),
           outHold: $('#lc_hold'),
           outAim: $('#lc_aim'),
+          outBack: $('#lc_back'),
           outTotal: $('#lc_total'),
           hint: $('#lc_hint'),
         };
@@ -496,13 +523,18 @@
 
           const aimAmt = parseFloat(els.aim?.value || '0') || 0;
 
-          let total = unit + addons + holdComm + aimAmt;
+          // Back-end F&I gross commission (hybrid/gross pay types)
+          const backGross = parseFloat(els.backGross?.value || '0') || 0;
+          const backComm = backGross * (SETTINGS.gross_back_pct / 100);
+
+          let total = unit + backComm + addons + holdComm + aimAmt;
 
           // Split deal: halve the total commission
           const isSplit = document.getElementById('split_deal_cb')?.checked;
           if (isSplit) total = Math.round(total / 2);
 
           els.outUnit.textContent = fmt(unit);
+          if (els.outBack) els.outBack.textContent = fmt(backComm);
           els.outAddons.textContent = fmt(addons);
           els.outHold.textContent = fmt(holdComm);
           if (els.outAim) els.outAim.textContent = fmt(aimAmt);
@@ -517,7 +549,7 @@
         window.__ct_calc_live_comm = calc;
 
         const watch = [
-          els.customer, els.discount, els.hold, els.dealType, els.aim,
+          els.customer, els.discount, els.hold, els.dealType, els.aim, els.backGross,
         ].filter(Boolean);
 
         watch.forEach((el) => {

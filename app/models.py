@@ -130,8 +130,8 @@ class Settings(Base):
     dealership_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Commission per unit
-    unit_comm_discount_le_200: Mapped[float] = mapped_column(Float, default=190.0)
-    unit_comm_discount_gt_200: Mapped[float] = mapped_column(Float, default=140.0)
+    unit_comm_discount_le_200: Mapped[float] = mapped_column(Float, default=150.0)
+    unit_comm_discount_gt_200: Mapped[float] = mapped_column(Float, default=150.0)
 
     # Add-on commissions
     permaplate: Mapped[float] = mapped_column(Float, default=40.0)
@@ -140,33 +140,33 @@ class Settings(Base):
     finance_non_subvented: Mapped[float] = mapped_column(Float, default=40.0)
     warranty: Mapped[float] = mapped_column(Float, default=25.0)
     tire_wheel: Mapped[float] = mapped_column(Float, default=25.0)
-    hourly_rate_ny_offset: Mapped[float] = mapped_column(Float, default=15.0)
+    hourly_rate_ny_offset: Mapped[float] = mapped_column(Float, default=16.0)
 
-    # Volume bonuses (new units)
+    # Volume bonuses (total units — combined new + used)
     new_volume_bonus_15_16: Mapped[float] = mapped_column(Float, default=1000.0)
-    new_volume_bonus_17_18: Mapped[float] = mapped_column(Float, default=1200.0)
-    new_volume_bonus_19_20: Mapped[float] = mapped_column(Float, default=1500.0)
-    new_volume_bonus_21_24: Mapped[float] = mapped_column(Float, default=2000.0)
-    new_volume_bonus_25_plus: Mapped[float] = mapped_column(Float, default=2800.0)
+    new_volume_bonus_17_18: Mapped[float] = mapped_column(Float, default=1400.0)
+    new_volume_bonus_19_20: Mapped[float] = mapped_column(Float, default=2000.0)
+    new_volume_bonus_21_24: Mapped[float] = mapped_column(Float, default=2800.0)
+    new_volume_bonus_25_plus: Mapped[float] = mapped_column(Float, default=3500.0)
 
     # Volume bonuses (used units)
     used_volume_bonus_8_10: Mapped[float] = mapped_column(Float, default=350.0)
     used_volume_bonus_11_12: Mapped[float] = mapped_column(Float, default=500.0)
     used_volume_bonus_13_plus: Mapped[float] = mapped_column(Float, default=1000.0)
 
-    # Spot bonuses
+    # Spot bonuses (per spot, retro to unit 1)
     spot_bonus_5_9: Mapped[float] = mapped_column(Float, default=50.0)
     spot_bonus_10_12: Mapped[float] = mapped_column(Float, default=80.0)
     spot_bonus_13_plus: Mapped[float] = mapped_column(Float, default=100.0)
 
-    # Quarterly bonus
+    # Quarterly bonus (rolling 3-month — lowest tier default, use DealerBonus for multi-tier)
     quarterly_bonus_threshold_units: Mapped[int] = mapped_column(Integer, default=60)
-    quarterly_bonus_amount: Mapped[float] = mapped_column(Float, default=1200.0)
+    quarterly_bonus_amount: Mapped[float] = mapped_column(Float, default=750.0)
 
     # Pay structure type: flat | gross | hybrid
-    pay_type: Mapped[str] = mapped_column(String(16), default="flat")
+    pay_type: Mapped[str] = mapped_column(String(16), default="hybrid")
     gross_front_pct: Mapped[float] = mapped_column(Float, default=0.0)   # e.g. 20.0 = 20%
-    gross_back_pct: Mapped[float] = mapped_column(Float, default=0.0)    # e.g. 20.0 = 20%
+    gross_back_pct: Mapped[float] = mapped_column(Float, default=7.0)    # e.g. 7.0 = 7%
     mini_deal: Mapped[float] = mapped_column(Float, default=0.0)         # minimum commission per deal
     pack_deduction: Mapped[float] = mapped_column(Float, default=0.0)    # deducted from gross before calc
 

@@ -453,20 +453,20 @@ async def _run_startup_migrations():
             CREATE TABLE IF NOT EXISTS settings (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER,
-                unit_comm_discount_le_200 FLOAT DEFAULT 190.0,
-                unit_comm_discount_gt_200 FLOAT DEFAULT 140.0,
+                unit_comm_discount_le_200 FLOAT DEFAULT 150.0,
+                unit_comm_discount_gt_200 FLOAT DEFAULT 150.0,
                 permaplate FLOAT DEFAULT 40.0,
                 nitro_fill FLOAT DEFAULT 40.0,
                 pulse FLOAT DEFAULT 40.0,
                 finance_non_subvented FLOAT DEFAULT 40.0,
                 warranty FLOAT DEFAULT 25.0,
                 tire_wheel FLOAT DEFAULT 25.0,
-                hourly_rate_ny_offset FLOAT DEFAULT 15.0,
+                hourly_rate_ny_offset FLOAT DEFAULT 16.0,
                 new_volume_bonus_15_16 FLOAT DEFAULT 1000.0,
-                new_volume_bonus_17_18 FLOAT DEFAULT 1200.0,
-                new_volume_bonus_19_20 FLOAT DEFAULT 1500.0,
-                new_volume_bonus_21_24 FLOAT DEFAULT 2000.0,
-                new_volume_bonus_25_plus FLOAT DEFAULT 2800.0,
+                new_volume_bonus_17_18 FLOAT DEFAULT 1400.0,
+                new_volume_bonus_19_20 FLOAT DEFAULT 2000.0,
+                new_volume_bonus_21_24 FLOAT DEFAULT 2800.0,
+                new_volume_bonus_25_plus FLOAT DEFAULT 3500.0,
                 used_volume_bonus_8_10 FLOAT DEFAULT 350.0,
                 used_volume_bonus_11_12 FLOAT DEFAULT 500.0,
                 used_volume_bonus_13_plus FLOAT DEFAULT 1000.0,
@@ -474,7 +474,7 @@ async def _run_startup_migrations():
                 spot_bonus_10_12 FLOAT DEFAULT 80.0,
                 spot_bonus_13_plus FLOAT DEFAULT 100.0,
                 quarterly_bonus_threshold_units INTEGER DEFAULT 60,
-                quarterly_bonus_amount FLOAT DEFAULT 1200.0
+                quarterly_bonus_amount FLOAT DEFAULT 750.0
             )
         """)
 
@@ -595,16 +595,16 @@ async def _run_startup_migrations():
             pass
 
         for col, typ, dflt in [
-            ("hourly_rate_ny_offset", "FLOAT", "15.0"),
-            ("new_volume_bonus_15_16", "FLOAT", "1000.0"), ("new_volume_bonus_17_18", "FLOAT", "1200.0"),
-            ("new_volume_bonus_19_20", "FLOAT", "1500.0"), ("new_volume_bonus_21_24", "FLOAT", "2000.0"),
-            ("new_volume_bonus_25_plus", "FLOAT", "2800.0"),
+            ("hourly_rate_ny_offset", "FLOAT", "16.0"),
+            ("new_volume_bonus_15_16", "FLOAT", "1000.0"), ("new_volume_bonus_17_18", "FLOAT", "1400.0"),
+            ("new_volume_bonus_19_20", "FLOAT", "2000.0"), ("new_volume_bonus_21_24", "FLOAT", "2800.0"),
+            ("new_volume_bonus_25_plus", "FLOAT", "3500.0"),
             ("used_volume_bonus_8_10", "FLOAT", "350.0"), ("used_volume_bonus_11_12", "FLOAT", "500.0"),
             ("used_volume_bonus_13_plus", "FLOAT", "1000.0"),
             ("spot_bonus_5_9", "FLOAT", "50.0"), ("spot_bonus_10_12", "FLOAT", "80.0"),
             ("spot_bonus_13_plus", "FLOAT", "100.0"),
             ("quarterly_bonus_threshold_units", "INTEGER", "60"),
-            ("quarterly_bonus_amount", "FLOAT", "1200.0"),
+            ("quarterly_bonus_amount", "FLOAT", "750.0"),
         ]:
             try:
                 await conn.execute(f"ALTER TABLE settings ADD COLUMN IF NOT EXISTS {col} {typ} DEFAULT {dflt}")
@@ -1809,10 +1809,10 @@ async def dashboard(
 
     # Fallback: if no custom bonuses, use legacy Settings fields
     if not custom_bonuses:
-        vol_tiers = [(25,None,float(s.new_volume_bonus_25_plus)),(21,24,float(s.new_volume_bonus_21_24)),
-                     (19,20,float(s.new_volume_bonus_19_20)),(17,18,float(s.new_volume_bonus_17_18)),(15,16,float(s.new_volume_bonus_15_16))]
+        vol_tiers = [(30,None,float(s.new_volume_bonus_25_plus)),(25,29,float(s.new_volume_bonus_21_24)),
+                     (21,24,float(s.new_volume_bonus_19_20)),(18,20,float(s.new_volume_bonus_17_18)),(15,17,float(s.new_volume_bonus_15_16))]
         used_tiers = [(13,None,float(s.used_volume_bonus_13_plus)),(11,12,float(s.used_volume_bonus_11_12)),(8,10,float(s.used_volume_bonus_8_10))]
-        spot_tiers = [(13,None,float(s.spot_bonus_13_plus)),(10,12,float(s.spot_bonus_10_12)),(5,9,float(s.spot_bonus_5_9))]
+        spot_tiers = [(15,None,float(s.spot_bonus_13_plus)),(10,14,float(s.spot_bonus_10_12)),(5,9,float(s.spot_bonus_5_9))]
         vol_amt, vol_tier = _tiered(units_mtd, vol_tiers)
         used_amt, used_tier = _tiered(used_mtd, used_tiers)
         spots = sum(1 for d in delivered_mtd if d.spot_sold)
@@ -3007,18 +3007,18 @@ async def payplan_get(request: Request, db: AsyncSession = Depends(get_db)):
     # Seed defaults if no custom bonuses exist
     if d_id and not bonuses:
         defaults = [
-            ("Volume 15-16", "volume_new", 15, 16, s.new_volume_bonus_15_16, "monthly"),
-            ("Volume 17-18", "volume_new", 17, 18, s.new_volume_bonus_17_18, "monthly"),
-            ("Volume 19-20", "volume_new", 19, 20, s.new_volume_bonus_19_20, "monthly"),
-            ("Volume 21-24", "volume_new", 21, 24, s.new_volume_bonus_21_24, "monthly"),
-            ("Volume 25+", "volume_new", 25, None, s.new_volume_bonus_25_plus, "monthly"),
-            ("Used Volume 8-10", "volume_used", 8, 10, s.used_volume_bonus_8_10, "monthly"),
-            ("Used Volume 11-12", "volume_used", 11, 12, s.used_volume_bonus_11_12, "monthly"),
-            ("Used Volume 13+", "volume_used", 13, None, s.used_volume_bonus_13_plus, "monthly"),
+            ("Volume 15-17", "volume_new", 15, 17, s.new_volume_bonus_15_16, "monthly"),
+            ("Volume 18-20", "volume_new", 18, 20, s.new_volume_bonus_17_18, "monthly"),
+            ("Volume 21-24", "volume_new", 21, 24, s.new_volume_bonus_19_20, "monthly"),
+            ("Volume 25-29", "volume_new", 25, 29, s.new_volume_bonus_21_24, "monthly"),
+            ("Volume 30+", "volume_new", 30, None, s.new_volume_bonus_25_plus, "monthly"),
             ("Spot Bonus 5-9", "spot", 5, 9, s.spot_bonus_5_9, "monthly"),
-            ("Spot Bonus 10-12", "spot", 10, 12, s.spot_bonus_10_12, "monthly"),
-            ("Spot Bonus 13+", "spot", 13, None, s.spot_bonus_13_plus, "monthly"),
-            ("Quarterly Bonus", "quarterly", s.quarterly_bonus_threshold_units, None, s.quarterly_bonus_amount, "quarterly"),
+            ("Spot Bonus 10-14", "spot", 10, 14, s.spot_bonus_10_12, "monthly"),
+            ("Spot Bonus 15+", "spot", 15, None, s.spot_bonus_13_plus, "monthly"),
+            ("Quarterly 60-69", "quarterly", 60, 69, 750.0, "quarterly"),
+            ("Quarterly 70-79", "quarterly", 70, 79, 1250.0, "quarterly"),
+            ("Quarterly 80-89", "quarterly", 80, 89, 1500.0, "quarterly"),
+            ("Quarterly 90+", "quarterly", 90, None, 2500.0, "quarterly"),
         ]
         for i, (name, cat, mn, mx, amt, per) in enumerate(defaults):
             if amt and amt > 0:
@@ -3867,8 +3867,8 @@ async def api_parse_payplan(request: Request, db: AsyncSession = Depends(get_db)
                                 "text": """Analyze this car dealership pay plan document. Extract the commission structure and return ONLY a JSON object with these fields (use 0 if not found, numbers only no $ signs):
 
 {
-  "unit_comm_le_200": <per-unit commission when discount is $200 or less>,
-  "unit_comm_gt_200": <per-unit commission when discount is over $200>,
+  "unit_comm_le_200": <per-unit commission when discount is $200 or less (or flat per-unit if no discount tiers)>,
+  "unit_comm_gt_200": <per-unit commission when discount is over $200 (same as above if no discount tiers)>,
   "hourly_offset": <hourly rate or NY offset amount>,
   "permaplate": <permaplate/paint protection commission per deal>,
   "nitro_fill": <nitrogen fill commission per deal>,
@@ -3876,8 +3876,9 @@ async def api_parse_payplan(request: Request, db: AsyncSession = Depends(get_db)
   "finance": <finance/non-subvented finance commission per deal>,
   "warranty": <extended warranty commission per deal>,
   "tire_wheel": <tire and wheel protection commission per deal>,
-  "pay_type": "flat" or "gross" or "hybrid",
-  "gross_percentage": <if gross-based, the percentage of gross profit>,
+  "pay_type": "flat" or "gross" or "hybrid" (hybrid = flat per-unit PLUS percentage of back-end gross),
+  "gross_front_pct": <percentage of front-end gross profit, 0 if not applicable>,
+  "gross_back_pct": <percentage of back-end F&I gross profit, e.g. 7 for 7%>,
   "notes": "<any important details about the pay structure>"
 }
 
@@ -4740,7 +4741,7 @@ async def admin_assign_user_to_dealership(
 import random as _random
 
 SEED_PAY_PLANS = {
-    "Toyota": {"unit_le": 200, "unit_gt": 150, "hourly": 16, "perma": 40, "nitro": 40, "pulse": 40, "finance": 50, "warranty": 25, "tw": 25, "nv1516": 1000, "nv1718": 1250, "nv1920": 1500, "nv2124": 2000, "nv25": 3000, "uv810": 350, "uv1112": 500, "uv13": 1000, "qt": 60, "qa": 1200},
+    "Toyota": {"unit_le": 150, "unit_gt": 150, "hourly": 16, "perma": 40, "nitro": 40, "pulse": 40, "finance": 50, "warranty": 25, "tw": 25, "nv1516": 1000, "nv1718": 1400, "nv1920": 2000, "nv2124": 2800, "nv25": 3500, "uv810": 350, "uv1112": 500, "uv13": 1000, "qt": 60, "qa": 750},
     "Honda": {"unit_le": 175, "unit_gt": 125, "hourly": 15, "perma": 35, "nitro": 35, "pulse": 35, "finance": 40, "warranty": 25, "tw": 20, "nv1516": 800, "nv1718": 1000, "nv1920": 1200, "nv2124": 1600, "nv25": 2200, "uv810": 300, "uv1112": 450, "uv13": 800, "qt": 55, "qa": 1000},
     "Ford": {"unit_le": 225, "unit_gt": 175, "hourly": 15, "perma": 50, "nitro": 45, "pulse": 45, "finance": 50, "warranty": 30, "tw": 30, "nv1516": 1200, "nv1718": 1500, "nv1920": 1800, "nv2124": 2500, "nv25": 3500, "uv810": 400, "uv1112": 600, "uv13": 1200, "qt": 55, "qa": 1500},
     "Chevrolet": {"unit_le": 190, "unit_gt": 140, "hourly": 14, "perma": 40, "nitro": 40, "pulse": 35, "finance": 45, "warranty": 25, "tw": 25, "nv1516": 900, "nv1718": 1100, "nv1920": 1400, "nv2124": 1800, "nv25": 2600, "uv810": 350, "uv1112": 500, "uv13": 900, "qt": 60, "qa": 1100},
