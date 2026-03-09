@@ -1098,6 +1098,10 @@ async def _run_startup_migrations():
                 )
             """)
             await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_photo_snap_dlr_date ON photo_snapshots(dealership_id, snapshot_date)")
+            try:
+                await conn.execute("ALTER TABLE photo_snapshots ADD COLUMN IF NOT EXISTS total_inventory INTEGER DEFAULT 0")
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -4894,6 +4898,13 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
     if tab == "not_in_csv" and last_upload_date:
         vehicles = [v for v in vehicles if v.last_seen_date and v.last_seen_date < last_upload_date]
 
+    # Get latest total_inventory from most recent snapshot
+    latest_snap = (await db.execute(
+        select(PhotoSnapshot).where(PhotoSnapshot.dealership_id == d_id, PhotoSnapshot.total_inventory > 0)
+        .order_by(PhotoSnapshot.snapshot_date.desc()).limit(1)
+    )).scalar_one_or_none()
+    total_inventory = latest_snap.total_inventory if latest_snap else 0
+
     msg = request.query_params.get("msg", "")
     msg_type = request.query_params.get("msg_type", "success")
 
@@ -4908,6 +4919,7 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
         "new_today": new_today,
         "not_in_csv": not_in_csv,
         "last_upload_date": last_upload_date,
+        "total_inventory": total_inventory,
         "today_date": today(),
         "current_tab": tab,
         "search": search,
@@ -5056,6 +5068,15 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
         snap.ready_for_photos = sum(1 for v in all_v if v.status == "ready_for_photos")
         snap.done_count = sum(1 for v in all_v if v.status == "done")
         snap.new_today = total_new
+        # Preserve total_inventory if already set for today
+        if not snap.total_inventory:
+            # Carry forward from most recent snapshot that had it
+            prev = (await db.execute(
+                select(PhotoSnapshot).where(PhotoSnapshot.dealership_id == d_id, PhotoSnapshot.total_inventory > 0)
+                .order_by(PhotoSnapshot.snapshot_date.desc()).limit(1)
+            )).scalar_one_or_none()
+            if prev:
+                snap.total_inventory = prev.total_inventory
         await db.commit()
     except Exception:
         pass
@@ -5119,6 +5140,26 @@ async def photos_bulk_remove(request: Request, db: AsyncSession = Depends(get_db
             v.dismissed = True
             v.status = "done"
         await db.commit()
+    return RedirectResponse(url="/photos", status_code=303)
+
+
+@app.post("/photos/inventory")
+async def photos_save_inventory(request: Request, total_inventory: int = Form(0), db: AsyncSession = Depends(get_db)):
+    """Save total lot inventory count for photo-readiness percentage."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+    if not d_id:
+        return RedirectResponse(url="/photos", status_code=303)
+    # Store in the latest snapshot (or create one for today)
+    today_d = today()
+    snap = (await db.execute(
+        select(PhotoSnapshot).where(PhotoSnapshot.dealership_id == d_id, PhotoSnapshot.snapshot_date == today_d)
+    )).scalar_one_or_none()
+    if not snap:
+        snap = PhotoSnapshot(dealership_id=d_id, snapshot_date=today_d)
+        db.add(snap)
+    snap.total_inventory = max(0, total_inventory)
+    await db.commit()
     return RedirectResponse(url="/photos", status_code=303)
 
 
@@ -5329,6 +5370,61 @@ async def photos_progress_pdf(request: Request, db: AsyncSession = Depends(get_d
     if days_tracking > 0 and total_processed > 0:
         avg_per_day = total_processed / days_tracking
         story.append(Paragraph(f"Processing an average of <b>{avg_per_day:.1f} vehicles per day</b> since tracking began.", body_style))
+
+    # ── Inventory photo-readiness percentage ──
+    latest_inv = 0
+    for snap in reversed(snapshots):
+        if snap.total_inventory and snap.total_inventory > 0:
+            latest_inv = snap.total_inventory
+            break
+    if latest_inv > 0:
+        photo_ready = latest_inv - total_active
+        pct = (photo_ready / latest_inv) * 100
+        story.append(Spacer(1, 8))
+        story.append(Paragraph(f"<b>{photo_ready} of {latest_inv}</b> vehicles on the lot have professional photos (<b>{pct:.0f}%</b> photo-ready).", body_style))
+
+    # ── Backlog bar chart ──
+    if len(weeks) >= 2:
+        story.append(Paragraph("Backlog Trend", heading_style))
+        story.append(Paragraph("Vehicles needing photos per week — lower is better.", body_style))
+        story.append(Spacer(1, 8))
+
+        from reportlab.graphics.shapes import Drawing, Rect, String, Line
+        from reportlab.graphics import renderPDF
+
+        sorted_weeks = sorted(weeks.keys())
+        backlogs = [weeks[k]["backlog"] for k in sorted_weeks]
+        max_val = max(backlogs) if backlogs else 1
+        num_bars = len(sorted_weeks)
+
+        chart_w = 6.5 * inch
+        chart_h = 2.0 * inch
+        bar_w = min(40, (chart_w - 40) / num_bars - 8)
+        drawing = Drawing(chart_w, chart_h + 30)
+
+        # Y axis line
+        drawing.add(Line(35, 20, 35, chart_h + 10, strokeColor=colors.HexColor('#cbd5e1'), strokeWidth=0.5))
+
+        for i, wk in enumerate(sorted_weeks):
+            val = weeks[wk]["backlog"]
+            bar_h = (val / max_val) * (chart_h - 10) if max_val > 0 else 0
+            x = 45 + i * ((chart_w - 55) / num_bars)
+
+            # Determine bar color — green if decreasing from first week, amber otherwise
+            bar_color = colors.HexColor('#059669') if val < backlogs[0] else colors.HexColor('#d97706')
+            if i == 0:
+                bar_color = colors.HexColor('#6366f1')
+
+            drawing.add(Rect(x, 20, bar_w, bar_h, fillColor=bar_color, strokeColor=None))
+            # Value on top
+            drawing.add(String(x + bar_w / 2, 24 + bar_h, str(val), fontSize=8, fillColor=colors.HexColor('#334155'), textAnchor='middle'))
+            # Week label
+            short_label = wk.split('-')[1] if '-' in wk else wk
+            drawing.add(String(x + bar_w / 2, 6, short_label, fontSize=7, fillColor=colors.HexColor('#94a3b8'), textAnchor='middle'))
+
+        story.append(drawing)
+        story.append(Spacer(1, 4))
+        story.append(Paragraph("Purple = starting week. Green = improved from start. Amber = above starting level.", ParagraphStyle('legend', parent=styles['Normal'], fontSize=7, textColor=colors.HexColor('#94a3b8'))))
 
     # ── Weekly breakdown table ──
     if weeks:

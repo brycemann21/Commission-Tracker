@@ -403,4 +403,5 @@ class PhotoSnapshot(Base):
     done_count: Mapped[int] = mapped_column(Integer, default=0)
     new_today: Mapped[int] = mapped_column(Integer, default=0)
     dismissed_today: Mapped[int] = mapped_column(Integer, default=0)
+    total_inventory: Mapped[int] = mapped_column(Integer, default=0)  # total lot size for % calculation
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

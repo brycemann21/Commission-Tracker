@@ -62,7 +62,16 @@
   <span class="text-slate-500 dark:text-slate-400">Last upload: <b class="text-slate-700 dark:text-slate-200">{{ last_upload_date.strftime('%b %-d, %Y') }}</b></span>
   {% if new_today > 0 %}<span class="text-violet-600 dark:text-violet-400">{{ new_today }} new</span>{% endif %}
   {% if not_in_csv > 0 %}<span class="text-orange-600 dark:text-orange-400">{{ not_in_csv }} dropped off</span>{% endif %}
-  <span class="text-slate-400 dark:text-slate-500">{{ total }} tracked</span>
+  <span class="text-slate-400 dark:text-slate-500">{{ total }} needing photos</span>
+  <span class="ml-auto flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
+    Total lot:
+    <input type="number" id="totalInventoryInput" value="{{ total_inventory or '' }}" placeholder="e.g. 280" min="0"
+           class="w-20 border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-xs focus:outline-none focus:border-indigo-400">
+    <button onclick="saveTotalInventory()" class="text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300" id="invSaveBtn">Save</button>
+    {% if total_inventory and total_inventory > 0 %}
+    <span class="text-emerald-600 dark:text-emerald-400 font-medium ml-1">{{ "{:.0f}".format(((total_inventory - total) / total_inventory) * 100) }}% photo-ready</span>
+    {% endif %}
+  </span>
 </div>
 {% endif %}
 
@@ -271,6 +280,15 @@ function bulkRemove() {
     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
     body: 'csrf_token={{ csrf_token }}&' + ids.map(id => 'vehicle_ids=' + id).join('&')
   }).then(() => location.reload());
+}
+function saveTotalInventory() {
+  const val = document.getElementById('totalInventoryInput').value;
+  const btn = document.getElementById('invSaveBtn');
+  fetch('/photos/inventory', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'total_inventory=' + encodeURIComponent(val) + '&csrf_token={{ csrf_token }}'
+  }).then(() => { btn.textContent = '✓'; setTimeout(() => location.reload(), 800); });
 }
 </script>
 
