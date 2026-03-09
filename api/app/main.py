@@ -5214,6 +5214,207 @@ async def photos_remove(vehicle_id: int, request: Request, db: AsyncSession = De
     return RedirectResponse(url="/photos", status_code=303)
 
 
+@app.get("/photos/pdf/progress")
+async def photos_progress_pdf(request: Request, db: AsyncSession = Depends(get_db)):
+    """Generate a printable progress report PDF for management."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+    import tempfile
+    from datetime import timedelta
+
+    # ── Gather data ──
+    all_vehicles = (await db.execute(
+        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__')
+    )).scalars().all()
+
+    active = [v for v in all_vehicles if not v.dismissed]
+    dismissed = [v for v in all_vehicles if v.dismissed]
+
+    needs_detail = [v for v in active if v.status == "needs_detail"]
+    ready_photos = [v for v in active if v.status == "ready_for_photos"]
+    done_active = [v for v in active if v.status == "done"]
+    over_30 = [v for v in active if v.age_days >= 30]
+
+    total_processed = len(dismissed) + len(done_active)
+    total_active = len(active)
+
+    # First seen date (when tracking started)
+    first_dates = [v.first_seen_date for v in all_vehicles if v.first_seen_date]
+    start_date = min(first_dates) if first_dates else today()
+    days_tracking = (today() - start_date).days + 1
+
+    # Snapshots for trend
+    snapshots = (await db.execute(
+        select(PhotoSnapshot).where(PhotoSnapshot.dealership_id == d_id)
+        .order_by(PhotoSnapshot.snapshot_date)
+    )).scalars().all()
+
+    # Weekly aggregation
+    weeks = {}
+    for snap in snapshots:
+        # ISO week
+        yr, wk, _ = snap.snapshot_date.isocalendar()
+        key = f"{yr}-W{wk:02d}"
+        if key not in weeks:
+            weeks[key] = {"start": snap.snapshot_date, "end": snap.snapshot_date, "new_total": 0, "backlog": 0, "snapshots": 0}
+        w = weeks[key]
+        w["end"] = snap.snapshot_date
+        w["new_total"] += snap.new_today
+        w["backlog"] = snap.total  # latest snapshot's total for that week
+        w["snapshots"] += 1
+
+    # Dealership name
+    dealership = (await db.execute(
+        select(Dealership).where(Dealership.id == d_id)
+    )).scalar_one_or_none()
+    dealer_name = dealership.name if dealership else "Dealership"
+
+    # ── Build PDF ──
+    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    doc = SimpleDocTemplate(tmp.name, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch,
+                            leftMargin=0.6*inch, rightMargin=0.6*inch)
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle('ReportTitle', parent=styles['Title'], fontSize=20, spaceAfter=4, textColor=colors.HexColor('#1e293b'))
+    subtitle_style = ParagraphStyle('ReportSub', parent=styles['Normal'], fontSize=11, textColor=colors.HexColor('#64748b'), spaceAfter=16)
+    heading_style = ParagraphStyle('SectionHead', parent=styles['Heading2'], fontSize=14, textColor=colors.HexColor('#1e293b'), spaceBefore=20, spaceAfter=8)
+    metric_label = ParagraphStyle('MetricLabel', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#64748b'))
+    metric_value = ParagraphStyle('MetricValue', parent=styles['Normal'], fontSize=22, textColor=colors.HexColor('#1e293b'), leading=28)
+    body_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#334155'), leading=14)
+
+    story = []
+
+    # ── Header ──
+    story.append(Paragraph(f"Photo Readiness Report", title_style))
+    story.append(Paragraph(f"{dealer_name} — Generated {today().strftime('%B %-d, %Y')}", subtitle_style))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e2e8f0'), spaceAfter=16))
+
+    # ── Summary metrics (2x3 grid as table) ──
+    story.append(Paragraph("Current Status", heading_style))
+
+    metric_data = [
+        [Paragraph(f"<b>{total_active}</b>", ParagraphStyle('mv', parent=metric_value, alignment=TA_CENTER)),
+         Paragraph(f"<b>{len(needs_detail)}</b>", ParagraphStyle('mv', parent=metric_value, alignment=TA_CENTER, textColor=colors.HexColor('#d97706'))),
+         Paragraph(f"<b>{len(ready_photos)}</b>", ParagraphStyle('mv', parent=metric_value, alignment=TA_CENTER, textColor=colors.HexColor('#2563eb')))],
+        [Paragraph("Active on Board", ParagraphStyle('ml', parent=metric_label, alignment=TA_CENTER)),
+         Paragraph("Needs Detail", ParagraphStyle('ml', parent=metric_label, alignment=TA_CENTER)),
+         Paragraph("Ready for Photos", ParagraphStyle('ml', parent=metric_label, alignment=TA_CENTER))],
+        [Paragraph(f"<b>{total_processed}</b>", ParagraphStyle('mv', parent=metric_value, alignment=TA_CENTER, textColor=colors.HexColor('#059669'))),
+         Paragraph(f"<b>{len(over_30)}</b>", ParagraphStyle('mv', parent=metric_value, alignment=TA_CENTER, textColor=colors.HexColor('#dc2626'))),
+         Paragraph(f"<b>{days_tracking}</b>", ParagraphStyle('mv', parent=metric_value, alignment=TA_CENTER))],
+        [Paragraph("Vehicles Completed", ParagraphStyle('ml', parent=metric_label, alignment=TA_CENTER)),
+         Paragraph("Over 30 Days Old", ParagraphStyle('ml', parent=metric_label, alignment=TA_CENTER)),
+         Paragraph("Days Tracking", ParagraphStyle('ml', parent=metric_label, alignment=TA_CENTER))],
+    ]
+
+    mt = Table(metric_data, colWidths=[2.3*inch, 2.3*inch, 2.3*inch], rowHeights=[36, 16, 36, 16])
+    mt.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f8fafc')),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]))
+    story.append(mt)
+    story.append(Spacer(1, 8))
+
+    if days_tracking > 0 and total_processed > 0:
+        avg_per_day = total_processed / days_tracking
+        story.append(Paragraph(f"Processing an average of <b>{avg_per_day:.1f} vehicles per day</b> since tracking began.", body_style))
+
+    # ── Weekly breakdown table ──
+    if weeks:
+        story.append(Paragraph("Weekly Breakdown", heading_style))
+
+        week_data = [["Week", "Date Range", "New Added", "Backlog", "Uploads"]]
+        for key in sorted(weeks.keys()):
+            w = weeks[key]
+            date_range = f"{w['start'].strftime('%m/%d')} – {w['end'].strftime('%m/%d')}"
+            week_data.append([key, date_range, str(w["new_total"]), str(w["backlog"]), str(w["snapshots"])])
+
+        wt = Table(week_data, colWidths=[1.1*inch, 1.5*inch, 1.1*inch, 1.1*inch, 1.1*inch])
+        wt.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e293b')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('ALIGN', (2, 0), (-1, -1), 'CENTER'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(wt)
+
+    # ── Vehicles over 30 days ──
+    if over_30:
+        story.append(Paragraph(f"Vehicles Over 30 Days ({len(over_30)})", heading_style))
+        story.append(Paragraph("These vehicles have been on the lot 30+ days without professional photos and should be prioritized.", body_style))
+        story.append(Spacer(1, 6))
+
+        urgent_data = [["Stock #", "Vehicle", "Age", "Status"]]
+        for v in sorted(over_30, key=lambda x: -x.age_days):
+            status_label = {"needs_detail": "Needs Detail", "ready_for_photos": "Ready for Photos", "done": "Done"}.get(v.status, v.status)
+            urgent_data.append([v.stock_num, v.year_make_model, f"{v.age_days}d", status_label])
+
+        ut = Table(urgent_data, colWidths=[1.2*inch, 3.5*inch, 0.8*inch, 1.3*inch])
+        ut.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#991b1b')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('ALIGN', (2, 0), (2, -1), 'CENTER'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#fef2f2'), colors.white]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(ut)
+
+    # ── Recently completed ──
+    recent_done = sorted(dismissed + done_active, key=lambda v: v.last_seen_date or today(), reverse=True)[:20]
+    if recent_done:
+        story.append(Paragraph(f"Recently Completed ({len(dismissed) + len(done_active)} total all-time)", heading_style))
+
+        done_data = [["Stock #", "Vehicle", "Age When Done"]]
+        for v in recent_done:
+            done_data.append([v.stock_num, v.year_make_model, f"{v.age_days}d"])
+
+        dt_table = Table(done_data, colWidths=[1.2*inch, 4.0*inch, 1.3*inch])
+        dt_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#065f46')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('ALIGN', (2, 0), (2, -1), 'CENTER'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0fdf4')]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(dt_table)
+
+    # ── Footer ──
+    story.append(Spacer(1, 24))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#cbd5e1')))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(f"Generated by Commission Tracker — Photo Readiness Module", ParagraphStyle('footer', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#94a3b8'))))
+
+    doc.build(story)
+
+    from starlette.responses import FileResponse
+    filename = f"photo_progress_report_{today().strftime('%Y%m%d')}.pdf"
+    return FileResponse(tmp.name, media_type="application/pdf", filename=filename)
+
+
 @app.get("/photos/pdf/{list_type}")
 async def photos_pdf(list_type: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Generate a PDF checklist for detail or photo list."""
