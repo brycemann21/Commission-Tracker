@@ -5104,6 +5104,24 @@ async def photos_bulk_not_in_csv_done(request: Request, db: AsyncSession = Depen
     return RedirectResponse(url="/photos?msg=Moved+to+Done&msg_type=success", status_code=303)
 
 
+@app.post("/photos/bulk/remove")
+async def photos_bulk_remove(request: Request, db: AsyncSession = Depends(get_db)):
+    """Bulk dismiss selected vehicles."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+    form = await request.form()
+    ids = [int(v) for v in form.getlist("vehicle_ids") if v.isdigit()]
+    if ids:
+        vehicles = (await db.execute(
+            select(PhotoVehicle).where(PhotoVehicle.id.in_(ids), PhotoVehicle.dealership_id == d_id)
+        )).scalars().all()
+        for v in vehicles:
+            v.dismissed = True
+            v.status = "done"
+        await db.commit()
+    return RedirectResponse(url="/photos", status_code=303)
+
+
 @app.post("/photos/add")
 async def photos_add_manual(
     request: Request,
