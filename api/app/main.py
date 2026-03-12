@@ -5264,9 +5264,9 @@ async def photos_progress_pdf(request: Request, db: AsyncSession = Depends(get_d
     from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
     from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable, KeepTogether
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
     import tempfile
     from datetime import timedelta
 
@@ -5300,7 +5300,6 @@ async def photos_progress_pdf(request: Request, db: AsyncSession = Depends(get_d
     # Weekly aggregation
     weeks = {}
     for snap in snapshots:
-        # ISO week
         yr, wk, _ = snap.snapshot_date.isocalendar()
         key = f"{yr}-W{wk:02d}"
         if key not in weeks:
@@ -5308,7 +5307,7 @@ async def photos_progress_pdf(request: Request, db: AsyncSession = Depends(get_d
         w = weeks[key]
         w["end"] = snap.snapshot_date
         w["new_total"] += snap.new_today
-        w["backlog"] = snap.total  # latest snapshot's total for that week
+        w["backlog"] = snap.total
         w["snapshots"] += 1
 
     # Dealership name
@@ -5317,9 +5316,48 @@ async def photos_progress_pdf(request: Request, db: AsyncSession = Depends(get_d
     )).scalar_one_or_none()
     dealer_name = dealership.name if dealership else "Dealership"
 
-    # ── Build PDF ──
+    # ── Compute week-over-week change for at-a-glance summary ──
+    sorted_week_keys = sorted(weeks.keys())
+    net_change = None
+    net_change_label = ""
+    if len(sorted_week_keys) >= 2:
+        prev_backlog = weeks[sorted_week_keys[-2]]["backlog"]
+        curr_backlog = weeks[sorted_week_keys[-1]]["backlog"]
+        net_change = curr_backlog - prev_backlog
+        if net_change < 0:
+            net_change_label = f"<font color='#059669'><b>{abs(net_change)} fewer</b></font> vehicles vs last week"
+        elif net_change > 0:
+            net_change_label = f"<font color='#dc2626'><b>{net_change} more</b></font> vehicles vs last week"
+        else:
+            net_change_label = "<b>No change</b> in backlog vs last week"
+
+    # ── Build PDF with page numbers ──
     tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-    doc = SimpleDocTemplate(tmp.name, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch,
+
+    # Page number callback
+    def _header_footer(canvas_obj, doc_obj):
+        canvas_obj.saveState()
+        page_w, page_h = letter
+        # Footer line
+        canvas_obj.setStrokeColor(colors.HexColor('#cbd5e1'))
+        canvas_obj.setLineWidth(0.5)
+        canvas_obj.line(0.6*inch, 0.42*inch, page_w - 0.6*inch, 0.42*inch)
+        # Footer left: branding
+        canvas_obj.setFont('Helvetica', 7)
+        canvas_obj.setFillColor(colors.HexColor('#94a3b8'))
+        canvas_obj.drawString(0.6*inch, 0.28*inch, "Commission Tracker — Photo Readiness Module")
+        # Footer center: date
+        canvas_obj.drawCentredString(page_w / 2, 0.28*inch, today().strftime('%B %-d, %Y'))
+        # Footer right: page number
+        canvas_obj.drawRightString(page_w - 0.6*inch, 0.28*inch, f"Page {doc_obj.page}")
+        # Header: dealership name (light, top-right) on pages after first
+        if doc_obj.page > 1:
+            canvas_obj.setFont('Helvetica', 8)
+            canvas_obj.setFillColor(colors.HexColor('#94a3b8'))
+            canvas_obj.drawRightString(page_w - 0.6*inch, page_h - 0.38*inch, f"{dealer_name} — Photo Readiness Report")
+        canvas_obj.restoreState()
+
+    doc = SimpleDocTemplate(tmp.name, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.6*inch,
                             leftMargin=0.6*inch, rightMargin=0.6*inch)
     styles = getSampleStyleSheet()
 
@@ -5329,30 +5367,94 @@ async def photos_progress_pdf(request: Request, db: AsyncSession = Depends(get_d
     metric_label = ParagraphStyle('MetricLabel', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#64748b'))
     metric_value = ParagraphStyle('MetricValue', parent=styles['Normal'], fontSize=22, textColor=colors.HexColor('#1e293b'), leading=28)
     body_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#334155'), leading=14)
+    note_style = ParagraphStyle('NoteCell', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#64748b'), leading=10)
 
     story = []
 
     # ── Header ──
-    story.append(Paragraph(f"Photo Readiness Report", title_style))
+    story.append(Paragraph("Photo Readiness Report", title_style))
     story.append(Paragraph(f"{dealer_name} — Generated {today().strftime('%B %-d, %Y')}", subtitle_style))
-    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e2e8f0'), spaceAfter=16))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e2e8f0'), spaceAfter=12))
 
-    # ── Summary metrics (2x3 grid as table) ──
+    # ── At-a-Glance Progress Summary ──
+    # Build a highlight banner with trend arrow and key numbers
+    latest_inv = 0
+    for snap in reversed(snapshots):
+        if snap.total_inventory and snap.total_inventory > 0:
+            latest_inv = snap.total_inventory
+            break
+
+    glance_parts = []
+    if latest_inv > 0:
+        photo_ready = latest_inv - total_active
+        pct = (photo_ready / latest_inv) * 100
+        pct_color = '#059669' if pct >= 80 else ('#d97706' if pct >= 60 else '#dc2626')
+        glance_parts.append(
+            f"<font size='28' color='{pct_color}'><b>{pct:.0f}%</b></font>"
+            f"<font size='10' color='#64748b'> photo-ready</font>"
+            f"<br/><font size='9' color='#64748b'>{photo_ready} of {latest_inv} vehicles on the lot</font>"
+        )
+    else:
+        glance_parts.append(
+            f"<font size='28' color='#1e293b'><b>{total_active}</b></font>"
+            f"<font size='10' color='#64748b'> need photos</font>"
+        )
+
+    trend_parts = []
+    if net_change_label:
+        if net_change is not None and net_change < 0:
+            arrow = "<font size='16' color='#059669'>&#x2193;</font>"
+        elif net_change is not None and net_change > 0:
+            arrow = "<font size='16' color='#dc2626'>&#x2191;</font>"
+        else:
+            arrow = "<font size='16' color='#64748b'>&#x2194;</font>"
+        trend_parts.append(f"{arrow}<br/><font size='9'>{net_change_label}</font>")
+    if days_tracking > 0 and total_processed > 0:
+        avg_per_day = total_processed / days_tracking
+        trend_parts.append(f"<font size='9' color='#334155'><b>{avg_per_day:.1f}</b> vehicles/day avg over {days_tracking} days</font>")
+
+    glance_left = Paragraph("<br/>".join(glance_parts), ParagraphStyle('gl', parent=styles['Normal'], alignment=TA_CENTER, leading=16))
+    glance_right = Paragraph("<br/><br/>".join(trend_parts) if trend_parts else "", ParagraphStyle('gr', parent=styles['Normal'], alignment=TA_CENTER, leading=14))
+
+    glance_table = Table([[glance_left, glance_right]], colWidths=[3.5*inch, 3.3*inch], rowHeights=[None])
+    glance_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('BACKGROUND', (0, 0), (0, 0), colors.HexColor('#f0fdf4') if (latest_inv > 0 and pct >= 80) else (colors.HexColor('#fffbeb') if (latest_inv > 0 and pct >= 60) else colors.HexColor('#fef2f2')) if latest_inv > 0 else colors.HexColor('#f8fafc')),
+        ('BACKGROUND', (1, 0), (1, 0), colors.HexColor('#f8fafc')),
+        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#e2e8f0')),
+        ('LINEAFTER', (0, 0), (0, -1), 0.5, colors.HexColor('#e2e8f0')),
+        ('TOPPADDING', (0, 0), (-1, -1), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+        ('LEFTPADDING', (0, 0), (-1, -1), 10),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+        ('ROUNDEDCORNERS', [4, 4, 4, 4]),
+    ]))
+    story.append(glance_table)
+    story.append(Spacer(1, 6))
+
+    # ── Current Status metrics (2x3 grid) ──
     story.append(Paragraph("Current Status", heading_style))
 
+    # Each metric card: colored top accent via LINEABOVE, number, label
+    def _metric_cell(value, label, val_color='#1e293b'):
+        return [
+            Paragraph(f"<b>{value}</b>", ParagraphStyle('mv2', parent=metric_value, alignment=TA_CENTER, textColor=colors.HexColor(val_color))),
+            Paragraph(label, ParagraphStyle('ml2', parent=metric_label, alignment=TA_CENTER)),
+        ]
+
+    m_active = _metric_cell(total_active, "Active on Board")
+    m_detail = _metric_cell(len(needs_detail), "Needs Detail", '#d97706')
+    m_ready = _metric_cell(len(ready_photos), "Ready for Photos", '#2563eb')
+    m_done = _metric_cell(total_processed, "Vehicles Completed", '#059669')
+    m_over30 = _metric_cell(len(over_30), "Over 30 Days Old", '#dc2626')
+    m_days = _metric_cell(days_tracking, "Days Tracking")
+
     metric_data = [
-        [Paragraph(f"<b>{total_active}</b>", ParagraphStyle('mv', parent=metric_value, alignment=TA_CENTER)),
-         Paragraph(f"<b>{len(needs_detail)}</b>", ParagraphStyle('mv', parent=metric_value, alignment=TA_CENTER, textColor=colors.HexColor('#d97706'))),
-         Paragraph(f"<b>{len(ready_photos)}</b>", ParagraphStyle('mv', parent=metric_value, alignment=TA_CENTER, textColor=colors.HexColor('#2563eb')))],
-        [Paragraph("Active on Board", ParagraphStyle('ml', parent=metric_label, alignment=TA_CENTER)),
-         Paragraph("Needs Detail", ParagraphStyle('ml', parent=metric_label, alignment=TA_CENTER)),
-         Paragraph("Ready for Photos", ParagraphStyle('ml', parent=metric_label, alignment=TA_CENTER))],
-        [Paragraph(f"<b>{total_processed}</b>", ParagraphStyle('mv', parent=metric_value, alignment=TA_CENTER, textColor=colors.HexColor('#059669'))),
-         Paragraph(f"<b>{len(over_30)}</b>", ParagraphStyle('mv', parent=metric_value, alignment=TA_CENTER, textColor=colors.HexColor('#dc2626'))),
-         Paragraph(f"<b>{days_tracking}</b>", ParagraphStyle('mv', parent=metric_value, alignment=TA_CENTER))],
-        [Paragraph("Vehicles Completed", ParagraphStyle('ml', parent=metric_label, alignment=TA_CENTER)),
-         Paragraph("Over 30 Days Old", ParagraphStyle('ml', parent=metric_label, alignment=TA_CENTER)),
-         Paragraph("Days Tracking", ParagraphStyle('ml', parent=metric_label, alignment=TA_CENTER))],
+        [m_active[0], m_detail[0], m_ready[0]],
+        [m_active[1], m_detail[1], m_ready[1]],
+        [m_done[0], m_over30[0], m_days[0]],
+        [m_done[1], m_over30[1], m_days[1]],
     ]
 
     mt = Table(metric_data, colWidths=[2.3*inch, 2.3*inch, 2.3*inch], rowHeights=[36, 16, 36, 16])
@@ -5361,83 +5463,129 @@ async def photos_progress_pdf(request: Request, db: AsyncSession = Depends(get_d
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
         ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f8fafc')),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        # Accent lines on top of value rows
+        ('LINEABOVE', (0, 0), (0, 0), 2.5, colors.HexColor('#334155')),
+        ('LINEABOVE', (1, 0), (1, 0), 2.5, colors.HexColor('#d97706')),
+        ('LINEABOVE', (2, 0), (2, 0), 2.5, colors.HexColor('#2563eb')),
+        ('LINEABOVE', (0, 2), (0, 2), 2.5, colors.HexColor('#059669')),
+        ('LINEABOVE', (1, 2), (1, 2), 2.5, colors.HexColor('#dc2626')),
+        ('LINEABOVE', (2, 2), (2, 2), 2.5, colors.HexColor('#6366f1')),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
     ]))
     story.append(mt)
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 4))
 
-    if days_tracking > 0 and total_processed > 0:
-        avg_per_day = total_processed / days_tracking
-        story.append(Paragraph(f"Processing an average of <b>{avg_per_day:.1f} vehicles per day</b> since tracking began.", body_style))
-
-    # ── Inventory photo-readiness percentage ──
-    latest_inv = 0
-    for snap in reversed(snapshots):
-        if snap.total_inventory and snap.total_inventory > 0:
-            latest_inv = snap.total_inventory
-            break
-    if latest_inv > 0:
-        photo_ready = latest_inv - total_active
-        pct = (photo_ready / latest_inv) * 100
-        story.append(Spacer(1, 8))
-        story.append(Paragraph(f"<b>{photo_ready} of {latest_inv}</b> vehicles on the lot have professional photos (<b>{pct:.0f}%</b> photo-ready).", body_style))
-
-    # ── Backlog bar chart ──
+    # ── Backlog bar chart (improved) ──
     if len(weeks) >= 2:
         story.append(Paragraph("Backlog Trend", heading_style))
-        story.append(Paragraph("Vehicles needing photos per week — lower is better.", body_style))
+        story.append(Paragraph("Weekly vehicle count needing photos. Green = improved from prior week, red = increased.", body_style))
         story.append(Spacer(1, 8))
 
-        from reportlab.graphics.shapes import Drawing, Rect, String, Line
+        from reportlab.graphics.shapes import Drawing, Rect, String, Line, Circle
         from reportlab.graphics import renderPDF
 
         sorted_weeks = sorted(weeks.keys())
         backlogs = [weeks[k]["backlog"] for k in sorted_weeks]
         max_val = max(backlogs) if backlogs else 1
+        min_val = min(backlogs) if backlogs else 0
         num_bars = len(sorted_weeks)
 
-        chart_w = 6.5 * inch
-        chart_h = 2.0 * inch
-        bar_w = min(40, (chart_w - 40) / num_bars - 8)
-        drawing = Drawing(chart_w, chart_h + 30)
+        # Limit to last 12 weeks max for readability
+        if num_bars > 12:
+            sorted_weeks = sorted_weeks[-12:]
+            backlogs = backlogs[-12:]
+            num_bars = 12
 
-        # Y axis line
-        drawing.add(Line(35, 20, 35, chart_h + 10, strokeColor=colors.HexColor('#cbd5e1'), strokeWidth=0.5))
+        chart_w = 6.8 * inch
+        chart_h = 2.2 * inch
+        margin_left = 40
+        margin_bottom = 24
+        bar_gap = 6
+        usable_w = chart_w - margin_left - 20
+        bar_w = max(16, min(42, (usable_w / num_bars) - bar_gap))
+        total_bars_w = num_bars * (bar_w + bar_gap) - bar_gap
+        start_x = margin_left + (usable_w - total_bars_w) / 2
+
+        drawing = Drawing(chart_w, chart_h + 36)
+
+        # Y axis with gridlines
+        num_gridlines = 4
+        for g in range(num_gridlines + 1):
+            y = margin_bottom + (g / num_gridlines) * (chart_h - 10)
+            grid_val = int((g / num_gridlines) * max_val)
+            drawing.add(Line(margin_left - 2, y, margin_left + usable_w, y,
+                           strokeColor=colors.HexColor('#e2e8f0'), strokeWidth=0.5))
+            drawing.add(String(margin_left - 6, y - 3, str(grid_val),
+                              fontSize=7, fillColor=colors.HexColor('#94a3b8'), textAnchor='end'))
 
         for i, wk in enumerate(sorted_weeks):
-            val = weeks[wk]["backlog"]
+            val = backlogs[i]
+            prev_val = backlogs[i - 1] if i > 0 else val
             bar_h = (val / max_val) * (chart_h - 10) if max_val > 0 else 0
-            x = 45 + i * ((chart_w - 55) / num_bars)
+            x = start_x + i * (bar_w + bar_gap)
 
-            # Determine bar color — green if decreasing from first week, amber otherwise
-            bar_color = colors.HexColor('#059669') if val < backlogs[0] else colors.HexColor('#d97706')
+            # Color based on week-over-week change (more intuitive)
             if i == 0:
-                bar_color = colors.HexColor('#6366f1')
+                bar_color = colors.HexColor('#6366f1')  # First week: neutral indigo
+            elif val < prev_val:
+                bar_color = colors.HexColor('#059669')   # Improved: green
+            elif val > prev_val:
+                bar_color = colors.HexColor('#ef4444')    # Worsened: red
+            else:
+                bar_color = colors.HexColor('#94a3b8')    # No change: gray
 
-            drawing.add(Rect(x, 20, bar_w, bar_h, fillColor=bar_color, strokeColor=None))
+            # Rounded-top bar effect via rect + small circle on top
+            drawing.add(Rect(x, margin_bottom, bar_w, bar_h, fillColor=bar_color, strokeColor=None))
+            if bar_h > 4:
+                drawing.add(Rect(x, margin_bottom + bar_h - 3, bar_w, 3, fillColor=bar_color, strokeColor=None))
+
             # Value on top
-            drawing.add(String(x + bar_w / 2, 24 + bar_h, str(val), fontSize=8, fillColor=colors.HexColor('#334155'), textAnchor='middle'))
-            # Week label
+            label_y = margin_bottom + bar_h + 4
+            drawing.add(String(x + bar_w / 2, label_y, str(val),
+                              fontSize=8, fillColor=colors.HexColor('#334155'), textAnchor='middle'))
+
+            # Week label below
             short_label = wk.split('-')[1] if '-' in wk else wk
-            drawing.add(String(x + bar_w / 2, 6, short_label, fontSize=7, fillColor=colors.HexColor('#94a3b8'), textAnchor='middle'))
+            drawing.add(String(x + bar_w / 2, margin_bottom - 14, short_label,
+                              fontSize=7, fillColor=colors.HexColor('#94a3b8'), textAnchor='middle'))
 
         story.append(drawing)
-        story.append(Spacer(1, 4))
-        story.append(Paragraph("Purple = starting week. Green = improved from start. Amber = above starting level.", ParagraphStyle('legend', parent=styles['Normal'], fontSize=7, textColor=colors.HexColor('#94a3b8'))))
+        story.append(Spacer(1, 2))
+        legend_style = ParagraphStyle('legend', parent=styles['Normal'], fontSize=7, textColor=colors.HexColor('#94a3b8'))
+        story.append(Paragraph(
+            "<font color='#6366f1'>&#x25A0;</font> First week &nbsp;&nbsp;"
+            "<font color='#059669'>&#x25A0;</font> Improved from prior week &nbsp;&nbsp;"
+            "<font color='#ef4444'>&#x25A0;</font> Increased from prior week &nbsp;&nbsp;"
+            "<font color='#94a3b8'>&#x25A0;</font> No change",
+            legend_style))
 
     # ── Weekly breakdown table ──
     if weeks:
         story.append(Paragraph("Weekly Breakdown", heading_style))
 
-        week_data = [["Week", "Date Range", "New Added", "Backlog", "Uploads"]]
+        # Add a Change column
+        week_data = [["Week", "Date Range", "New Added", "Backlog", "Change", "Uploads"]]
+        prev_bl = None
         for key in sorted(weeks.keys()):
             w = weeks[key]
-            date_range = f"{w['start'].strftime('%m/%d')} – {w['end'].strftime('%m/%d')}"
-            week_data.append([key, date_range, str(w["new_total"]), str(w["backlog"]), str(w["snapshots"])])
+            date_range = f"{w['start'].strftime('%m/%d')} - {w['end'].strftime('%m/%d')}"
+            bl = w["backlog"]
+            if prev_bl is not None:
+                diff = bl - prev_bl
+                if diff < 0:
+                    change_str = f"{diff}"
+                elif diff > 0:
+                    change_str = f"+{diff}"
+                else:
+                    change_str = "—"
+            else:
+                change_str = "—"
+            prev_bl = bl
+            week_data.append([key, date_range, str(w["new_total"]), str(bl), change_str, str(w["snapshots"])])
 
-        wt = Table(week_data, colWidths=[1.1*inch, 1.5*inch, 1.1*inch, 1.1*inch, 1.1*inch])
-        wt.setStyle(TableStyle([
+        wt = Table(week_data, colWidths=[1.0*inch, 1.3*inch, 0.9*inch, 0.9*inch, 0.8*inch, 0.8*inch])
+        wt_style_cmds = [
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e293b')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -5447,50 +5595,80 @@ async def photos_progress_pdf(request: Request, db: AsyncSession = Depends(get_d
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
             ('TOPPADDING', (0, 0), (-1, -1), 5),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-        ]))
+        ]
+        # Color the Change column cells
+        for row_idx in range(1, len(week_data)):
+            change_val = week_data[row_idx][4]
+            if change_val.startswith('-'):
+                wt_style_cmds.append(('TEXTCOLOR', (4, row_idx), (4, row_idx), colors.HexColor('#059669')))
+                wt_style_cmds.append(('FONTNAME', (4, row_idx), (4, row_idx), 'Helvetica-Bold'))
+            elif change_val.startswith('+'):
+                wt_style_cmds.append(('TEXTCOLOR', (4, row_idx), (4, row_idx), colors.HexColor('#dc2626')))
+                wt_style_cmds.append(('FONTNAME', (4, row_idx), (4, row_idx), 'Helvetica-Bold'))
+        wt.setStyle(TableStyle(wt_style_cmds))
         story.append(wt)
 
-    # ── Vehicles over 30 days ──
+    # ── Vehicles over 30 days (now with Notes column) ──
     if over_30:
         story.append(Paragraph(f"Vehicles Over 30 Days ({len(over_30)})", heading_style))
         story.append(Paragraph("These vehicles have been on the lot 30+ days without professional photos and should be prioritized.", body_style))
         story.append(Spacer(1, 6))
 
-        urgent_data = [["Stock #", "Vehicle", "Age", "Status"]]
+        urgent_data = [[
+            Paragraph("<b>Stock #</b>", ParagraphStyle('uh', parent=styles['Normal'], fontSize=8, textColor=colors.white)),
+            Paragraph("<b>Vehicle</b>", ParagraphStyle('uh', parent=styles['Normal'], fontSize=8, textColor=colors.white)),
+            Paragraph("<b>Age</b>", ParagraphStyle('uh', parent=styles['Normal'], fontSize=8, textColor=colors.white, alignment=TA_CENTER)),
+            Paragraph("<b>Status</b>", ParagraphStyle('uh', parent=styles['Normal'], fontSize=8, textColor=colors.white)),
+            Paragraph("<b>Notes</b>", ParagraphStyle('uh', parent=styles['Normal'], fontSize=8, textColor=colors.white)),
+        ]]
         for v in sorted(over_30, key=lambda x: -x.age_days):
             status_label = {"needs_detail": "Needs Detail", "ready_for_photos": "Ready for Photos", "done": "Done"}.get(v.status, v.status)
-            urgent_data.append([v.stock_num, v.year_make_model, f"{v.age_days}d", status_label])
+            note_text = (v.notes or "").strip()
+            # Truncate long notes for the PDF
+            if len(note_text) > 60:
+                note_text = note_text[:57] + "..."
+            urgent_data.append([
+                v.stock_num,
+                Paragraph(v.year_make_model or "", ParagraphStyle('uc', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#334155'))),
+                f"{v.age_days}d",
+                status_label,
+                Paragraph(note_text, note_style) if note_text else "",
+            ])
 
-        ut = Table(urgent_data, colWidths=[1.2*inch, 3.5*inch, 0.8*inch, 1.3*inch])
+        ut = Table(urgent_data, colWidths=[0.9*inch, 2.2*inch, 0.6*inch, 1.1*inch, 2.0*inch])
         ut.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#991b1b')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
             ('ALIGN', (2, 0), (2, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#fef2f2'), colors.white]),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
-            ('TOPPADDING', (0, 0), (-1, -1), 5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
         ]))
         story.append(ut)
 
-    # ── Recently completed ──
+    # ── Recently completed (now with completion date) ──
     recent_done = sorted(dismissed + done_active, key=lambda v: v.last_seen_date or today(), reverse=True)[:20]
     if recent_done:
         story.append(Paragraph(f"Recently Completed ({len(dismissed) + len(done_active)} total all-time)", heading_style))
 
-        done_data = [["Stock #", "Vehicle", "Age When Done"]]
+        done_data = [["Stock #", "Vehicle", "Age When Done", "Completed"]]
         for v in recent_done:
-            done_data.append([v.stock_num, v.year_make_model, f"{v.age_days}d"])
+            comp_date = v.last_seen_date.strftime('%m/%d/%Y') if v.last_seen_date else "—"
+            done_data.append([v.stock_num, v.year_make_model, f"{v.age_days}d", comp_date])
 
-        dt_table = Table(done_data, colWidths=[1.2*inch, 4.0*inch, 1.3*inch])
+        dt_table = Table(done_data, colWidths=[1.0*inch, 3.2*inch, 1.1*inch, 1.2*inch])
         dt_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#065f46')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('ALIGN', (2, 0), (2, -1), 'CENTER'),
+            ('ALIGN', (2, 0), (3, -1), 'CENTER'),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0fdf4')]),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
             ('TOPPADDING', (0, 0), (-1, -1), 5),
@@ -5498,13 +5676,8 @@ async def photos_progress_pdf(request: Request, db: AsyncSession = Depends(get_d
         ]))
         story.append(dt_table)
 
-    # ── Footer ──
-    story.append(Spacer(1, 24))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#cbd5e1')))
-    story.append(Spacer(1, 6))
-    story.append(Paragraph(f"Generated by Commission Tracker — Photo Readiness Module", ParagraphStyle('footer', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#94a3b8'))))
-
-    doc.build(story)
+    # ── Build with page number callbacks ──
+    doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
 
     from starlette.responses import FileResponse
     filename = f"photo_progress_report_{today().strftime('%Y%m%d')}.pdf"
