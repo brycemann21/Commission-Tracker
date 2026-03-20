@@ -405,3 +405,28 @@ class PhotoSnapshot(Base):
     dismissed_today: Mapped[int] = mapped_column(Integer, default=0)
     total_inventory: Mapped[int] = mapped_column(Integer, default=0)  # total lot size for % calculation
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+# ════════════════════════════════════════════════
+# VEHICLE WISHLIST — customers waiting for a vehicle
+# ════════════════════════════════════════════════
+
+class WishlistVehicle(Base):
+    """A customer waiting for a specific vehicle to arrive at the dealership.
+    Per-user (salesperson), scoped to their dealership.
+    When the vehicle hits the lot, the salesperson knows who to call."""
+    __tablename__ = "wishlist_vehicles"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    dealership_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Customer info
+    customer_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    customer_phone: Mapped[str] = mapped_column(String(30), default="")
+    # Vehicle they want
+    vehicle_description: Mapped[str] = mapped_column(String(300), nullable=False)  # e.g. "2025 Toyota RAV4 XLE AWD"
+    color_preference: Mapped[str] = mapped_column(String(100), default="")  # e.g. "Blue or Black"
+    # Status tracking
+    status: Mapped[str] = mapped_column(String(24), default="waiting")
+    # waiting | contacted | sold | canceled
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

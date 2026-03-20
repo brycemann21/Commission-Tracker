@@ -31,7 +31,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import select, func, or_, and_, text as sa_text
 
-from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder, Dealership, Invite, Post, PostUpvote, PollOption, PollVote, DealerProduct, DealProduct, DealerBonus, PhotoVehicle, PhotoSnapshot
+from .models import Base, User, Deal, Settings, Goal, UserSession, PasswordResetToken, Reminder, Dealership, Invite, Post, PostUpvote, PollOption, PollVote, DealerProduct, DealProduct, DealerBonus, PhotoVehicle, PhotoSnapshot, WishlistVehicle
 from .schemas import DealIn
 from .payplan import calc_commission
 from .utils import parse_date, today
@@ -1145,6 +1145,27 @@ async def _run_startup_migrations():
                         await conn.execute("UPDATE settings SET deals_recalculated = true")
             except Exception:
                 pass
+        except Exception:
+            pass
+
+        # 17. Vehicle Wishlist table (customers waiting for vehicles)
+        try:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS wishlist_vehicles (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    dealership_id INTEGER,
+                    customer_name VARCHAR(200) NOT NULL,
+                    customer_phone VARCHAR(30) DEFAULT '',
+                    vehicle_description VARCHAR(300) NOT NULL,
+                    color_preference VARCHAR(100) DEFAULT '',
+                    status VARCHAR(24) DEFAULT 'waiting',
+                    notes TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_user ON wishlist_vehicles(user_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_dlr ON wishlist_vehicles(dealership_id)")
         except Exception:
             pass
 
@@ -4838,6 +4859,171 @@ async def admin_verify_user(user_id: int, request: Request, db: AsyncSession = D
     if target and target.dealership_id:
         return RedirectResponse(url=f"/admin/dealership/{target.dealership_id}", status_code=303)
     return RedirectResponse(url="/admin", status_code=303)
+
+
+# ════════════════════════════════════════════════
+# VEHICLE WISHLIST — customers waiting for vehicles
+# ════════════════════════════════════════════════
+
+@app.get("/wishlist", response_class=HTMLResponse)
+async def wishlist_page(request: Request, tab: str = "waiting", q: str = "", db: AsyncSession = Depends(get_db)):
+    """Vehicle wishlist — track customers waiting for specific vehicles."""
+    user_id = uid(request)
+    d_id = user_dealership_id(request)
+
+    search = q.strip() if q else ""
+
+    # Base query: user's own wishlist items within their dealership
+    query = select(WishlistVehicle).where(WishlistVehicle.user_id == user_id)
+    if d_id:
+        query = query.where(WishlistVehicle.dealership_id == d_id)
+
+    if search:
+        query = query.where(
+            (WishlistVehicle.customer_name.ilike(f"%{search}%")) |
+            (WishlistVehicle.vehicle_description.ilike(f"%{search}%")) |
+            (WishlistVehicle.customer_phone.ilike(f"%{search}%"))
+        )
+
+    # Get all for counts (unfiltered by tab)
+    all_items = (await db.execute(
+        select(WishlistVehicle).where(WishlistVehicle.user_id == user_id).where(
+            WishlistVehicle.dealership_id == d_id if d_id else True
+        )
+    )).scalars().all()
+
+    waiting_count = sum(1 for i in all_items if i.status == "waiting")
+    contacted_count = sum(1 for i in all_items if i.status == "contacted")
+    sold_count = sum(1 for i in all_items if i.status == "sold")
+    canceled_count = sum(1 for i in all_items if i.status == "canceled")
+
+    # Apply tab filter
+    if tab != "all":
+        query = query.where(WishlistVehicle.status == tab)
+
+    query = query.order_by(WishlistVehicle.created_at.desc())
+    items = (await db.execute(query)).scalars().all()
+
+    msg = request.query_params.get("msg", "")
+    msg_type = request.query_params.get("msg_type", "success")
+
+    return templates.TemplateResponse("wishlist.html", {
+        "request": request,
+        "user": await _user(request, db),
+        "items": items,
+        "total": len(all_items),
+        "waiting_count": waiting_count,
+        "contacted_count": contacted_count,
+        "sold_count": sold_count,
+        "canceled_count": canceled_count,
+        "current_tab": tab,
+        "search": search,
+        "message": msg,
+        "msg_type": msg_type,
+        "overdue_reminders": await get_overdue_reminders(db, user_id),
+        "has_new_posts": await get_new_community_posts(db, user_id),
+    })
+
+
+@app.post("/wishlist/add")
+async def wishlist_add(
+    request: Request,
+    customer_name: str = Form(""),
+    customer_phone: str = Form(""),
+    vehicle_description: str = Form(""),
+    color_preference: str = Form(""),
+    notes: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a customer to the vehicle wishlist."""
+    user_id = uid(request)
+    d_id = user_dealership_id(request)
+
+    if not customer_name.strip() or not vehicle_description.strip():
+        return RedirectResponse(url="/wishlist?msg=Customer+name+and+vehicle+required&msg_type=error", status_code=303)
+
+    item = WishlistVehicle(
+        user_id=user_id,
+        dealership_id=d_id,
+        customer_name=customer_name.strip(),
+        customer_phone=customer_phone.strip(),
+        vehicle_description=vehicle_description.strip(),
+        color_preference=color_preference.strip(),
+        notes=notes.strip(),
+        status="waiting",
+        created_at=_utcnow(),
+    )
+    db.add(item)
+    await db.commit()
+    return RedirectResponse(url="/wishlist?msg=Added+to+wishlist&msg_type=success", status_code=303)
+
+
+@app.post("/wishlist/{item_id}/status")
+async def wishlist_update_status(item_id: int, request: Request, new_status: str = Form(...), db: AsyncSession = Depends(get_db)):
+    """Update wishlist item status."""
+    user_id = uid(request)
+    item = (await db.execute(
+        select(WishlistVehicle).where(WishlistVehicle.id == item_id, WishlistVehicle.user_id == user_id)
+    )).scalar_one_or_none()
+    if item and new_status in ("waiting", "contacted", "sold", "canceled"):
+        item.status = new_status
+        await db.commit()
+    tab = request.query_params.get("tab", "waiting")
+    return RedirectResponse(url=f"/wishlist?tab={tab}", status_code=303)
+
+
+@app.post("/wishlist/{item_id}/note")
+async def wishlist_update_note(item_id: int, request: Request, notes: str = Form(""), db: AsyncSession = Depends(get_db)):
+    """Update notes on a wishlist item."""
+    user_id = uid(request)
+    item = (await db.execute(
+        select(WishlistVehicle).where(WishlistVehicle.id == item_id, WishlistVehicle.user_id == user_id)
+    )).scalar_one_or_none()
+    if item:
+        item.notes = notes.strip()
+        await db.commit()
+    return RedirectResponse(url="/wishlist", status_code=303)
+
+
+@app.post("/wishlist/{item_id}/edit")
+async def wishlist_edit(
+    item_id: int,
+    request: Request,
+    customer_name: str = Form(""),
+    customer_phone: str = Form(""),
+    vehicle_description: str = Form(""),
+    color_preference: str = Form(""),
+    notes: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    """Edit a wishlist item."""
+    user_id = uid(request)
+    item = (await db.execute(
+        select(WishlistVehicle).where(WishlistVehicle.id == item_id, WishlistVehicle.user_id == user_id)
+    )).scalar_one_or_none()
+    if item:
+        if customer_name.strip():
+            item.customer_name = customer_name.strip()
+        if vehicle_description.strip():
+            item.vehicle_description = vehicle_description.strip()
+        item.customer_phone = customer_phone.strip()
+        item.color_preference = color_preference.strip()
+        item.notes = notes.strip()
+        await db.commit()
+    return RedirectResponse(url="/wishlist?msg=Updated&msg_type=success", status_code=303)
+
+
+@app.post("/wishlist/{item_id}/delete")
+async def wishlist_delete(item_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Delete a wishlist item."""
+    user_id = uid(request)
+    item = (await db.execute(
+        select(WishlistVehicle).where(WishlistVehicle.id == item_id, WishlistVehicle.user_id == user_id)
+    )).scalar_one_or_none()
+    if item:
+        await db.delete(item)
+        await db.commit()
+    return RedirectResponse(url="/wishlist?msg=Removed&msg_type=success", status_code=303)
 
 
 # ════════════════════════════════════════════════
