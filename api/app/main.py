@@ -3186,6 +3186,19 @@ async def reminder_delete(reminder_id: int, request: Request, db: AsyncSession =
     return JSONResponse({"ok": True})
 
 # ════════════════════════════════════════════════
+# LEASE CONVERTER
+# ════════════════════════════════════════════════
+@app.get("/lease-converter", response_class=HTMLResponse)
+async def lease_converter(request: Request, db: AsyncSession = Depends(get_db)):
+    user = await _user(request, db)
+    return templates.TemplateResponse("lease_converter.html", {
+        "request": request, "user": user, "title": "Lease Converter",
+        "overdue_reminders": await get_overdue_reminders(db, uid(request)),
+        "has_new_posts": await get_new_community_posts(db, uid(request)),
+    })
+
+
+# ════════════════════════════════════════════════
 # PAY PLAN
 # ════════════════════════════════════════════════
 @app.get("/payplan", response_class=HTMLResponse)
