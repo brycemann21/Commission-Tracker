@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="theme-color" content="#0f172a"/>
+  <title>
+    {% if mode == "register" %}Create Account
+    {% elif mode == "forgot" %}Reset Password
+    {% elif mode == "reset_confirm" %}Set New Password
+    {% else %}Sign In
+    {% endif %} — Commission Tracker
+  </title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script>
+    (function(){var t=localStorage.getItem('ct-theme'),sys=window.matchMedia('(prefers-color-scheme:dark)').matches;if(t==='dark'||(t==null&&sys))document.documentElement.classList.add('dark');})();
+    tailwind.config={darkMode:'class'};
+  </script>
+  <style>
+    .dark body{background:#0f172a;color:#e2e8f0}
+    .dark select,.dark input{background:#1e293b;color:#e2e8f0;border-color:#475569}
+    .dark .card-wrapper{background:#1e293b;border-color:#334155}
+    .dark .tab-bg{background:#0f172a}
+    .dark .tab-active{background:#334155;color:#f1f5f9;box-shadow:none}
+    .dark .tab-inactive{color:#94a3b8}
+    .dark .tab-inactive:hover{color:#cbd5e1}
+    .dark .field-label{color:#94a3b8}
+    .dark .field-input{background:#0f172a;border-color:#475569;color:#f1f5f9}
+    .dark .field-input:focus{border-color:#818cf8;box-shadow:0 0 0 2px rgba(129,140,248,0.15)}
+    .dark .btn-primary{background:#4f46e5}
+    .dark .btn-primary:hover{background:#4338ca}
+    .dark .alert-error{background:rgba(127,29,29,0.15);border-color:#7f1d1d;color:#fca5a5}
+    .dark .alert-success{background:rgba(5,46,22,0.2);border-color:#14532d;color:#86efac}
+    .dark .link-muted{color:#818cf8}
+    .dark .link-muted:hover{color:#a5b4fc}
+    .dark .footer-text{color:#475569}
+  </style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-900 min-h-screen flex items-center justify-center p-4">
+  <div class="w-full max-w-sm">
+
+    <!-- Logo -->
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-slate-900 dark:bg-indigo-600 text-white mb-4">
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+        </svg>
+      </div>
+      <h1 class="text-2xl font-bold text-slate-900 dark:text-white">Commission Tracker</h1>
+      <p class="text-slate-500 dark:text-slate-400 mt-1 text-sm">Track your deals, commissions &amp; bonuses</p>
+    </div>
+
+    <!-- Card -->
+    <div class="card-wrapper bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
+
+      {% if mode in ("login", "register") %}
+      <!-- Tab nav -->
+      <div class="flex mb-6 tab-bg bg-slate-100 dark:bg-slate-900/50 rounded-lg p-1">
+        <a href="/login" class="flex-1 text-center py-2 text-sm font-medium rounded-md transition
+          {{ 'tab-active bg-white shadow-sm text-slate-900 dark:bg-slate-700 dark:text-white' if mode == 'login' else 'tab-inactive text-slate-500 hover:text-slate-700' }}">
+          Sign In
+        </a>
+        <a href="/register" class="flex-1 text-center py-2 text-sm font-medium rounded-md transition
+          {{ 'tab-active bg-white shadow-sm text-slate-900 dark:bg-slate-700 dark:text-white' if mode == 'register' else 'tab-inactive text-slate-500 hover:text-slate-700' }}">
+          Create Account
+        </a>
+      </div>
+      {% elif mode == "forgot" %}
+      <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-1">Reset your password</h2>
+      <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">Enter your email and we'll send you a reset link.</p>
+      {% elif mode == "reset_confirm" %}
+      <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-1">Set a new password</h2>
+      <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">Choose a strong password (at least 6 characters).</p>
+      {% endif %}
+
+      <!-- Alerts -->
+      {% if error %}
+      <div class="alert-error mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/15 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm flex items-start gap-2">
+        <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="M12 8v4m0 4h.01"/>
+        </svg>
+        {{ error }}
+      </div>
+      {% endif %}
+
+      {% if success %}
+      <div class="alert-success mb-4 p-3 rounded-lg bg-green-50 dark:bg-green-900/15 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 text-sm flex items-start gap-2">
+        <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+        {{ success }}
+      </div>
+      {% endif %}
+
+      <!-- ── SIGN IN ── -->
+      {% if mode == "login" %}
+      <form method="POST" action="/login" class="space-y-4">
+        {{ csrf_hidden|safe }}
+        <input type="hidden" name="next" value="{{ next }}"/>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+            {{ "Email" if supabase_enabled else "Username or Email" }}
+          </label>
+          <input name="{{ 'email' if supabase_enabled else 'username' }}"
+                 type="{{ 'email' if supabase_enabled else 'text' }}"
+                 required autocomplete="{{ 'email' if supabase_enabled else 'username' }}"
+                 class="w-full px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-slate-900 dark:focus:ring-indigo-500 focus:border-slate-900 dark:focus:border-indigo-500 outline-none transition"
+                 placeholder="{{ 'you@example.com' if supabase_enabled else 'Your username' }}"/>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Password</label>
+          <input name="password" type="password" required autocomplete="current-password"
+                 class="w-full px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-slate-900 dark:focus:ring-indigo-500 focus:border-slate-900 dark:focus:border-indigo-500 outline-none transition"
+                 placeholder="Your password"/>
+        </div>
+        <!-- Remember me + Forgot -->
+        <div class="flex items-center justify-between">
+          <label class="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 cursor-pointer">
+            <input type="checkbox" name="remember_me" value="on"
+                   class="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"/>
+            Remember me
+          </label>
+          <a href="/forgot-password" class="link-muted text-sm text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-indigo-400 transition">
+            Forgot password?
+          </a>
+        </div>
+        <button type="submit"
+                class="btn-primary w-full py-2.5 bg-slate-900 dark:bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-slate-800 dark:hover:bg-indigo-700 active:bg-slate-700 transition">
+          Sign In
+        </button>
+      </form>
+
+      <!-- ── CREATE ACCOUNT ── -->
+      {% elif mode == "register" %}
+      <form method="POST" action="{% if invite_token is defined and invite_token %}/join/{{ invite_token }}{% else %}/register{% endif %}" class="space-y-4" id="registerForm">
+        {{ csrf_hidden|safe }}
+        {% if supabase_enabled %}
+        <div>
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Email</label>
+          <input name="email" type="email" required autocomplete="email"
+                 class="w-full px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-slate-900 dark:focus:ring-indigo-500 focus:border-slate-900 dark:focus:border-indigo-500 outline-none transition"
+                 placeholder="you@example.com"/>
+        </div>
+        {% else %}
+        <div>
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Username</label>
+          <input name="username" type="text" required minlength="3" maxlength="80" autocomplete="username"
+                 class="w-full px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-slate-900 dark:focus:ring-indigo-500 focus:border-slate-900 dark:focus:border-indigo-500 outline-none transition"
+                 placeholder="e.g. jsmith"/>
+        </div>
+        {% endif %}
+        <div>
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Display Name <span class="text-slate-400 font-normal">(optional)</span></label>
+          <input name="display_name" type="text" maxlength="120" autocomplete="name"
+                 class="w-full px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-slate-900 dark:focus:ring-indigo-500 focus:border-slate-900 dark:focus:border-indigo-500 outline-none transition"
+                 placeholder="John Smith"/>
+        </div>
+
+        {# ── Dealership Picker (Deploy 2) — only show for new signups, not invite joins ── #}
+        {% if not (invite_token is defined and invite_token) %}
+        <div>
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Your Dealership</label>
+          <div class="relative">
+            <input type="text" id="dealershipSearch" autocomplete="off"
+                   class="w-full px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-slate-900 dark:focus:ring-indigo-500 focus:border-slate-900 dark:focus:border-indigo-500 outline-none transition"
+                   placeholder="Search for your dealership..."/>
+            <div id="placesResults" class="absolute z-10 w-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-lg shadow-lg hidden max-h-48 overflow-y-auto"></div>
+          </div>
+          <input type="hidden" name="dealership_name" id="dealershipName"/>
+          <input type="hidden" name="google_place_id" id="googlePlaceId"/>
+          <input type="hidden" name="dealership_address" id="dealershipAddress"/>
+          <input type="hidden" name="dealership_phone" id="dealershipPhone"/>
+          <!-- Selected dealership display -->
+          <div id="selectedDealer" class="hidden mt-2 p-2.5 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-600">
+            <div class="flex items-start justify-between">
+              <div>
+                <div class="text-sm font-medium text-slate-900 dark:text-white" id="selectedDealerName"></div>
+                <div class="text-xs text-slate-500 dark:text-slate-400" id="selectedDealerAddr"></div>
+              </div>
+              <button type="button" onclick="clearDealer()" class="text-xs text-slate-400 hover:text-slate-600 ml-2 shrink-0">✕ Clear</button>
+            </div>
+          </div>
+          <div class="text-xs text-slate-400 mt-1">Type your dealership name to search Google Maps, or just type a name if you can't find it</div>
+        </div>
+        {% endif %}
+
+        <div>
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Password</label>
+          <input name="password" type="password" required minlength="6" autocomplete="new-password"
+                 class="w-full px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-slate-900 dark:focus:ring-indigo-500 focus:border-slate-900 dark:focus:border-indigo-500 outline-none transition"
+                 placeholder="At least 6 characters"/>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Confirm Password</label>
+          <input name="password2" type="password" required minlength="6" autocomplete="new-password"
+                 class="w-full px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-slate-900 dark:focus:ring-indigo-500 focus:border-slate-900 dark:focus:border-indigo-500 outline-none transition"
+                 placeholder="Re-enter password"/>
+        </div>
+        <button type="submit"
+                class="btn-primary w-full py-2.5 bg-slate-900 dark:bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-slate-800 dark:hover:bg-indigo-700 active:bg-slate-700 transition">
+          Create Account
+        </button>
+      </form>
+
+      <script>
+      // ── Google Places dealership search (Deploy 2) ──
+      (function() {
+        const searchInput = document.getElementById('dealershipSearch');
+        const resultsDiv = document.getElementById('placesResults');
+        if (!searchInput || !resultsDiv) return;
+
+        let debounceTimer = null;
+
+        searchInput.addEventListener('input', function() {
+          clearTimeout(debounceTimer);
+          const q = this.value.trim();
+          if (q.length < 2) { resultsDiv.classList.add('hidden'); return; }
+
+          debounceTimer = setTimeout(async () => {
+            try {
+              const res = await fetch('/api/places/search?q=' + encodeURIComponent(q + ' dealership'));
+              const places = await res.json();
+              if (!places.length) {
+                // No results — allow manual entry
+                resultsDiv.innerHTML = '<div class="px-3 py-2 text-xs text-slate-400">No results. Your typed name will be used.</div>';
+                resultsDiv.classList.remove('hidden');
+                // Set the manual name
+                document.getElementById('dealershipName').value = searchInput.value.trim();
+                document.getElementById('googlePlaceId').value = '';
+                return;
+              }
+              resultsDiv.innerHTML = places.map(p =>
+                '<button type="button" class="w-full text-left px-3 py-2 hover:bg-slate-50 transition border-b border-slate-100 last:border-0" ' +
+                'onclick="selectPlace(\'' + p.place_id.replace(/'/g, "\\'") + '\',\'' + (p.name||'').replace(/'/g, "\\'") + '\',\'' + (p.description||'').replace(/'/g, "\\'") + '\')">' +
+                '<div class="text-sm font-medium text-slate-900">' + (p.name||'') + '</div>' +
+                '<div class="text-xs text-slate-500 truncate">' + (p.description||'') + '</div>' +
+                '</button>'
+              ).join('');
+              resultsDiv.classList.remove('hidden');
+            } catch(e) {
+              // Silently fail — user can just type a name manually
+              document.getElementById('dealershipName').value = searchInput.value.trim();
+            }
+          }, 300);
+        });
+
+        searchInput.addEventListener('blur', function() {
+          setTimeout(() => {
+            resultsDiv.classList.add('hidden');
+            // If no place selected, use typed text as dealer name
+            if (!document.getElementById('googlePlaceId').value && searchInput.value.trim()) {
+              document.getElementById('dealershipName').value = searchInput.value.trim();
+            }
+          }, 200);
+        });
+      })();
+
+      async function selectPlace(placeId, name, desc) {
+        document.getElementById('googlePlaceId').value = placeId;
+        document.getElementById('dealershipName').value = name;
+        document.getElementById('dealershipSearch').value = name;
+        document.getElementById('placesResults').classList.add('hidden');
+        // Show selected state
+        document.getElementById('selectedDealer').classList.remove('hidden');
+        document.getElementById('selectedDealerName').textContent = name;
+        document.getElementById('selectedDealerAddr').textContent = desc;
+
+        // Fetch details (address, phone)
+        try {
+          const res = await fetch('/api/places/detail?place_id=' + encodeURIComponent(placeId));
+          const d = await res.json();
+          if (d.address) {
+            document.getElementById('dealershipAddress').value = d.address;
+            document.getElementById('selectedDealerAddr').textContent = d.address;
+          }
+          if (d.phone) document.getElementById('dealershipPhone').value = d.phone;
+          if (d.name) {
+            document.getElementById('dealershipName').value = d.name;
+            document.getElementById('selectedDealerName').textContent = d.name;
+          }
+        } catch(e) { /* ok, we have the basics */ }
+      }
+
+      function clearDealer() {
+        document.getElementById('googlePlaceId').value = '';
+        document.getElementById('dealershipName').value = '';
+        document.getElementById('dealershipAddress').value = '';
+        document.getElementById('dealershipPhone').value = '';
+        document.getElementById('dealershipSearch').value = '';
+        document.getElementById('selectedDealer').classList.add('hidden');
+      }
+      </script>
+
+      <!-- ── FORGOT PASSWORD ── -->
+      {% elif mode == "forgot" %}
+      <form method="POST" action="/forgot-password" class="space-y-4">
+        {{ csrf_hidden|safe }}
+        <div>
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Email address</label>
+          <input name="email" type="email" required autocomplete="email"
+                 class="w-full px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-slate-900 dark:focus:ring-indigo-500 focus:border-slate-900 dark:focus:border-indigo-500 outline-none transition"
+                 placeholder="you@example.com"/>
+        </div>
+        <button type="submit"
+                class="btn-primary w-full py-2.5 bg-slate-900 dark:bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-slate-800 dark:hover:bg-indigo-700 active:bg-slate-700 transition">
+          Send Reset Link
+        </button>
+        <a href="/login" class="block text-center text-sm text-slate-500 hover:text-slate-900 transition mt-2">
+          ← Back to Sign In
+        </a>
+      </form>
+
+      <!-- ── RESET PASSWORD CONFIRM ── -->
+      {% elif mode == "reset_confirm" %}
+      {# Supabase sends the token in the URL fragment (#access_token=...) for legacy flow
+         or as a query param for PKCE. This script handles both. #}
+      <script>
+        window.addEventListener("DOMContentLoaded", function () {
+          // Try fragment first (legacy Supabase flow)
+          const hash = window.location.hash.substring(1);
+          const hashParams = new URLSearchParams(hash);
+          const fromHash = hashParams.get("access_token");
+
+          // Then try query string (PKCE flow / some Supabase versions)
+          const searchParams = new URLSearchParams(window.location.search);
+          const fromQuery = searchParams.get("access_token");
+
+          // Use server-provided value as final fallback
+          const serverValue = "{{ access_token | default('') }}";
+
+          const at = fromHash || fromQuery || serverValue;
+          const field = document.getElementById("access_token_field");
+          if (field && at) field.value = at;
+
+          // If we still have nothing and there is a token_hash, that is fine —
+          // the server will use it directly via the token_hash field.
+        });
+      </script>
+      <form method="POST" action="/auth/reset-confirm" class="space-y-4">
+        {{ csrf_hidden|safe }}
+        <input type="hidden" name="access_token" id="access_token_field" value="{{ access_token | default('') }}"/>
+        <input type="hidden" name="token_hash" value="{{ token_hash | default('') }}"/>
+        <input type="hidden" name="token" value="{{ token | default('') }}"/>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">New Password</label>
+          <input name="password" type="password" required minlength="6" autocomplete="new-password"
+                 class="w-full px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-slate-900 dark:focus:ring-indigo-500 focus:border-slate-900 dark:focus:border-indigo-500 outline-none transition"
+                 placeholder="At least 6 characters"/>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Confirm New Password</label>
+          <input name="password2" type="password" required minlength="6" autocomplete="new-password"
+                 class="w-full px-3 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 text-sm focus:ring-2 focus:ring-slate-900 dark:focus:ring-indigo-500 focus:border-slate-900 dark:focus:border-indigo-500 outline-none transition"
+                 placeholder="Re-enter new password"/>
+        </div>
+        <button type="submit"
+                class="btn-primary w-full py-2.5 bg-slate-900 dark:bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-slate-800 dark:hover:bg-indigo-700 active:bg-slate-700 transition">
+          Update Password
+        </button>
+      </form>
+      {% endif %}
+    </div>
+
+    <p class="footer-text text-center text-xs text-slate-400 dark:text-slate-600 mt-6">&copy; {{ today().year }} Commission Tracker</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="theme-color" content="#0f172a"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <link rel="manifest" href="/static/manifest.json"/>
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png"/>
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png"/>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+  <title>{{ title or "Commission Tracker" }}</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script>
+    (function(){
+      var t=localStorage.getItem('ct-theme');
+      var sys=window.matchMedia('(prefers-color-scheme:dark)').matches;
+      if(t==='dark'||(t==null&&sys)) document.documentElement.classList.add('dark');
+    })();
+    tailwind.config={darkMode:'class'};
+  </script>
+  <style>
+    @media(min-width:768px) and (max-width:900px){
+      .nav-links{display:none}
+      .nav-links.open{display:flex;flex-direction:column;position:absolute;top:100%;left:0;right:0;background:white;border-bottom:1px solid #e2e8f0;padding:12px 16px 16px;gap:2px;z-index:50;box-shadow:0 4px 6px -1px rgb(0 0 0/.1)}
+      .dark .nav-links.open{background:#1e293b;border-bottom-color:#334155}
+      .nav-links.open a,.nav-links.open button,.nav-links.open form{padding:12px;border-radius:8px;font-size:15px}
+      .nav-links.open .desktop-only{display:none}
+      .hamburger{display:flex!important}
+    }
+    @media(pointer:coarse){button,a,input[type="checkbox"],select{min-height:44px}.touch-row td{padding-top:12px;padding-bottom:12px}}
+    .upvote-btn{min-width:64px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:999px;padding:8px 16px;transition:all .15s}
+    .upvote-btn:active{transform:scale(0.95)}
+    kbd{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 6px;border-radius:5px;background:#f1f5f9;border:1px solid #e2e8f0;font-family:ui-monospace,monospace;font-size:12px;font-weight:600;color:#334155}
+    .dark kbd{background:#334155;border-color:#475569;color:#cbd5e1}
+    /* Dark mode global overrides */
+    .dark body{background:#0f172a;color:#e2e8f0}
+    .dark select,.dark input[type=text],.dark input[type=date],.dark input[type=number],.dark input[type=email],.dark input[type=password],.dark textarea{background:#1e293b;color:#e2e8f0;border-color:#475569}
+    .dark select:focus,.dark input[type=text]:focus,.dark input[type=date]:focus,.dark input[type=number]:focus,.dark input[type=email]:focus,.dark input[type=password]:focus,.dark textarea:focus{border-color:#818cf8;box-shadow:0 0 0 2px rgba(129,140,248,0.15)}
+    .dark select option{background:#1e293b;color:#e2e8f0}
+    .dark .editable:hover{background:#334155 !important;border-radius:4px}
+    .dark .editable input,.dark .editable select{background:#0f172a !important;color:#e2e8f0 !important;border-color:#6366f1 !important}
+    .dark table tbody tr{border-color:#334155}
+    .dark table tbody tr:hover{background:rgba(51,65,85,0.4)}
+    /* Scrollbar styling for dark mode */
+    .dark ::-webkit-scrollbar{width:8px;height:8px}
+    .dark ::-webkit-scrollbar-track{background:#1e293b}
+    .dark ::-webkit-scrollbar-thumb{background:#475569;border-radius:4px}
+    .dark ::-webkit-scrollbar-thumb:hover{background:#64748b}
+
+    /* ── Mobile bottom nav ── */
+    @media(max-width:767px){
+      .top-nav-desktop{display:none !important}
+      body{padding-bottom:64px}
+    }
+    @media(min-width:768px){
+      .mobile-bottom-nav{display:none !important}
+      .mobile-more-sheet{display:none !important}
+    }
+    .mobile-bottom-nav{
+      position:fixed;bottom:0;left:0;right:0;z-index:40;
+      background:#fff;border-top:1px solid #e2e8f0;
+      display:flex;align-items:stretch;height:64px;
+      padding-bottom:env(safe-area-inset-bottom,0);
+    }
+    .dark .mobile-bottom-nav{background:#1e293b;border-top-color:#334155}
+    .mobile-bottom-nav a,.mobile-bottom-nav button{
+      flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+      gap:2px;font-size:10px;font-weight:500;color:#64748b;
+      text-decoration:none;background:none;border:none;cursor:pointer;
+      padding:4px 2px;transition:color .15s;position:relative;
+    }
+    .dark .mobile-bottom-nav a,.dark .mobile-bottom-nav button{color:#94a3b8}
+    .mobile-bottom-nav a:active,.mobile-bottom-nav button:active{opacity:0.7}
+    .mobile-bottom-nav .bnav-active{color:#4f46e5;font-weight:600}
+    .dark .mobile-bottom-nav .bnav-active{color:#818cf8}
+    .mobile-bottom-nav svg{width:22px;height:22px}
+    .mobile-bottom-nav .bnav-badge{
+      position:absolute;top:4px;right:50%;margin-right:-14px;
+      width:15px;height:15px;border-radius:50%;
+      background:#ef4444;color:#fff;font-size:9px;font-weight:700;
+      display:flex;align-items:center;justify-content:center;
+    }
+    /* More sheet */
+    .mobile-more-sheet{
+      position:fixed;bottom:64px;left:0;right:0;z-index:39;
+      background:#fff;border-top:1px solid #e2e8f0;
+      padding:12px 16px calc(8px + env(safe-area-inset-bottom,0));
+      transform:translateY(100%);transition:transform .2s ease;
+      box-shadow:0 -4px 12px rgba(0,0,0,.08);
+    }
+    .dark .mobile-more-sheet{background:#1e293b;border-top-color:#334155;box-shadow:0 -4px 12px rgba(0,0,0,.3)}
+    .mobile-more-sheet.open{transform:translateY(0)}
+    .mobile-more-sheet a,.mobile-more-sheet button{
+      display:flex;align-items:center;gap:10px;width:100%;
+      padding:12px 8px;font-size:14px;color:#334155;
+      text-decoration:none;background:none;border:none;cursor:pointer;
+      border-radius:8px;transition:background .1s;
+    }
+    .dark .mobile-more-sheet a,.dark .mobile-more-sheet button{color:#e2e8f0}
+    .mobile-more-sheet a:hover,.mobile-more-sheet button:hover{background:#f1f5f9}
+    .dark .mobile-more-sheet a:hover,.dark .mobile-more-sheet button:hover{background:#334155}
+    .mobile-more-sheet svg{width:20px;height:20px;color:#64748b}
+    .dark .mobile-more-sheet svg{color:#94a3b8}
+  </style>
+</head>
+<body class="{{ 'bg-white' if (embed|default(false)) else 'bg-slate-50 dark:bg-slate-900' }} text-slate-900 dark:text-slate-100">
+  {% if not (embed|default(false)) %}
+  {% set path = request.url.path if request is defined else '' %}
+  <nav class="top-nav-desktop sticky top-0 z-30 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 relative">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
+      <a class="font-bold text-lg flex items-center gap-2 shrink-0" href="/">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        <span class="hidden sm:inline">Commission Tracker</span>
+        <span class="sm:hidden">CT</span>
+      </a>
+      <button class="hamburger ml-auto hidden items-center justify-center w-10 h-10 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 active:bg-slate-200 transition" onclick="document.getElementById('navLinks').classList.toggle('open')" aria-label="Menu">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <div id="navLinks" class="nav-links flex flex-wrap items-center gap-1 ml-auto">
+        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 dark:bg-indigo-600 text-white' if path=='/' else 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700' }}" href="/">Dashboard</a>
+        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 dark:bg-indigo-600 text-white' if path.startswith('/deals') else 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700' }}" href="/deals">Sales Entry</a>
+        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 dark:bg-indigo-600 text-white' if path.startswith('/delivery') else 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700' }}" href="/delivery">Delivery Board</a>
+        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 dark:bg-indigo-600 text-white' if path.startswith('/payplan') else 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700' }}" href="/payplan">Pay Plan</a>
+        <a class="text-sm px-3 py-1.5 rounded transition relative {{ 'bg-slate-900 dark:bg-indigo-600 text-white' if path.startswith('/reminders') else 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700' }}" href="/reminders">
+          Reminders
+          {%- if overdue_reminders is defined and overdue_reminders > 0 %}
+          <span class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{{ overdue_reminders }}</span>
+          {%- endif %}
+        </a>
+        {% if request.state.is_super_admin is defined and request.state.is_super_admin %}
+        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-slate-900 dark:bg-indigo-600 text-white' if path.startswith('/photos') else 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700' }}" href="/photos">
+          <span class="flex items-center gap-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><circle cx="12" cy="13" r="3"/></svg>
+            Photos
+          </span>
+        </a>
+        <a class="text-sm px-3 py-1.5 rounded transition {{ 'bg-violet-700 text-white' if path.startswith('/admin') else 'text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-slate-700' }}" href="/admin">Platform</a>
+        {% endif %}
+        <div class="w-px h-5 bg-slate-200 dark:bg-slate-600 mx-1 desktop-only hidden sm:block"></div>
+        <a class="desktop-only inline-flex items-center px-3 py-1.5 text-sm rounded border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition gap-1" href="/import">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+          Import
+        </a>
+        <a class="desktop-only inline-flex items-center px-3 py-1.5 text-sm rounded bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-800 transition gap-1" href="/deals/new">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          New Deal
+        </a>
+        <!-- Dark mode toggle -->
+        <button id="darkToggle" onclick="toggleDarkMode()" title="Toggle dark mode"
+                class="inline-flex items-center justify-center w-9 h-9 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition ml-1">
+          <svg id="icon-sun" class="w-4 h-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707M17.657 17.657l-.707-.707M6.343 6.343l-.707-.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+          </svg>
+          <svg id="icon-moon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+          </svg>
+        </button>
+        <!-- User menu -->
+        <div class="relative" id="userMenuWrap">
+          <button onclick="document.getElementById('userDropdown').classList.toggle('hidden')"
+                  class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition ml-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+            <span class="hidden sm:inline max-w-[100px] truncate">{{ user.display_name if user is defined and user else '' }}</span>
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div id="userDropdown" class="hidden absolute right-0 mt-1 w-48 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-600 py-1 z-50">
+            {% if user is defined and user %}
+            <div class="px-3 py-2 border-b border-slate-100 dark:border-slate-700">
+              <div class="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{{ user.display_name }}</div>
+              <div class="text-xs text-slate-500 dark:text-slate-400">@{{ user.username }}</div>
+            </div>
+            {% endif %}
+            <a href="/profile" class="flex items-center gap-2 px-3 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+              Profile
+            </a>
+            <a href="/logout" class="flex items-center gap-2 px-3 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+              Sign Out
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Keyboard Shortcut Sheet -->
+  <div id="shortcutSheet" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5);backdrop-filter:blur(4px)">
+    <div class="flex items-center justify-center min-h-screen p-4">
+      <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold dark:text-white">Keyboard Shortcuts</h2>
+          <button onclick="document.getElementById('shortcutSheet').classList.add('hidden')" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+        </div>
+        <div class="space-y-3 text-sm">
+          <div class="flex items-center justify-between"><span class="text-slate-600 dark:text-slate-300">New Deal</span><kbd>N</kbd></div>
+          <div class="flex items-center justify-between"><span class="text-slate-600 dark:text-slate-300">Dashboard</span><kbd>D</kbd></div>
+          <div class="flex items-center justify-between"><span class="text-slate-600 dark:text-slate-300">Sales Entry</span><kbd>S</kbd></div>
+          <div class="flex items-center justify-between"><span class="text-slate-600 dark:text-slate-300">Delivery Board</span><kbd>B</kbd></div>
+          <div class="flex items-center justify-between"><span class="text-slate-600 dark:text-slate-300">Pay Plan</span><kbd>P</kbd></div>
+          <div class="flex items-center justify-between"><span class="text-slate-600 dark:text-slate-300">Search</span><kbd>/</kbd></div>
+          <div class="flex items-center justify-between"><span class="text-slate-600 dark:text-slate-300">Close</span><kbd>Esc</kbd></div>
+          <div class="flex items-center justify-between"><span class="text-slate-600 dark:text-slate-300">This help</span><kbd>?</kbd></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  function toggleDarkMode(){
+    var isDark=document.documentElement.classList.toggle('dark');
+    localStorage.setItem('ct-theme',isDark?'dark':'light');
+    updateDarkIcons(isDark);
+  }
+  function updateDarkIcons(isDark){
+    document.getElementById('icon-sun').classList.toggle('hidden',!isDark);
+    document.getElementById('icon-moon').classList.toggle('hidden',isDark);
+  }
+  updateDarkIcons(document.documentElement.classList.contains('dark'));
+  document.addEventListener('keydown',function(e){
+    const t=(e.target.tagName||'').toLowerCase();
+    const typing=(t==='input'||t==='textarea'||t==='select'||e.target.isContentEditable);
+    const sh=document.getElementById('shortcutSheet');
+    if(e.key==='Escape'){
+      if(sh&&!sh.classList.contains('hidden')){sh.classList.add('hidden');return}
+      document.getElementById('navLinks')?.classList.remove('open');
+      document.getElementById('userDropdown')?.classList.add('hidden');
+      return;
+    }
+    if(e.key==='?'&&!e.ctrlKey&&!e.metaKey){sh?.classList.toggle('hidden');return}
+    if(typing||e.ctrlKey||e.metaKey||e.altKey)return;
+    const r={n:'/deals/new',d:'/',s:'/deals',b:'/delivery',p:'/payplan'};
+    const k=e.key.toLowerCase();
+    if(r[k]){e.preventDefault();window.location.href=r[k];return}
+    if(e.key==='/'){const s=document.querySelector('input[name="q"]');if(s){e.preventDefault();s.focus();s.select()}}
+  });
+  document.addEventListener('click',function(e){
+    const n=document.getElementById('navLinks'),h=document.querySelector('.hamburger');
+    if(n&&n.classList.contains('open')&&!n.contains(e.target)&&!h?.contains(e.target))n.classList.remove('open');
+    const d=document.getElementById('userDropdown'),w=document.getElementById('userMenuWrap');
+    if(d&&!d.classList.contains('hidden')&&!w?.contains(e.target))d.classList.add('hidden');
+  });
+  </script>
+
+  <!-- Session timeout warning -->
+  <div id="sessionWarning" class="hidden fixed inset-0 z-[100]" style="background:rgba(0,0,0,0.55)">
+    <div class="flex items-center justify-center min-h-screen p-4">
+      <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm p-6 text-center">
+        <div class="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mx-auto mb-4">
+          <svg class="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+          </svg>
+        </div>
+        <h2 class="text-lg font-bold mb-1 dark:text-white">Session Expiring Soon</h2>
+        <p class="text-sm text-slate-500 dark:text-slate-400 mb-1">You'll be signed out in</p>
+        <div id="sessionCountdown" class="text-3xl font-bold text-amber-600 mb-4">2:00</div>
+        <p class="text-xs text-slate-400 mb-5">Any unsaved changes will be lost.</p>
+        <div class="flex gap-3">
+          <button onclick="extendSession()" class="flex-1 px-4 py-2 rounded-lg bg-slate-900 dark:bg-slate-600 text-white text-sm font-medium hover:bg-slate-700 transition">Stay Signed In</button>
+          <a href="/logout" class="flex-1 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition">Sign Out</a>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function(){
+    const WARN_AT=2*60,CHECK_INTERVAL=60*1000;
+    let warningShown=false,countdownTimer=null;
+    function fmtTime(s){const m=Math.floor(s/60),sec=s%60;return `${m}:${String(sec).padStart(2,'0')}`;}
+    function showWarning(secondsLeft){
+      if(warningShown)return;warningShown=true;
+      const modal=document.getElementById('sessionWarning'),countdown=document.getElementById('sessionCountdown');
+      modal.classList.remove('hidden');let remaining=secondsLeft;
+      countdown.textContent=fmtTime(remaining);
+      countdownTimer=setInterval(()=>{remaining--;countdown.textContent=fmtTime(Math.max(0,remaining));if(remaining<=0){clearInterval(countdownTimer);window.location.href='/login?next='+encodeURIComponent(window.location.pathname);}},1000);
+    }
+    window.extendSession=async function(){
+      try{const res=await fetch('/api/session-extend',{method:'POST'});const data=await res.json();
+        if(data.ok&&data.seconds_remaining>WARN_AT){document.getElementById('sessionWarning').classList.add('hidden');clearInterval(countdownTimer);warningShown=false;}
+        else{window.location.href='/login?next='+encodeURIComponent(window.location.pathname);}
+      }catch{window.location.reload();}
+    };
+    async function checkSession(){
+      try{const res=await fetch('/api/session-status');const data=await res.json();
+        if(!data.authenticated){window.location.href='/login?next='+encodeURIComponent(window.location.pathname);return;}
+        if(data.remember_me)return;if(data.seconds_remaining<=WARN_AT)showWarning(data.seconds_remaining);
+      }catch{}
+    }
+    setTimeout(()=>{checkSession();setInterval(checkSession,CHECK_INTERVAL);},5*60*1000);
+  })();
+  </script>
+  {% endif %}
+
+  <main class="{% block main_class %}{{ 'p-4' if (embed|default(false)) else 'max-w-6xl mx-auto px-4 py-6' }}{% endblock %}">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script>
+  document.addEventListener('click',function(e){
+    var nav=document.getElementById('navLinks'),hamburger=document.querySelector('.hamburger');
+    if(nav&&nav.classList.contains('open')&&!nav.contains(e.target)&&!hamburger.contains(e.target))nav.classList.remove('open');
+    var dd=document.getElementById('userDropdown'),wrap=document.getElementById('userMenuWrap');
+    if(dd&&!dd.classList.contains('hidden')&&wrap&&!wrap.contains(e.target))dd.classList.add('hidden');
+  });
+  </script>
+  <script>
+  if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js',{scope:'/'}).catch(()=>{});}
+  </script>
+
+  {% if not (embed|default(false)) %}
+  {% set path = request.url.path if request is defined else '' %}
+  <!-- Mobile bottom navigation -->
+  <div class="mobile-more-sheet" id="mobileMoreSheet">
+    <a href="/deals/new">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      New Deal
+    </a>
+    <a href="/import">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+      Import
+    </a>
+    {% if request.state.is_super_admin is defined and request.state.is_super_admin %}
+    <a href="/admin">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3" stroke-width="2"/></svg>
+      Platform
+    </a>
+    {% endif %}
+    <a href="/profile">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+      Profile
+    </a>
+    <button onclick="toggleDarkMode();closeMobileMore()">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+      Toggle Dark Mode
+    </button>
+    <a href="/logout">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+      Sign Out
+    </a>
+  </div>
+
+  <nav class="mobile-bottom-nav">
+    <a href="/" class="{{ 'bnav-active' if path=='/' else '' }}">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+      <span>Dashboard</span>
+    </a>
+    <a href="/deals" class="{{ 'bnav-active' if path.startswith('/deals') else '' }}">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+      <span>Sales</span>
+    </a>
+    <a href="/delivery" class="{{ 'bnav-active' if path.startswith('/delivery') else '' }}">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+      <span>Delivery</span>
+    </a>
+    <a href="/reminders" class="{{ 'bnav-active' if path.startswith('/reminders') else '' }}">
+      {%- if overdue_reminders is defined and overdue_reminders > 0 %}
+      <span class="bnav-badge">{{ overdue_reminders }}</span>
+      {%- endif %}
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+      <span>Reminders</span>
+    </a>
+    <button onclick="toggleMobileMore()" id="mobileMoreBtn" class="{{ 'bnav-active' if path.startswith('/admin') or path.startswith('/profile') else '' }}">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z"/></svg>
+      <span>More</span>
+    </button>
+  </nav>
+
+  <script>
+  function toggleMobileMore(){
+    var s=document.getElementById('mobileMoreSheet');
+    if(s)s.classList.toggle('open');
+  }
+  function closeMobileMore(){
+    var s=document.getElementById('mobileMoreSheet');
+    if(s)s.classList.remove('open');
+  }
+  document.addEventListener('click',function(e){
+    var s=document.getElementById('mobileMoreSheet'),b=document.getElementById('mobileMoreBtn');
+    if(s&&s.classList.contains('open')&&!s.contains(e.target)&&b&&!b.contains(e.target))s.classList.remove('open');
+  });
+  </script>
+  {% endif %}
+</body>
+</html>

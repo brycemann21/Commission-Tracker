@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex items-end justify-between gap-3 mb-4">
+  <div>
+    <h1 class="text-xl font-bold">Pay Plan</h1>
+    {% if is_admin is defined and is_admin %}
+    <div class="text-sm text-slate-500 dark:text-slate-400">Edit your dealership's pay plan values. These values drive commission calculations for all salespeople.</div>
+    {% else %}
+    <div class="text-sm text-amber-600 dark:text-amber-400">View only — only your dealership admin can change the pay plan.</div>
+    {% endif %}
+  </div>
+</div>
+
+<form method="post" action="/payplan" class="space-y-6">
+        {{ csrf_hidden|safe }}
+
+  <!-- Pay Structure — Hybrid: $150/unit + 7% Back-End F&I -->
+  <div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4">
+    <div class="font-semibold mb-1 dark:text-white">Commission Structure</div>
+    <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">Flat per-unit + percentage of back-end F&amp;I gross on each unit sold</div>
+    <input type="hidden" name="pay_type" value="hybrid">
+    <input type="hidden" name="gross_front_pct" value="0">
+    <input type="hidden" name="mini_deal" value="0">
+    <input type="hidden" name="pack_deduction" value="0">
+    <div class="grid md:grid-cols-3 gap-4">
+      <div>
+        <label class="text-xs text-slate-500 dark:text-slate-400">Per-Unit Commission</label>
+        <div class="relative">
+          <span class="absolute left-3 top-2.5 text-slate-400">$</span>
+          <input type="number" step="0.01" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" name="unit_comm_discount_le_200" value="{{ s.unit_comm_discount_le_200 }}">
+        </div>
+        <div class="text-xs text-slate-400 mt-1">Per New &amp; Used unit sold</div>
+      </div>
+      <div>
+        <label class="text-xs text-slate-500 dark:text-slate-400">Back-End F&amp;I Gross %</label>
+        <div class="relative">
+          <input type="number" step="0.1" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="gross_back_pct" value="{{ s.gross_back_pct or 7 }}">
+        </div>
+        <div class="text-xs text-slate-400 mt-1">% of back-end F&amp;I gross on each unit</div>
+      </div>
+      <div>
+        <label class="text-xs text-slate-500 dark:text-slate-400">Hourly Rate (NY Offset)</label>
+        <div class="relative">
+          <span class="absolute left-3 top-2.5 text-slate-400">$</span>
+          <input type="number" step="0.01" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" name="hourly_rate_ny_offset" value="{{ s.hourly_rate_ny_offset }}">
+        </div>
+        <div class="text-xs text-slate-400 mt-1">Per clocked hour</div>
+      </div>
+    </div>
+    {# Keep unit_comm_discount_gt_200 synced to le_200 (no discount tiers) #}
+    <input type="hidden" name="unit_comm_discount_gt_200" value="{{ s.unit_comm_discount_le_200 }}">
+    {# Hidden legacy fields so the form still submits valid data #}
+    <input type="hidden" name="permaplate" value="{{ s.permaplate }}">
+    <input type="hidden" name="nitro_fill" value="{{ s.nitro_fill }}">
+    <input type="hidden" name="pulse" value="{{ s.pulse }}">
+    <input type="hidden" name="finance_non_subvented" value="{{ s.finance_non_subvented }}">
+    <input type="hidden" name="warranty" value="{{ s.warranty }}">
+    <input type="hidden" name="tire_wheel" value="{{ s.tire_wheel }}">
+  </div>
+
+  <!-- Bonuses -->
+  <div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4">
+    <div class="flex items-center justify-between mb-3">
+      <div class="font-semibold dark:text-white">Bonuses</div>
+      <div class="text-xs text-slate-400">Volume, spot, quarterly, or any custom bonus</div>
+    </div>
+
+    {% set cat_labels = {"volume_new": "Volume", "volume_used": "Used Volume", "spot": "Spot Bonus", "quarterly": "Quarterly", "custom": "Custom"} %}
+    {% for cat, items in bonus_groups.items() %}
+    <div class="mb-4">
+      <div class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-2">{{ cat_labels.get(cat, cat) }}</div>
+      <div class="space-y-1.5">
+        {% for b in items %}
+        <div class="flex items-center gap-2 text-sm dark:text-slate-200">
+          <span class="flex-1">
+            {{ b.name }}
+            <span class="text-xs text-slate-400">({{ b.threshold_min }}{{ '-' + b.threshold_max|string if b.threshold_max else '+' }} units, {{ b.period }})</span>
+          </span>
+          <span class="text-emerald-600 dark:text-emerald-400 font-medium">${{ "{:,.0f}".format(b.amount) }}</span>
+          {% if is_admin is defined and is_admin %}
+          <form method="post" action="/payplan/bonus/{{ b.id }}/delete" class="inline" onsubmit="return confirm('Remove this bonus?')">
+            {{ csrf_hidden|safe }}
+            <button type="submit" class="text-xs text-slate-400 hover:text-rose-500 transition px-1">✕</button>
+          </form>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+
+    {% if bonuses|length == 0 %}
+    <div class="text-sm text-slate-400 py-2">No bonuses set up yet.</div>
+    {% endif %}
+
+    {% if is_admin is defined and is_admin %}
+    </form>
+    <form method="post" action="/payplan/bonus/add" class="pt-3 border-t border-slate-100 dark:border-slate-700">
+      {{ csrf_hidden|safe }}
+      <div class="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">Add Bonus</div>
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-2">
+        <input type="text" name="bonus_name" placeholder="Bonus name" maxlength="100"
+               class="col-span-2 md:col-span-1 border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+        <select name="bonus_category" class="border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm">
+          <option value="volume_new">Volume</option>
+          <option value="volume_used">Used Volume</option>
+          <option value="spot">Spot</option>
+          <option value="quarterly">Quarterly</option>
+          <option value="custom">Custom</option>
+        </select>
+        <select name="bonus_period" class="border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm">
+          <option value="monthly">Monthly</option>
+          <option value="quarterly">Quarterly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-2">
+        <input type="number" name="bonus_min" value="0" placeholder="Min units" class="w-24 border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm">
+        <span class="text-xs text-slate-400">to</span>
+        <input type="text" name="bonus_max" placeholder="Max (blank=unlimited)" class="w-32 border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm">
+        <div class="relative">
+          <span class="absolute left-2 top-2 text-slate-400 text-sm">$</span>
+          <input type="number" step="0.01" name="bonus_amount" value="0" class="w-28 border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-6 pr-2 py-2 text-sm">
+        </div>
+        <button type="submit" class="px-3 py-2 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-700 transition">Add</button>
+      </div>
+    </form>
+    <form method="post" action="/payplan">
+      {{ csrf_hidden|safe }}
+      {# Hidden fields for the main form submission #}
+      <input type="hidden" name="pay_type" value="{{ s.pay_type or 'flat' }}">
+      <input type="hidden" name="gross_front_pct" value="{{ s.gross_front_pct or 0 }}">
+      <input type="hidden" name="gross_back_pct" value="{{ s.gross_back_pct or 0 }}">
+      <input type="hidden" name="pay_type" value="hybrid">
+      <input type="hidden" name="gross_front_pct" value="0">
+      <input type="hidden" name="gross_back_pct" value="{{ s.gross_back_pct or 7 }}">
+      <input type="hidden" name="mini_deal" value="0">
+      <input type="hidden" name="pack_deduction" value="0">
+      <input type="hidden" name="unit_comm_discount_le_200" value="{{ s.unit_comm_discount_le_200 }}">
+      <input type="hidden" name="unit_comm_discount_gt_200" value="{{ s.unit_comm_discount_le_200 }}">
+      <input type="hidden" name="permaplate" value="{{ s.permaplate }}">
+      <input type="hidden" name="nitro_fill" value="{{ s.nitro_fill }}">
+      <input type="hidden" name="pulse" value="{{ s.pulse }}">
+      <input type="hidden" name="finance_non_subvented" value="{{ s.finance_non_subvented }}">
+      <input type="hidden" name="warranty" value="{{ s.warranty }}">
+      <input type="hidden" name="tire_wheel" value="{{ s.tire_wheel }}">
+      <input type="hidden" name="hourly_rate_ny_offset" value="{{ s.hourly_rate_ny_offset }}">
+      <input type="hidden" name="new_volume_bonus_15_16" value="{{ s.new_volume_bonus_15_16 }}">
+      <input type="hidden" name="new_volume_bonus_17_18" value="{{ s.new_volume_bonus_17_18 }}">
+      <input type="hidden" name="new_volume_bonus_19_20" value="{{ s.new_volume_bonus_19_20 }}">
+      <input type="hidden" name="new_volume_bonus_21_24" value="{{ s.new_volume_bonus_21_24 }}">
+      <input type="hidden" name="new_volume_bonus_25_plus" value="{{ s.new_volume_bonus_25_plus }}">
+      <input type="hidden" name="used_volume_bonus_8_10" value="{{ s.used_volume_bonus_8_10 }}">
+      <input type="hidden" name="used_volume_bonus_11_12" value="{{ s.used_volume_bonus_11_12 }}">
+      <input type="hidden" name="used_volume_bonus_13_plus" value="{{ s.used_volume_bonus_13_plus }}">
+      <input type="hidden" name="spot_bonus_5_9" value="{{ s.spot_bonus_5_9 }}">
+      <input type="hidden" name="spot_bonus_10_12" value="{{ s.spot_bonus_10_12 }}">
+      <input type="hidden" name="spot_bonus_13_plus" value="{{ s.spot_bonus_13_plus }}">
+      <input type="hidden" name="quarterly_bonus_threshold_units" value="{{ s.quarterly_bonus_threshold_units }}">
+      <input type="hidden" name="quarterly_bonus_amount" value="{{ s.quarterly_bonus_amount }}">
+    {% endif %}
+  </div>
+
+  {% if is_admin is defined and is_admin %}
+  <div class="flex gap-2">
+    <button class="px-4 py-2 rounded bg-slate-900 dark:bg-indigo-600 text-white hover:bg-slate-700 dark:hover:bg-indigo-700 transition">Save</button>
+    <a class="px-4 py-2 rounded border border-slate-200 dark:border-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition" href="/">Back</a>
+  </div>
+  {% else %}
+  <div class="flex gap-2">
+    <a class="px-4 py-2 rounded border border-slate-200 dark:border-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition" href="/">Back to Dashboard</a>
+  </div>
+  {% endif %}
+
+</form>
+{% if is_admin is not defined or not is_admin %}
+<script>
+  // Disable all inputs for non-admin users (view only)
+  document.querySelectorAll('form[action="/payplan"] input, form[action="/payplan"] select').forEach(function(el){ el.disabled = true; el.classList.add('bg-slate-50', 'dark:bg-slate-900/30', 'text-slate-500', 'dark:text-slate-500'); });
+</script>
+{% endif %}
+{% endblock %}

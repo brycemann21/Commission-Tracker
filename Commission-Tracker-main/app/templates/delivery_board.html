@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="flex items-center justify-between mb-5">
+  <div>
+    <h1 class="text-xl font-bold">Delivery Board</h1>
+    <div class="text-sm text-slate-500 dark:text-slate-400">{{ total }} vehicle{{ 's' if total != 1 else '' }} in prep</div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4" style="min-height: 400px;">
+
+  {# ── PREP Column ── #}
+  <div>
+    <div class="flex items-center gap-2 mb-3">
+      <div class="w-3 h-3 rounded-full bg-amber-400"></div>
+      <div class="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">Prep</div>
+      <div class="text-xs text-slate-400 ml-1">({{ prep|length }})</div>
+    </div>
+    <div class="space-y-3">
+      {% for d in prep %}
+        <div data-deal="{{ d.id }}" class="bg-white dark:bg-slate-800 rounded-lg border-l-4 border-l-amber-400 border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow transition">
+          <div class="flex items-start justify-between mb-2">
+            <div>
+              <div class="font-semibold text-slate-900 dark:text-slate-100">{{ d.customer }}</div>
+              <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">#{{ d.stock_num }}{% if d.model %} · {{ d.model }}{% endif %}</div>
+            </div>
+            <button type="button" onclick="deliveryFetch('/delivery/{{ d.id }}/remove', this.closest('[data-deal]'))" class="ml-2 text-slate-300 dark:text-slate-500 hover:text-slate-500 dark:hover:text-slate-300 transition" title="Remove from board">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+          </div>
+
+          <div class="flex items-center gap-3 text-xs text-slate-500 mb-3">
+            {% if d.scheduled_date %}
+              <span class="flex items-center gap-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                {{ d.scheduled_date.strftime('%m/%d') if d.scheduled_date else '' }}
+              </span>
+            {% endif %}
+            {% if d.business_manager %}
+              <span class="flex items-center gap-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                {{ d.business_manager }}
+              </span>
+            {% endif %}
+          </div>
+
+          {# Checkboxes #}
+          <div class="space-y-2">
+            {% set checks = [
+              ("gas_ready", "Gas", d.gas_ready),
+              ("inspection_ready", "Inspection", d.inspection_ready),
+              ("insurance_ready", "Insurance", d.insurance_ready),
+            ] %}
+            {% for field, label, checked in checks %}
+              <button type="button"
+                onclick="toggleCheck(this, {{ d.id }}, '{{ field }}')"
+                data-checked="{{ '1' if checked else '0' }}"
+                class="flex items-center gap-2 w-full text-left group">
+                {% if checked %}
+                  <div class="check-box w-5 h-5 rounded border-2 border-emerald-500 bg-emerald-500 flex items-center justify-center flex-shrink-0">
+                    <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+                  </div>
+                  <span class="check-label text-sm text-slate-400 line-through">{{ label }}</span>
+                {% else %}
+                  <div class="check-box w-5 h-5 rounded border-2 border-slate-300 dark:border-slate-500 group-hover:border-slate-400 dark:group-hover:border-slate-300 flex-shrink-0 transition"></div>
+                  <span class="check-label text-sm text-slate-700 group-hover:text-slate-900 dark:text-slate-100">{{ label }}</span>
+                {% endif %}
+              </button>
+            {% endfor %}
+          </div>
+
+          {# Progress indicator #}
+          {% set done_count = (1 if d.gas_ready else 0) + (1 if d.inspection_ready else 0) + (1 if d.insurance_ready else 0) %}
+          <div class="mt-3 flex items-center gap-2">
+            <div class="flex-1 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+              <div class="h-1.5 rounded-full bg-amber-400 transition-all duration-300" style="width: {{ (done_count / 3 * 100) | round }}%"></div>
+            </div>
+            <span class="text-[10px] text-slate-400">{{ done_count }}/3</span>
+          </div>
+        </div>
+      {% endfor %}
+
+      {% if prep|length == 0 %}
+        <div class="text-center py-8 text-sm text-slate-400 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
+          No vehicles in prep
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── READY Column ── #}
+  <div>
+    <div class="flex items-center gap-2 mb-3">
+      <div class="w-3 h-3 rounded-full bg-emerald-500"></div>
+      <div class="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">Ready to Go</div>
+      <div class="text-xs text-slate-400 ml-1">({{ ready|length }})</div>
+    </div>
+    <div class="space-y-3">
+      {% for d in ready %}
+        <div data-deal="{{ d.id }}" class="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border-l-4 border-l-emerald-500 border border-emerald-200 dark:border-emerald-800 p-4 shadow-sm">
+          <div class="flex items-start justify-between mb-2">
+            <div>
+              <div class="font-semibold text-slate-900 dark:text-slate-100">{{ d.customer }}</div>
+              <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">#{{ d.stock_num }}{% if d.model %} · {{ d.model }}{% endif %}</div>
+            </div>
+            <span class="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-800 px-2 py-0.5 rounded-full uppercase">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+              Ready
+            </span>
+          </div>
+
+          <div class="flex items-center gap-3 text-xs text-slate-500 mb-3">
+            {% if d.scheduled_date %}
+              <span class="flex items-center gap-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                {{ d.scheduled_date.strftime('%m/%d') if d.scheduled_date else '' }}
+              </span>
+            {% endif %}
+            {% if d.business_manager %}
+              <span class="flex items-center gap-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                {{ d.business_manager }}
+              </span>
+            {% endif %}
+          </div>
+
+          <div class="flex items-center gap-3 text-xs text-emerald-700 dark:text-emerald-400 mb-3">
+            <span>✓ Gas</span>
+            <span>✓ Inspection</span>
+            <span>✓ Insurance</span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button type="button"
+              onclick="deliveryFetch('/delivery/{{ d.id }}/deliver', this.closest('[data-deal]'))"
+              class="flex-1 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium transition flex items-center justify-center gap-1">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+              Mark Delivered
+            </button>
+            <button type="button"
+              onclick="toggleCheck(this.closest('[data-deal]').querySelector('[data-checked]'), this.closest('[data-deal]').dataset.deal, 'gas_ready')"
+              title="Move back to Prep"
+              class="px-2 py-2 rounded border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition text-xs">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+            </button>
+          </div>
+        </div>
+      {% endfor %}
+
+      {% if ready|length == 0 %}
+        <div class="text-center py-8 text-sm text-slate-400 border-2 border-dashed border-emerald-200 dark:border-emerald-800 rounded-lg">
+          No vehicles ready yet
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<script>
+async function deliveryFetch(url, card) {
+  if (card) { card.style.opacity = '0.4'; card.style.pointerEvents = 'none'; }
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { 'Accept': 'application/json' } });
+    const data = await res.json();
+    if (data.ok && card) {
+      card.style.transition = 'opacity 0.2s, transform 0.2s';
+      card.style.opacity = '0'; card.style.transform = 'scale(0.95)';
+      setTimeout(() => card.remove(), 200);
+    } else if (card) { card.style.opacity = ''; card.style.pointerEvents = ''; }
+  } catch { if (card) { card.style.opacity = ''; card.style.pointerEvents = ''; } }
+}
+
+async function toggleCheck(btn, dealId, field) {
+  const fd = new FormData(); fd.append('field', field);
+  const res = await fetch(`/delivery/${dealId}/toggle`, {
+    method: 'POST', headers: { 'Accept': 'application/json' }, body: fd
+  });
+  const data = await res.json();
+  if (!data.ok) return;
+  // Reload page to update column state (prep → ready transition needs full re-render)
+  window.location.reload();
+}
+</script>
+
+{% endblock %}

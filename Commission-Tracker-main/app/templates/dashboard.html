@@ -1,0 +1,952 @@
+{% extends "base.html" %}
+{% block content %}
+
+{# ── Milestone banner ── #}
+{% if milestones %}
+<div class="mb-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3">
+  {% for m in milestones %}
+    <div class="flex items-center gap-2 text-sm font-medium text-emerald-800 dark:text-emerald-300 {% if not loop.first %}mt-1{% endif %}">
+      <span>🎉</span> {{ m }}
+    </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ── Today's Deliveries ── #}
+{% if todays_deliveries %}
+<div class="mb-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+  <div class="flex items-center gap-2 mb-2">
+    <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+    <span class="text-sm font-bold text-blue-800 dark:text-blue-300">Today's Deliveries ({{ todays_deliveries|length }})</span>
+  </div>
+  <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+    {% for d in todays_deliveries %}
+      <div class="flex items-center gap-3 bg-white dark:bg-slate-700 rounded-lg px-3 py-2 border border-blue-100 dark:border-slate-600">
+        <div class="flex-1 min-w-0">
+          <div class="font-medium text-sm text-slate-900 dark:text-slate-100 truncate">{{ d.customer }}</div>
+          <div class="text-xs text-slate-500 dark:text-slate-400">#{{ d.stock_num }}{% if d.model %} · {{ d.model }}{% endif %}{% if d.business_manager %} · {{ d.business_manager }}{% endif %}</div>
+        </div>
+        {% if d.on_delivery_board and d.gas_ready and d.inspection_ready and d.insurance_ready %}
+          <span class="shrink-0 text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">READY</span>
+        {% elif d.on_delivery_board %}
+          <span class="shrink-0 text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">PREP</span>
+        {% else %}
+          <a href="/delivery/{{ d.id }}/push" class="shrink-0 text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full hover:bg-blue-200 transition"
+             onclick="event.preventDefault(); fetch('/delivery/{{ d.id }}/push', {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'}}).then(()=>location.reload());">
+            → Board
+          </a>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# ── Month/Year Selector ── #}
+<div class="mb-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+  <div class="flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <div class="text-xs text-slate-500 dark:text-slate-400 uppercase tracking-wide">Viewing</div>
+      <div class="text-lg font-bold dark:text-white">
+        {% for mo in month_options %}{% if mo.num == selected_month %}{{ mo.label }}{% endif %}{% endfor %}
+        {{ selected_year }}
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button type="button" id="openGoalModal" class="text-xs px-3 py-1.5 rounded border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 dark:text-slate-300 transition flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        Goals
+      </button>
+      <a href="/reports/export?month={{ month }}" class="text-xs px-3 py-1.5 rounded border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 dark:text-slate-300 transition flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        CSV
+      </a>
+      <form method="get" action="/" class="flex flex-wrap items-end gap-2">
+        <select name="month" class="h-9 px-2 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 dark:text-slate-200 text-sm" onchange="this.form.submit()">
+          {% for mo in month_options %}
+            <option value="{{ mo.num }}" {% if mo.num == selected_month %}selected{% endif %}>{{ mo.label }}</option>
+          {% endfor %}
+        </select>
+        <select name="year" class="h-9 px-2 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 dark:text-slate-200 text-sm" onchange="this.form.submit()">
+          {% for y in year_options %}
+            <option value="{{ y }}" {% if y == selected_year %}selected{% endif %}>{{ y }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="h-9 px-3 rounded bg-slate-900 dark:bg-slate-600 text-white text-sm hover:bg-slate-700 transition">Go</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+{# ── Stat Cards ── #}
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+
+  {# Units MTD #}
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+    <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Units MTD</div>
+    <div class="text-3xl font-bold mt-1 dark:text-white">{{ units_mtd | int if units_mtd == units_mtd | int else units_mtd }}</div>
+    <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">New: {{ new_mtd }} · Used: {{ used_mtd }}</div>
+    {% if units_diff != 0 %}
+      <div class="text-xs mt-1 flex items-center gap-1 {{ 'text-emerald-600 dark:text-emerald-400' if units_diff > 0 else 'text-rose-600 dark:text-rose-400' }}">
+        {% if units_diff > 0 %}↑{% else %}↓{% endif %} {{ units_diff|abs }} vs last month
+      </div>
+    {% endif %}
+    {% set unit_pct = ((units_mtd / goals.unit_goal * 100) | round | int) if goals.unit_goal > 0 else 0 %}
+    <div class="mt-2">
+      <div class="flex justify-between text-[10px] text-slate-400 dark:text-slate-500 mb-0.5">
+        <span>Goal: {{ goals.unit_goal }}</span>
+        <span>{{ unit_pct }}%</span>
+      </div>
+      <div class="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+        <div class="h-2 rounded-full transition-all duration-500 {{ 'bg-emerald-500' if unit_pct >= 100 else 'bg-amber-500' if unit_pct >= 60 else 'bg-slate-400' }}" style="width: {{ [unit_pct, 100] | min }}%"></div>
+      </div>
+    </div>
+  </div>
+
+  {# Commission MTD #}
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+    <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Commission MTD</div>
+    <div class="text-3xl font-bold mt-1 dark:text-white">${{ "{:,.0f}".format(comm_mtd or 0) }}</div>
+    <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">Avg/deal: ${{ "{:,.0f}".format(avg_per_deal or 0) }}</div>
+    {% if comm_diff != 0 %}
+      <div class="text-xs mt-1 flex items-center gap-1 {{ 'text-emerald-600 dark:text-emerald-400' if comm_diff > 0 else 'text-rose-600 dark:text-rose-400' }}">
+        {% if comm_diff > 0 %}↑{% else %}↓{% endif %} ${{ "{:,.0f}".format(comm_diff|abs) }} vs last month
+      </div>
+    {% endif %}
+    {% set comm_pct = ((comm_mtd / goals.commission_goal * 100) | round | int) if goals.commission_goal > 0 else 0 %}
+    <div class="mt-2">
+      <div class="flex justify-between text-[10px] text-slate-400 dark:text-slate-500 mb-0.5">
+        <span>Goal: ${{ "{:,.0f}".format(goals.commission_goal) }}</span>
+        <span>{{ comm_pct }}%</span>
+      </div>
+      <div class="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+        <div class="h-2 rounded-full transition-all duration-500 {{ 'bg-emerald-500' if comm_pct >= 100 else 'bg-amber-500' if comm_pct >= 60 else 'bg-slate-400' }}" style="width: {{ [comm_pct, 100] | min }}%"></div>
+      </div>
+    </div>
+  </div>
+
+  {# Projected Units #}
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+    <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Projected Units</div>
+    <div class="text-3xl font-bold mt-1 text-blue-700 dark:text-blue-400">{{ proj_units | int if proj_units == proj_units | int else proj_units }} <span class="text-base font-medium text-slate-400">MTD</span></div>
+    <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">{{ pending_in_month_count }} pending</div>
+    <div class="text-xl font-bold mt-2 dark:text-white">{{ units_ytd }} <span class="text-sm font-medium text-slate-400">YTD</span></div>
+  </div>
+
+  {# Bonus #}
+  <button type="button" id="openBonusModal" class="text-left bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 hover:border-slate-300 hover:shadow-sm transition">
+    <div class="text-xs font-medium text-slate-500 uppercase tracking-wide">Total Bonus</div>
+    <div class="text-3xl font-bold mt-1 text-violet-700 dark:text-violet-400">${{ "{:,.0f}".format(current_bonus_total or 0) }}</div>
+    <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">Click for breakdown</div>
+  </button>
+</div>
+
+{# ── Secondary stats ── #}
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+    <div class="text-xs text-slate-500 dark:text-slate-400">Commission YTD</div>
+    <div class="text-xl font-bold dark:text-white">${{ "{:,.0f}".format(comm_ytd or 0) }}</div>
+  </div>
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+    <div class="text-xs text-slate-500 dark:text-slate-400">Avg Per Copy</div>
+    <div class="text-xl font-bold dark:text-white">${{ "{:,.0f}".format(avg_per_deal or 0) }}</div>
+  </div>
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+    <div class="text-xs text-slate-500 dark:text-slate-400">Spots MTD</div>
+    <div class="text-xl font-bold dark:text-white">{{ spots_mtd }}</div>
+  </div>
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+    <div class="text-xs text-slate-500 dark:text-slate-400">Projected Commission</div>
+    <div class="text-xl font-bold text-blue-700 dark:text-blue-400">${{ "{:,.0f}".format(proj_comm or 0) }}</div>
+  </div>
+</div>
+
+{# ── Next Milestones ── #}
+{% set custom_list = bonus_breakdown.get('custom_list', []) %}
+{% if custom_list %}
+  {# Group by category and pick closest (lowest need) per category #}
+  {% set closest = {} %}
+  {% for b in custom_list %}
+    {% if not b.hit and b.need > 0 %}
+      {% if b.category not in closest or b.need < closest[b.category].need %}
+        {% if closest.update({b.category: b}) %}{% endif %}
+      {% endif %}
+    {% endif %}
+  {% endfor %}
+  {% set upcoming = closest.values() | list %}
+  {% if upcoming|length > 0 %}
+  <div class="mb-4 bg-white dark:bg-slate-800 rounded-lg border border-amber-200 dark:border-amber-800/50 p-4">
+    <div class="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-3 flex items-center gap-1">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      Next Milestones
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {% for b in upcoming %}
+      <div class="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">{{ b.name }}</div>
+        <div class="text-lg font-bold text-amber-800 dark:text-amber-300">{{ b.need }} more</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">→ {{ b.range }} = ${{ "{:,.0f}".format(b.amount) }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+{% else %}
+  {# Legacy milestones fallback #}
+  {% set vn = bonus_breakdown.volume.next %}
+  {% set un = bonus_breakdown.used.next %}
+  {% set sn = bonus_breakdown.spot.next %}
+  {% set qn = bonus_breakdown.quarterly.next %}
+  {% if vn.need > 0 or un.need > 0 or sn.need > 0 or qn.need > 0 %}
+  <div class="mb-4 bg-white dark:bg-slate-800 rounded-lg border border-amber-200 dark:border-amber-800/50 p-4">
+    <div class="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-3 flex items-center gap-1">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      Next Milestones
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {% if vn.need > 0 %}
+      <div class="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">Volume Bonus</div>
+        <div class="text-lg font-bold text-amber-800 dark:text-amber-300">{{ vn.need }} more</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">→ {{ vn.tier }} = ${{ "{:,.0f}".format(vn.amount) }}</div>
+      </div>
+      {% endif %}
+      {% if un.need > 0 %}
+      <div class="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">Used Bonus</div>
+        <div class="text-lg font-bold text-amber-800 dark:text-amber-300">{{ un.need }} more used</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">→ {{ un.tier }} = ${{ "{:,.0f}".format(un.amount) }}</div>
+      </div>
+      {% endif %}
+      {% if sn.need > 0 %}
+      <div class="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">Spot Bonus</div>
+        <div class="text-lg font-bold text-amber-800 dark:text-amber-300">{{ sn.need }} more spots</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">→ {{ sn.tier }} @ ${{ "{:,.0f}".format(sn.per) }}/spot</div>
+      </div>
+      {% endif %}
+      {% if qn.need > 0 %}
+      <div class="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">Quarterly ({{ bonus_breakdown.quarterly.q_label }})</div>
+        <div class="text-lg font-bold text-amber-800 dark:text-amber-300">{{ qn.need }} more units</div>
+        <div class="text-[11px] text-slate-500 dark:text-slate-400">→ ${{ "{:,.0f}".format(qn.amount) }}</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+{% endif %}
+
+{# ── Closing Rates (color coded) ── #}
+<div class="mb-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+  <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-3">Closing % (Delivered Deals)</div>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    {% for k in ["pulse","nitro","permaplate","aim"] %}
+      {% set r = closing_rates[k] %}
+      {% set pct = (r.pct if r.pct is not none else 0) %}
+      {% set bar_color = 'bg-emerald-500' if r.pct is not none and r.pct >= 60 else 'bg-amber-500' if r.pct is not none and r.pct >= 30 else 'bg-rose-400' if r.pct is not none else 'bg-slate-200' %}
+      {% set text_color = 'text-emerald-700 dark:text-emerald-400' if r.pct is not none and r.pct >= 60 else 'text-amber-700 dark:text-amber-400' if r.pct is not none and r.pct >= 30 else 'text-rose-600 dark:text-rose-400' if r.pct is not none else 'text-slate-400 dark:text-slate-500' %}
+      <div>
+        <div class="flex items-center justify-between mb-1">
+          <div class="text-sm font-medium text-slate-700 dark:text-slate-300">{{ r.label }}</div>
+          <div class="text-lg font-bold {{ text_color }}">
+            {% if r.pct is none %}--{% else %}{{ "{:.0f}".format(r.pct) }}%{% endif %}
+          </div>
+        </div>
+        <div class="h-2.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+          <div class="h-2.5 rounded-full {{ bar_color }} transition-all duration-500" style="width: {{ pct }}%"></div>
+        </div>
+        <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-1">{{ r.yes }}/{{ r.den }}{% if k == "aim" %} (X excluded){% endif %}</div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+{# ── Year Trend ── #}
+<div class="mb-4 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+  <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-3">{{ year }} Unit Trend</div>
+  <div class="flex items-end gap-1" style="height: 120px;">
+    {% set max_units = units_by_month | max %}
+    {% for i in range(12) %}
+      {% set u = units_by_month[i] %}
+      {% set h = ((u / max_units * 100) | round | int) if max_units > 0 else 0 %}
+      {% set is_current = (i + 1 == selected_month) %}
+      <div class="flex-1 flex flex-col items-center justify-end h-full">
+        <div class="text-[10px] font-semibold mb-1 {{ 'text-slate-900 dark:text-slate-200' if u > 0 else 'text-slate-300 dark:text-slate-600' }}">{{ u }}</div>
+        <div class="w-full rounded-t {{ 'bg-emerald-500' if is_current else 'bg-slate-400 dark:bg-slate-500' if u > 0 else 'bg-slate-200 dark:bg-slate-700' }} transition-all duration-300"
+             style="height: {{ [h, 4] | max }}%"></div>
+        <div class="text-[10px] mt-1 {{ 'font-bold text-slate-900 dark:text-white' if is_current else 'text-slate-400 dark:text-slate-500' }}">{{ month_labels[i] }}</div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<style>
+  .editable-p { cursor:pointer; border-radius:3px; padding:1px 3px; display:inline-block; transition:background .1s; }
+  .editable-p:hover { background:#f1f5f9; } .dark .editable-p:hover { background:#334155; }
+  .editable-p.editing { background:transparent; padding:0; }
+  .editable-p input, .editable-p select { border:1.5px solid #6366f1; border-radius:4px; padding:2px 5px; font-size:.8rem; background:#fff; outline:none; min-width:70px; max-width:140px; } .dark .editable-p input, .dark .editable-p select { background:#1e293b; color:#e2e8f0; }
+  .editable-p.save-ok { animation:fok .5s ease; } .editable-p.save-err { animation:ferr .5s ease; }
+  @keyframes fok  { 0%,100%{background:transparent} 50%{background:#dcfce7} }
+  @keyframes ferr { 0%,100%{background:transparent} 50%{background:#fee2e2} }
+</style>
+
+{# ── Pending Deals ── #}
+<div class="flex items-center justify-between mb-2">
+  <h2 class="text-lg font-bold dark:text-white">Pending & Scheduled <span class="text-sm font-normal text-slate-500 dark:text-slate-400">({{ pending }})</span></h2>
+  <div class="flex items-center gap-2">
+    <button id="pendingDeleteBtn" type="button" onclick="submitPendingBulkDelete()" class="hidden text-xs px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-700 text-white font-medium transition">
+      Delete Selected (<span id="pendingDeleteCount">0</span>)
+    </button>
+    {% if pending > 0 %}
+      <button id="openPendingModal" type="button" class="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white underline">View all</button>
+    {% endif %}
+  </div>
+</div>
+
+<form id="pendingBulkForm" method="post" action="/deals/bulk-delete">
+        {{ csrf_hidden|safe }}
+  <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
+  <div class="overflow-x-auto bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+    <table class="min-w-full text-sm">
+      <thead class="bg-slate-900 text-white">
+        <tr>
+          <th class="p-2 w-8"><input type="checkbox" id="pendingSelectAll" class="rounded cursor-pointer accent-white" title="Select all"></th>
+          <th class="text-left p-2">Sold</th>
+          <th class="text-left p-2">Customer</th>
+          <th class="text-left p-2">Tag</th>
+          <th class="text-left p-2">Stock #</th>
+          <th class="text-left p-2">Model</th>
+          <th class="text-left p-2">Notes</th>
+          <th class="text-left p-2">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in pending_deals %}
+          <tr class="border-t pending-row {% if d.days_pending >= 7 %}bg-rose-50 dark:bg-rose-900/20{% elif d.days_pending >= 3 %}bg-amber-50 dark:bg-amber-900/15{% endif %}">
+            <td class="p-2">
+              <input type="checkbox" name="deal_ids" value="{{ d.id }}" class="pending-checkbox rounded cursor-pointer" onchange="updatePendingSelection()">
+            </td>
+            <td class="p-2 whitespace-nowrap">
+              <span class="editable-p" data-field="sold_date" data-id="{{ d.id }}" data-type="date"
+                    data-value="{{ d.sold_date.isoformat() if d.sold_date else '' }}">
+                {{ d.sold_date.strftime('%-m/%-d') if d.sold_date else '—' }}
+              </span>
+              {% if d.days_pending >= 3 %}
+                <span class="ml-1 text-[10px] font-medium {{ 'text-rose-600 dark:text-rose-400' if d.days_pending >= 7 else 'text-amber-600 dark:text-amber-400' }}">{{ d.days_pending }}d</span>
+              {% endif %}
+            </td>
+            <td class="p-2 font-medium">
+              <span class="editable-p" data-field="customer" data-id="{{ d.id }}" data-type="text"
+                    data-value="{{ d.customer|e }}">{{ d.customer }}</span>
+            </td>
+            <td class="p-2">
+              <span class="editable-p" data-field="tag" data-id="{{ d.id }}" data-type="select"
+                    data-value="{{ d.tag or '' }}" data-options="|Shop|Title|Inbound|FO|SPOT|LOCATE">
+                {% if d.tag %}<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300">{{ d.tag }}</span>{% else %}—{% endif %}
+              </span>
+            </td>
+            <td class="p-2">
+              <span class="editable-p" data-field="stock_num" data-id="{{ d.id }}" data-type="text"
+                    data-value="{{ d.stock_num|e }}">{{ d.stock_num or '—' }}</span>
+            </td>
+            <td class="p-2">
+              <span class="editable-p" data-field="model" data-id="{{ d.id }}" data-type="text"
+                    data-value="{{ d.model|e }}">{{ d.model or '—' }}</span>
+            </td>
+            <td class="p-2 text-slate-500 max-w-[160px]">
+              <span class="editable-p truncate block" data-field="notes" data-id="{{ d.id }}" data-type="text"
+                    data-value="{{ (d.notes or '')|e }}" title="{{ d.notes or '' }}">{{ d.notes or '—' }}</span>
+            </td>
+            <td class="p-2 whitespace-nowrap">
+              <select onchange="pendingStatusChange(this.value, {{ d.id }})"
+                      class="text-xs font-semibold rounded-md px-2 py-1.5 border cursor-pointer
+                        {% if d.status == 'Delivered' %}bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-700
+                        {% elif d.status == 'Dead' %}bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600
+                        {% elif d.status == 'Scheduled' %}bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 border-blue-200 dark:border-blue-700
+                        {% else %}bg-amber-50 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-700{% endif %}
+                        focus:outline-none focus:ring-1 focus:ring-indigo-400">
+                {% for st in ['Pending', 'Scheduled', 'Delivered', 'Dead'] %}
+                  <option value="{{ st }}" {% if d.status == st %}selected{% endif %}>{{ st }}</option>
+                {% endfor %}
+              </select>
+            </td>
+          </tr>
+        {% endfor %}
+        {% if pending_deals|length == 0 %}
+          <tr class="border-t">
+            <td class="p-6 text-center text-slate-400 dark:text-slate-500" colspan="8">
+              No pending deals.
+              <a href="/deals/new" class="ml-2 inline-flex items-center gap-1 px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                Log your first deal
+              </a>
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</form>
+
+{# ═══════ MODALS ═══════ #}
+
+{# ── Bonus Breakdown Modal ── #}
+<div id="bonusModal" class="fixed inset-0 z-50 hidden">
+  <div class="absolute inset-0 bg-black/50" id="bonusModalBackdrop"></div>
+  <div class="absolute inset-0 flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-800 w-full max-w-3xl rounded-lg shadow-lg overflow-hidden max-h-[85vh] flex flex-col">
+      <div class="flex items-center justify-between px-5 py-4 border-b dark:border-slate-700 shrink-0">
+        <div>
+          <div class="text-sm text-slate-500 dark:text-slate-400">Bonus Breakdown</div>
+          <div class="text-lg font-semibold dark:text-white">{{ month_options[selected_month-1].label }} {{ selected_year }}</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" id="printBonus" class="text-sm px-3 py-1 rounded border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 dark:text-slate-300 dark:bg-transparent">Print</button>
+          <button type="button" id="closeBonusModal" class="text-slate-500 hover:text-slate-900 text-2xl leading-none p-2">&times;</button>
+        </div>
+      </div>
+      <div class="p-5 overflow-y-auto" id="bonusModalContent">
+        <div class="text-2xl font-bold text-slate-900 dark:text-white mb-4">Total: ${{ "{:,.0f}".format(bonus_breakdown.total or 0) }}</div>
+
+        {% if bonus_breakdown.get('custom_list') %}
+          {# Count hit bonuses #}
+          {% set hit_bonuses = [] %}
+          {% for b in bonus_breakdown.custom_list %}{% if b.hit %}{% if hit_bonuses.append(b) %}{% endif %}{% endif %}{% endfor %}
+
+          {% if hit_bonuses|length > 0 %}
+          <div class="overflow-x-auto rounded border border-slate-200 dark:border-slate-700">
+            <table class="min-w-full text-sm">
+              <thead class="bg-slate-900 text-white">
+                <tr>
+                  <th class="text-left p-2.5">Bonus</th>
+                  <th class="text-left p-2.5">Your Count</th>
+                  <th class="text-left p-2.5">Threshold</th>
+                  <th class="text-right p-2.5">Earned</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for b in hit_bonuses %}
+                <tr class="border-t dark:border-slate-700 bg-emerald-50 dark:bg-emerald-900/20">
+                  <td class="p-2.5 font-medium dark:text-slate-200">{{ b.name }}</td>
+                  <td class="p-2.5">{{ b.count }} {{ b.category.replace('volume_', '') if 'volume' in b.category else b.category }}</td>
+                  <td class="p-2.5">{{ b.range }} ({{ b.period }})</td>
+                  <td class="p-2.5 text-right font-semibold text-emerald-700">${{ "{:,.0f}".format(b.earned) }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="text-slate-500 dark:text-slate-400 text-sm bg-slate-50 dark:bg-slate-700 rounded-lg p-4">No bonuses earned yet this month. Keep pushing!</div>
+          {% endif %}
+
+        {% else %}
+          {# Legacy fallback — only show rows with earned > 0 #}
+          {% set has_any = (bonus_breakdown.volume.amount or 0) > 0 or (bonus_breakdown.used.amount or 0) > 0 or (bonus_breakdown.spot.amount or 0) > 0 or bonus_breakdown.quarterly.hit %}
+          {% if has_any %}
+          <div class="overflow-x-auto rounded border border-slate-200 dark:border-slate-700">
+            <table class="min-w-full text-sm">
+              <thead class="bg-slate-900 text-white">
+                <tr>
+                  <th class="text-left p-2.5">Bonus</th>
+                  <th class="text-left p-2.5">Your Count</th>
+                  <th class="text-left p-2.5">Threshold</th>
+                  <th class="text-right p-2.5">Earned</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if (bonus_breakdown.volume.amount or 0) > 0 %}
+                <tr class="border-t dark:border-slate-700 bg-emerald-50 dark:bg-emerald-900/20">
+                  <td class="p-2.5 font-medium">Volume Bonus</td>
+                  <td class="p-2.5">{{ bonus_breakdown.volume.units }} units</td>
+                  <td class="p-2.5">{{ bonus_breakdown.volume.get('tier', '--') }}</td>
+                  <td class="p-2.5 text-right font-semibold text-emerald-700">${{ "{:,.0f}".format(bonus_breakdown.volume.amount or 0) }}</td>
+                </tr>
+                {% endif %}
+                {% if (bonus_breakdown.used.amount or 0) > 0 %}
+                <tr class="border-t dark:border-slate-700 bg-emerald-50 dark:bg-emerald-900/20">
+                  <td class="p-2.5 font-medium">Used Volume</td>
+                  <td class="p-2.5">{{ bonus_breakdown.used.units }} used</td>
+                  <td class="p-2.5">{{ bonus_breakdown.used.get('tier', '--') }}</td>
+                  <td class="p-2.5 text-right font-semibold text-emerald-700">${{ "{:,.0f}".format(bonus_breakdown.used.amount or 0) }}</td>
+                </tr>
+                {% endif %}
+                {% if (bonus_breakdown.spot.amount or 0) > 0 %}
+                <tr class="border-t dark:border-slate-700 bg-emerald-50 dark:bg-emerald-900/20">
+                  <td class="p-2.5 font-medium">Spot Bonus</td>
+                  <td class="p-2.5">{{ bonus_breakdown.spot.spots }} spots</td>
+                  <td class="p-2.5">—</td>
+                  <td class="p-2.5 text-right font-semibold text-emerald-700">${{ "{:,.0f}".format(bonus_breakdown.spot.amount or 0) }}</td>
+                </tr>
+                {% endif %}
+                {% if bonus_breakdown.quarterly.hit %}
+                <tr class="border-t dark:border-slate-700 bg-emerald-50 dark:bg-emerald-900/20">
+                  <td class="p-2.5 font-medium">Quarterly</td>
+                  <td class="p-2.5">{{ bonus_breakdown.quarterly.units_qtd }} units ({{ bonus_breakdown.quarterly.q_label }})</td>
+                  <td class="p-2.5">—</td>
+                  <td class="p-2.5 text-right font-semibold text-emerald-700">${{ "{:,.0f}".format(bonus_breakdown.quarterly.amount or 0) }}</td>
+                </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="text-slate-500 dark:text-slate-400 text-sm bg-slate-50 dark:bg-slate-700 rounded-lg p-4">No bonuses earned yet this month. Keep pushing!</div>
+          {% endif %}
+        {% endif %}
+
+        <div class="text-xs text-slate-400 mt-3">* Bonuses based on Delivered deals for selected month. Quarterly based on Delivered units in the current quarter.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Pending Modal ── #}
+<div id="pendingModal" class="fixed inset-0 z-50 hidden">
+  <div class="absolute inset-0 bg-black/50" id="pendingModalBackdrop"></div>
+  <div class="absolute inset-0 flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-800 w-full max-w-6xl rounded-lg shadow-lg overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-4 border-b dark:border-slate-700">
+        <div>
+          <div class="text-sm text-slate-500 dark:text-slate-400">Pending Deals</div>
+          <div class="text-lg font-semibold dark:text-white">All Pending ({{ pending }})</div>
+        </div>
+        <div class="flex items-center gap-3">
+          <button id="modalDeleteBtn" type="button" onclick="submitModalBulkDelete()" class="hidden text-xs px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-700 text-white font-medium transition">
+            Delete Selected (<span id="modalDeleteCount">0</span>)
+          </button>
+          <button type="button" id="closePendingModal" class="text-slate-500 hover:text-slate-900 text-2xl leading-none">&times;</button>
+        </div>
+      </div>
+      <div class="p-4 overflow-auto" style="max-height: 75vh;">
+        <form id="modalBulkForm" method="post" action="/deals/bulk-delete">
+        {{ csrf_hidden|safe }}
+          <input type="hidden" name="redirect" value="/?year={{ selected_year }}&month={{ selected_month }}">
+          <div class="overflow-x-auto bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">
+            <table class="min-w-full text-sm">
+              <thead class="bg-slate-900 text-white">
+                <tr>
+                  <th class="p-2 w-8">
+                    <input type="checkbox" id="modalSelectAll" class="rounded cursor-pointer accent-white" title="Select all">
+                  </th>
+                  <th class="text-left p-2">Sold Date</th>
+                  <th class="text-left p-2">Customer</th>
+                  <th class="text-left p-2">Tag</th>
+                  <th class="text-left p-2">Stock #</th>
+                  <th class="text-left p-2">Model</th>
+                  <th class="text-left p-2">Notes</th>
+                  <th class="p-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for d in pending_deals_all %}
+                  <tr class="border-t {% if d.days_pending >= 7 %}bg-rose-50 dark:bg-rose-900/20{% elif d.days_pending >= 3 %}bg-amber-50 dark:bg-amber-900/15{% endif %}">
+                    <td class="p-2">
+                      <input type="checkbox" name="deal_ids" value="{{ d.id }}" class="modal-checkbox rounded cursor-pointer" onchange="updateModalSelection()">
+                    </td>
+                    <td class="p-2">{{ d.sold_date or "" }}{% if d.days_pending >= 3 %} <span class="text-[10px] font-medium {{ 'text-rose-600' if d.days_pending >= 7 else 'text-amber-600' }}">{{ d.days_pending }}d</span>{% endif %}</td>
+                    <td class="p-2 font-medium dark:text-slate-200">{{ d.customer }}</td>
+                    <td class="p-2">{{ d.tag }}</td>
+                    <td class="p-2">{{ d.stock_num }}</td>
+                    <td class="p-2">{{ d.model }}</td>
+                    <td class="p-2">{{ d.notes or "" }}</td>
+                    <td class="p-2 text-right whitespace-nowrap">
+                      <a class="text-blue-600 hover:underline mr-2 text-xs" href="/deals/{{ d.id }}/edit">Edit</a>
+                      <button type="button"
+                        onclick="quickAction(this, '/deals/{{ d.id }}/mark_delivered')"
+                        class="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded text-xs font-medium">Delivered</button>
+                      <button type="button"
+                        onclick="quickAction(this, '/deals/{{ d.id }}/mark_dead')"
+                        class="bg-rose-600 hover:bg-rose-700 text-white px-2.5 py-1 rounded text-xs font-medium ml-1">Dead</button>
+                    </td>
+                  </tr>
+                {% endfor %}
+                {% if pending_deals_all|length == 0 %}
+                  <tr class="border-t"><td class="p-3 text-slate-500 dark:text-slate-400" colspan="8">No pending deals.</td></tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Goals Modal ── #}
+<div id="goalModal" class="fixed inset-0 z-50 hidden">
+  <div class="absolute inset-0 bg-black/50" id="goalModalBackdrop"></div>
+  <div class="absolute inset-0 flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-800 w-full max-w-md rounded-lg shadow-lg overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-4 border-b dark:border-slate-700">
+        <div class="text-lg font-semibold dark:text-white">Set Monthly Goals</div>
+        <button type="button" id="closeGoalModal" class="text-slate-500 hover:text-slate-900 text-2xl leading-none">&times;</button>
+      </div>
+      <form method="post" action="/goals/save" class="p-5">
+        {{ csrf_hidden|safe }}
+        <div class="text-sm text-slate-500 dark:text-slate-400 mb-4">{{ month_options[selected_month-1].label }} {{ selected_year }}</div>
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-slate-500 dark:text-slate-400 block mb-1">Unit Goal</label>
+            <input type="number" name="unit_goal" value="{{ goals.unit_goal }}" class="w-full border border-slate-300 dark:border-slate-600 rounded px-3 py-2 dark:bg-slate-700 dark:text-slate-200" min="0">
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 dark:text-slate-400 block mb-1">Commission Goal ($)</label>
+            <input type="number" step="100" name="commission_goal" value="{{ goals.commission_goal | int }}" class="w-full border border-slate-300 dark:border-slate-600 rounded px-3 py-2 dark:bg-slate-700 dark:text-slate-200" min="0">
+          </div>
+        </div>
+        <div class="mt-5 flex justify-end gap-2">
+          <button type="button" id="cancelGoalModal" class="px-4 py-2 rounded border border-slate-200 dark:border-slate-600 dark:text-slate-300 text-sm hover:bg-slate-50 dark:hover:bg-slate-700">Cancel</button>
+          <button type="submit" class="px-4 py-2 rounded bg-slate-900 dark:bg-slate-600 text-white text-sm hover:bg-slate-700">Save Goals</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{# ── Bulk Delete Confirmation Modal ── #}
+<div id="bulkDeleteModal" class="fixed inset-0 z-[60] hidden">
+  <div class="absolute inset-0 bg-black/50"></div>
+  <div class="absolute inset-0 flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-800 w-full max-w-sm rounded-lg shadow-xl overflow-hidden">
+      <div class="px-5 py-4 border-b dark:border-slate-700 flex items-center gap-3">
+        <div class="w-9 h-9 rounded-full bg-rose-100 dark:bg-rose-900/40 flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        </div>
+        <div>
+          <div class="font-semibold text-slate-900 dark:text-slate-100">Delete Deals</div>
+          <div class="text-xs text-slate-500 dark:text-slate-400" id="bulkDeleteSubtitle"></div>
+        </div>
+      </div>
+      <div class="px-5 py-4">
+        <p class="text-sm text-slate-600 dark:text-slate-400">This will permanently delete <strong id="bulkDeleteCountText"></strong>. This action cannot be undone.</p>
+      </div>
+      <div class="px-5 py-3 bg-slate-50 dark:bg-slate-700 border-t dark:border-slate-600 flex justify-end gap-2">
+        <button type="button" onclick="closeBulkDeleteModal()" class="px-4 py-2 rounded border border-slate-200 dark:border-slate-500 dark:text-slate-300 text-sm hover:bg-slate-100 dark:hover:bg-slate-600 transition">Cancel</button>
+        <button type="button" onclick="confirmBulkDelete()" class="px-4 py-2 rounded bg-rose-600 hover:bg-rose-700 text-white text-sm font-medium transition">Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ═══════ SCRIPTS ═══════ #}
+<script>
+  // ── Quick fetch actions (no page reload) ──
+  async function pendingStatusChange(val, dealId) {
+    if (val === 'Scheduled') {
+      openSchedModal(dealId, '', false);
+      return;
+    }
+
+    try {
+      var url = val === 'Delivered' ? '/deals/' + dealId + '/mark_delivered'
+              : val === 'Dead'      ? '/deals/' + dealId + '/mark_dead'
+              : null;
+      if (url) {
+        await fetch(url, {method:'POST', headers:{'Accept':'application/json'}});
+      } else {
+        await fetch('/deals/' + dealId + '/quick_update', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({field:'status', value:val})
+        });
+      }
+      window.location.reload();
+    } catch(e) {
+      console.error(e);
+    }
+  }
+
+  async function quickAction(btn, url) {
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+    try {
+      const res = await fetch(url, { method: 'POST', headers: { 'Accept': 'application/json' } });
+      const data = await res.json();
+      if (!data.ok) throw new Error();
+      // Remove the row from the pending table instantly
+      const row = btn.closest('tr');
+      if (row) {
+        row.style.transition = 'opacity 0.25s';
+        row.style.opacity = '0';
+        setTimeout(() => {
+          row.remove();
+          // Update the pending count badge
+          const badge = document.querySelector('h2 .text-slate-500');
+          if (badge) {
+            const cur = parseInt(badge.textContent.replace(/\D/g,'')) || 0;
+            badge.textContent = `(${Math.max(0, cur - 1)})`;
+          }
+        }, 250);
+      }
+    } catch {
+      btn.disabled = false;
+      btn.style.opacity = '';
+      btn.textContent = 'Error – retry';
+      btn.classList.add('bg-red-100', 'text-red-700');
+    }
+  }
+
+  // ── Inline edit for pending deals ──
+  (function() {
+    let active = null;
+    function fmtDate(iso) { if(!iso) return '—'; const p=iso.split('-'); return p.length===3?`${+p[1]}/${+p[2]}`:iso; }
+    function render(field, val) {
+      if (field==='sold_date') return fmtDate(val);
+      if (field==='tag') return val ? `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 dark:text-slate-300">${val}</span>` : '—';
+      return val || '—';
+    }
+    async function save(span, field, id, val) {
+      try {
+        const r = await fetch(`/deals/${id}/quick_update`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({field,value:val})});
+        const d = await r.json();
+        if (!d.ok) throw 0;
+        span.dataset.value = val;
+        span.innerHTML = render(field, val);
+        span.classList.remove('editing');
+        span.classList.add('save-ok');
+        setTimeout(()=>span.classList.remove('save-ok'),600);
+        active = null;
+      } catch {
+        span.classList.add('save-err');
+        setTimeout(()=>span.classList.remove('save-err'),600);
+      }
+    }
+    function cancel(span) {
+      if (!span?._orig) return;
+      span.innerHTML = span._orig;
+      span.classList.remove('editing');
+      if (active===span) active=null;
+    }
+    function startEdit(span) {
+      if (active && active!==span) cancel(active);
+      active = span;
+      span.classList.add('editing');
+      span._orig = span.innerHTML;
+      const {field, type='text', value:cur='', id} = span.dataset;
+      let inp;
+      if (type==='select') {
+        inp = document.createElement('select');
+        (span.dataset.options||'').split('|').forEach(o=>{const opt=document.createElement('option');opt.value=o;opt.textContent=o||'—';if(o===cur)opt.selected=true;inp.appendChild(opt);});
+      } else {
+        inp=document.createElement('input');
+        inp.type=type==='date'?'date':'text';
+        inp.value=cur;
+      }
+      span.innerHTML=''; span.appendChild(inp); inp.focus();
+      const commit=()=>{const v=inp.value;if(v===cur){cancel(span);return;}save(span,field,id,v);};
+      inp.addEventListener('blur',commit);
+      inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();inp.blur();}if(e.key==='Escape'){e.preventDefault();cancel(span);}});
+      if(type==='select') inp.addEventListener('change',()=>inp.blur());
+    }
+    document.addEventListener('click',e=>{
+      const s=e.target.closest('.editable-p');
+      if(s&&!s.classList.contains('editing')){startEdit(s);return;}
+      if(!s&&active) cancel(active);
+    });
+  })();
+
+  // ── Multi-select pending deals ──
+  function updatePendingSelection() {
+    const checkboxes = document.querySelectorAll('.pending-checkbox');
+    const checked = document.querySelectorAll('.pending-checkbox:checked');
+    const btn = document.getElementById('pendingDeleteBtn');
+    const countSpan = document.getElementById('pendingDeleteCount');
+    const selectAll = document.getElementById('pendingSelectAll');
+
+    countSpan.textContent = checked.length;
+    btn.classList.toggle('hidden', checked.length === 0);
+
+    // Update select-all state
+    if (checked.length === 0) selectAll.indeterminate = false, selectAll.checked = false;
+    else if (checked.length === checkboxes.length) selectAll.indeterminate = false, selectAll.checked = true;
+    else selectAll.indeterminate = true;
+  }
+
+  document.getElementById('pendingSelectAll')?.addEventListener('change', function() {
+    document.querySelectorAll('.pending-checkbox').forEach(cb => cb.checked = this.checked);
+    updatePendingSelection();
+  });
+
+  function submitPendingBulkDelete() {
+    const checked = document.querySelectorAll('.pending-checkbox:checked');
+    if (checked.length === 0) return;
+    const n = checked.length;
+    window._activeBulkForm = 'pending';
+    document.getElementById('bulkDeleteSubtitle').textContent = `${n} deal${n !== 1 ? 's' : ''} selected`;
+    document.getElementById('bulkDeleteCountText').innerHTML = `${n} pending deal${n !== 1 ? 's' : ''}`;
+    document.getElementById('bulkDeleteModal').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+
+  // ── Multi-select in View All modal ──
+  function updateModalSelection() {
+    const checkboxes = document.querySelectorAll('.modal-checkbox');
+    const checked = document.querySelectorAll('.modal-checkbox:checked');
+    const btn = document.getElementById('modalDeleteBtn');
+    const countSpan = document.getElementById('modalDeleteCount');
+    const selectAll = document.getElementById('modalSelectAll');
+
+    countSpan.textContent = checked.length;
+    btn.classList.toggle('hidden', checked.length === 0);
+
+    if (checked.length === 0) { selectAll.indeterminate = false; selectAll.checked = false; }
+    else if (checked.length === checkboxes.length) { selectAll.indeterminate = false; selectAll.checked = true; }
+    else { selectAll.indeterminate = true; }
+  }
+
+  document.getElementById('modalSelectAll')?.addEventListener('change', function() {
+    document.querySelectorAll('.modal-checkbox').forEach(cb => cb.checked = this.checked);
+    updateModalSelection();
+  });
+
+  function submitModalBulkDelete() {
+    const checked = document.querySelectorAll('.modal-checkbox:checked');
+    if (checked.length === 0) return;
+    const n = checked.length;
+    window._activeBulkForm = 'modal';
+    document.getElementById('bulkDeleteSubtitle').textContent = `${n} deal${n !== 1 ? 's' : ''} selected`;
+    document.getElementById('bulkDeleteCountText').innerHTML = `${n} pending deal${n !== 1 ? 's' : ''}`;
+    document.getElementById('bulkDeleteModal').classList.remove('hidden');
+  }
+
+  function closeBulkDeleteModal() {
+    document.getElementById('bulkDeleteModal').classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+
+  function confirmBulkDelete() {
+    closeBulkDeleteModal();
+    if (window._activeBulkForm === 'modal') {
+      document.getElementById('modalBulkForm').submit();
+    } else {
+      document.getElementById('pendingBulkForm').submit();
+    }
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeBulkDeleteModal();
+  });
+
+  function setupModal(openId, modalId, closeId, backdropId) {
+    const open = document.getElementById(openId);
+    const modal = document.getElementById(modalId);
+    const close = document.getElementById(closeId);
+    const backdrop = document.getElementById(backdropId);
+    if (!modal) return;
+    const show = () => { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; };
+    const hide = () => { modal.classList.add('hidden'); document.body.style.overflow = ''; };
+    if (open) open.addEventListener('click', show);
+    if (close) close.addEventListener('click', hide);
+    if (backdrop) backdrop.addEventListener('click', hide);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
+    return { show, hide };
+  }
+
+  setupModal('openBonusModal', 'bonusModal', 'closeBonusModal', 'bonusModalBackdrop');
+  setupModal('openPendingModal', 'pendingModal', 'closePendingModal', 'pendingModalBackdrop');
+  const goalModal = setupModal('openGoalModal', 'goalModal', 'closeGoalModal', 'goalModalBackdrop');
+  if (goalModal) {
+    const cancel = document.getElementById('cancelGoalModal');
+    if (cancel) cancel.addEventListener('click', goalModal.hide);
+  }
+
+  // Print bonus
+  (function() {
+    const btn = document.getElementById('printBonus');
+    const content = document.getElementById('bonusModalContent');
+    if (!btn || !content) return;
+    btn.addEventListener('click', () => {
+      const w = window.open('', '_blank');
+      if (!w) return;
+      w.document.write('<html><head><title>Bonus Breakdown</title><style>body{font-family:system-ui;padding:20px}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border:1px solid #e2e8f0;padding:8px;font-size:13px}th{background:#0f172a;color:white;text-align:left}</style></head><body>' + content.innerHTML + '</body></html>');
+      w.document.close(); w.focus(); w.print(); w.close();
+    });
+  })();
+</script>
+
+<!-- ── Schedule / Delivery Board Modal (Dashboard) ───────────────────────── -->
+<div id="dashSchedModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold">Schedule Delivery</h2>
+        <button onclick="closeDashSchedModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Scheduled Delivery Date</label>
+          <input type="date" id="dashSchedDate"
+                 class="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+        </div>
+        <label class="flex items-center gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition">
+          <input type="checkbox" id="dashSchedBoard" class="rounded w-4 h-4 text-indigo-600">
+          <div>
+            <div class="text-sm font-medium text-slate-800">Add to Delivery Board</div>
+            <div class="text-xs text-slate-500 dark:text-slate-400">Track prep status (gas, inspection, insurance)</div>
+          </div>
+        </label>
+      </div>
+      <div class="flex gap-3 mt-6">
+        <button onclick="saveDashSched()"
+                class="flex-1 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 transition">
+          Save
+        </button>
+        <button onclick="closeDashSchedModal()"
+                class="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let _dashSchedDealId = null;
+
+function openSchedModal(dealId, currentDate, onBoard) {
+  _dashSchedDealId = dealId;
+  document.getElementById('dashSchedDate').value = currentDate || new Date().toISOString().split('T')[0];
+  document.getElementById('dashSchedBoard').checked = onBoard || false;
+  document.getElementById('dashSchedModal').classList.remove('hidden');
+  setTimeout(function(){ document.getElementById('dashSchedDate').focus(); }, 50);
+}
+
+function closeDashSchedModal() {
+  document.getElementById('dashSchedModal').classList.add('hidden');
+  _dashSchedDealId = null;
+}
+
+async function saveDashSched() {
+  if (!_dashSchedDealId) return;
+  const date = document.getElementById('dashSchedDate').value;
+  const board = document.getElementById('dashSchedBoard').checked;
+  try {
+    await fetch(`/deals/${_dashSchedDealId}/quick_update`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field: 'status', value: 'Scheduled' }),
+    });
+    if (date) {
+      await fetch(`/deals/${_dashSchedDealId}/quick_update`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field: 'scheduled_date', value: date }),
+      });
+    }
+    if (board) {
+      const form = new FormData();
+      form.append('next', window.location.href);
+      await fetch(`/delivery/${_dashSchedDealId}/push`, { method: 'POST', body: form });
+    }
+    closeDashSchedModal();
+    window.location.reload();
+  } catch(e) {
+    alert('Failed to save. Please try again.');
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeDashSchedModal();
+});
+</script>
+
+{% endblock %}

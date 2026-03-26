@@ -1,0 +1,596 @@
+{% extends "base.html" %}
+{% block main_class %}max-w-[1400px] mx-auto px-3 py-2{% endblock %}
+{% block content %}
+
+<style>
+  @media print { body * { visibility: hidden !important; } }
+  /* Thin row table styling */
+  .dt th { padding: 5px 6px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+  .dt td { padding: 3px 6px; font-size: 0.78rem; line-height: 1.25; white-space: nowrap; }
+  .dt tbody tr { border-top: 1px solid #f1f5f9; }
+  .dark .dt tbody tr { border-top-color: #334155; }
+  .dt tbody tr:hover { background: rgba(241,245,249,0.6); }
+  .dark .dt tbody tr:hover { background: rgba(51,65,85,0.35); }
+  /* Column width hints */
+  .dt .col-sold { width: 60px; min-width: 50px; }
+  .dt .col-deld { width: 52px; min-width: 44px; }
+  .dt .col-cust { width: 120px; min-width: 90px; }
+  .dt .col-fi { width: 44px; min-width: 36px; }
+  .dt .col-stock { width: 72px; min-width: 60px; }
+  .dt .col-model { width: 120px; min-width: 80px; }
+  .dt .col-fcl { width: 56px; min-width: 44px; }
+  .dt .col-nu { width: 40px; min-width: 36px; }
+  .dt .col-comments { min-width: 120px; width: auto; }
+  .dt .col-comments .editable { white-space: normal; word-break: break-word; max-width: 100%; display: block; }
+  .dt .col-status { width: 80px; min-width: 68px; }
+  .dt .col-tag { width: 64px; min-width: 52px; }
+  .dt .col-comm { width: 80px; min-width: 68px; }
+  .dt .col-actions { width: 120px; min-width: 100px; }
+  /* Editable cells */
+  .editable { cursor: pointer; border-radius: 3px; padding: 1px 3px; display: inline-block; transition: background .1s; }
+  .editable:hover { background: #f1f5f9; }
+  .dark .editable:hover { background: #334155; }
+  .editable.editing { background: transparent; padding: 0; }
+  .editable input, .editable select { border: 1.5px solid #6366f1; border-radius: 3px; padding: 1px 4px; font-size: 0.75rem; background: #fff; outline: none; min-width: 60px; max-width: 140px; }
+  .dark .editable input, .dark .editable select { background: #1e293b; color: #e2e8f0; }
+  .editable.save-ok { animation: fok .5s ease; }
+  .editable.save-err { animation: ferr .5s ease; }
+  @keyframes fok  { 0%,100%{background:transparent} 50%{background:#dcfce7} }
+  @keyframes ferr { 0%,100%{background:transparent} 50%{background:#fee2e2} }
+  .dark @keyframes fok  { 0%,100%{background:transparent} 50%{background:rgba(22,163,74,0.15)} }
+  .dark @keyframes ferr { 0%,100%{background:transparent} 50%{background:rgba(220,38,38,0.15)} }
+  /* Action links */
+  .act-link { font-size: 0.68rem; color: #64748b; cursor: pointer; padding: 1px 3px; border-radius: 3px; white-space: nowrap; }
+  .act-link:hover { background: #f1f5f9; color: #334155; }
+  .dark .act-link { color: #94a3b8; }
+  .dark .act-link:hover { background: #334155; color: #e2e8f0; }
+  .act-link.paid { color: #059669; }
+  .act-link.paid:hover { background: #d1fae5; }
+  .dark .act-link.paid { color: #34d399; }
+  /* ── Mobile card layout (below 768px) ── */
+  @media(max-width:767px) {
+    .dt-desktop { display: none !important; }
+    .dt-mobile { display: block !important; }
+  }
+  @media(min-width:768px) {
+    .dt-mobile { display: none !important; }
+  }
+  .deal-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    background: #fff;
+    position: relative;
+  }
+  .dark .deal-card {
+    border-color: #334155;
+    background: #1e293b;
+  }
+  .deal-card .card-row {
+    display: flex;
+    align-items: baseline;
+    padding: 2px 0;
+    font-size: 0.82rem;
+    line-height: 1.4;
+  }
+  .deal-card .card-label {
+    width: 90px;
+    flex-shrink: 0;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #64748b;
+  }
+  .dark .deal-card .card-label { color: #94a3b8; }
+  .deal-card .card-value {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.85rem;
+    color: #1e293b;
+  }
+  .dark .deal-card .card-value { color: #e2e8f0; }
+  .deal-card .card-checkbox {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+  }
+  .deal-card .card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid #f1f5f9;
+  }
+  .dark .deal-card .card-footer { border-top-color: #334155; }
+  .deal-card.dead-deal { opacity: 0.5; }
+</style>
+
+<!-- Schedule Modal -->
+<div id="scheduleModal" class="fixed inset-0 z-50 hidden" style="background:rgba(0,0,0,0.5)">
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-bold dark:text-white">Schedule Delivery</h2>
+        <button onclick="closeSchedModal()" class="text-slate-400 hover:text-slate-600 text-2xl leading-none">&times;</button>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Delivery Date</label>
+          <input type="date" id="schedDate" class="w-full border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm dark:bg-slate-700 dark:text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+        </div>
+        <label class="flex items-center gap-3 cursor-pointer p-2.5 rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 transition">
+          <input type="checkbox" id="schedBoard" class="rounded w-4 h-4 text-indigo-600">
+          <div>
+            <div class="text-sm font-medium text-slate-800 dark:text-slate-200">Add to Delivery Board</div>
+            <div class="text-xs text-slate-500 dark:text-slate-400">Track prep status</div>
+          </div>
+        </label>
+      </div>
+      <div class="flex gap-3 mt-5">
+        <button onclick="saveSchedModal()" class="flex-1 px-4 py-2 rounded-lg bg-slate-900 dark:bg-indigo-600 text-white text-sm font-medium hover:bg-slate-700 dark:hover:bg-indigo-700 transition">Save</button>
+        <button onclick="closeSchedModal()" class="flex-1 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var _schedId = null;
+function openSchedModal(dealId, date, board) {
+  _schedId = dealId;
+  document.getElementById('schedDate').value = date || new Date().toISOString().split('T')[0];
+  document.getElementById('schedBoard').checked = !!board;
+  document.getElementById('scheduleModal').classList.remove('hidden');
+  setTimeout(function(){ document.getElementById('schedDate').focus(); }, 50);
+}
+function closeSchedModal() {
+  document.getElementById('scheduleModal').classList.add('hidden');
+  _schedId = null;
+}
+async function saveSchedModal() {
+  if (!_schedId) return;
+  var date = document.getElementById('schedDate').value;
+  var board = document.getElementById('schedBoard').checked;
+  try {
+    await fetch('/deals/' + _schedId + '/quick_update', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({field:'status',value:'Scheduled'})});
+    if (date) await fetch('/deals/' + _schedId + '/quick_update', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({field:'scheduled_date',value:date})});
+    if (board) { var f=new FormData(); f.append('next',window.location.href); await fetch('/delivery/'+_schedId+'/push',{method:'POST',body:f}); }
+    closeSchedModal(); window.location.reload();
+  } catch(e) { alert('Failed to save. Please try again.'); }
+}
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeSchedModal(); });
+</script>
+
+<!-- Page header row: title + filters all in one line -->
+<div class="flex flex-wrap items-center gap-2 mb-2">
+  <div class="shrink-0">
+    <span class="font-bold text-base dark:text-white">Deals</span>
+    <span class="text-xs text-slate-400 dark:text-slate-500 ml-2">{{ selected_month }}/{{ selected_year }} · <span class="text-violet-600 font-medium">↪ carry</span> = prior month · click cell to edit</span>
+  </div>
+  <form class="flex flex-wrap items-center gap-1.5 ml-auto" method="get" action="/deals">
+    <!-- prev/month/year/next -->
+    <div class="flex items-center border border-slate-200 dark:border-slate-600 rounded bg-white dark:bg-slate-800">
+      <button type="submit" name="_nav" value="prev" class="px-2 py-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-l text-sm transition">‹</button>
+      <select name="month" onchange="this.form.submit()" class="border-0 py-1.5 text-sm bg-transparent dark:text-slate-200 focus:outline-none">
+        {% for mo in range(1,13) %}
+          <option value="{{ mo }}" {% if mo == selected_month %}selected{% endif %}>{{ ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][mo] }}</option>
+        {% endfor %}
+      </select>
+      <select name="year" onchange="this.form.submit()" class="border-0 py-1.5 text-sm bg-transparent dark:text-slate-200 focus:outline-none">
+        {% for yr in range(selected_year - 2, selected_year + 2) %}
+          <option value="{{ yr }}" {% if yr == selected_year %}selected{% endif %}>{{ yr }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" name="_nav" value="next" class="px-2 py-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-r text-sm transition">›</button>
+    </div>
+    <input class="border border-slate-200 dark:border-slate-600 rounded px-2 py-1.5 text-sm w-44 bg-white dark:bg-slate-800 dark:text-slate-200 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-400" name="q" value="{{ q }}" placeholder="Search customer / stock / model" />
+    <label class="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300 cursor-pointer border border-slate-200 dark:border-slate-600 rounded px-2 py-1.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition">
+      <input type="checkbox" name="search_all" value="1" {% if searching_all %}checked{% endif %} class="rounded"> All months
+    </label>
+    <select class="border border-slate-200 dark:border-slate-600 rounded px-2 py-1.5 text-sm bg-white dark:bg-slate-800 dark:text-slate-200" name="status">
+      {% for s in ["All","Pending","Scheduled","Delivered","Dead"] %}
+        <option value="{{ s }}" {% if status==s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <select class="border border-slate-200 dark:border-slate-600 rounded px-2 py-1.5 text-sm bg-white dark:bg-slate-800 dark:text-slate-200" name="paid">
+      <option value="All" {% if paid=="All" %}selected{% endif %}>All</option>
+      <option value="Paid" {% if paid=="Paid" %}selected{% endif %}>Paid</option>
+      <option value="Pending" {% if paid=="Pending" %}selected{% endif %}>Pending Pay</option>
+    </select>
+    <button class="px-3 py-1.5 text-sm rounded bg-slate-900 dark:bg-slate-600 text-white hover:bg-slate-700 dark:hover:bg-slate-500 transition">Go</button>
+  </form>
+</div>
+
+{% if searching_all %}
+<div class="mb-2 px-3 py-1.5 rounded bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-700 text-violet-700 dark:text-violet-300 text-xs flex items-center gap-2">
+  <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0"/></svg>
+  Searching all months for <strong>"{{ q }}"</strong>
+  <a href="/deals?q={{ q }}" class="ml-auto text-violet-500 hover:text-violet-700 underline">Back to {{ selected_month }}/{{ selected_year }}</a>
+</div>
+{% endif %}
+
+<form method="post" action="/deals/bulk-delete" id="bulkForm">
+  {{ csrf_hidden|safe }}
+  <div id="bulkToolbar" class="hidden mb-2 flex items-center gap-3 px-3 py-1.5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-sm">
+    <span id="bulkCount" class="font-medium text-red-700 dark:text-red-400">0 selected</span>
+    <button type="submit" onclick="return confirm('Permanently delete selected deals?')" class="px-3 py-1 rounded bg-red-600 text-white text-xs font-medium hover:bg-red-700 transition">Delete</button>
+    <button type="button" onclick="clearSelection()" class="px-2 py-1 rounded border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 text-xs hover:bg-red-100 dark:hover:bg-red-900/30 transition">Cancel</button>
+  </div>
+
+  <!-- DESKTOP TABLE -->
+  <div class="dt-desktop overflow-x-auto rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+    <table class="w-full dt" style="table-layout:auto">
+      <thead class="bg-slate-900 text-white">
+        <tr>
+          <th class="w-6 px-2"><input type="checkbox" id="selectAll" class="rounded accent-white" title="Select all"></th>
+          <th class="text-left col-sold">Sold</th>
+          <th class="text-left col-deld">Del'd</th>
+          <th class="text-left col-cust">Customer</th>
+          <th class="text-left col-fi">F&amp;I</th>
+          <th class="text-left col-stock">Stock #</th>
+          <th class="text-left col-model">Model</th>
+          <th class="text-left col-fcl">F/C/L</th>
+          <th class="text-left col-nu">N/U</th>
+          <th class="text-left col-comments">Comments</th>
+          <th class="text-left col-status">Status</th>
+          <th class="text-left col-tag">Tag</th>
+          <th class="text-right col-comm">Commission</th>
+          <th class="text-right pr-3 col-actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in deals %}
+        <tr class="deal-row {% if d.status == 'Dead' %}opacity-50{% endif %}" data-id="{{ d.id }}">
+
+          <td class="px-2 checkbox-cell">
+            <input type="checkbox" name="deal_ids" value="{{ d.id }}" class="deal-checkbox rounded accent-indigo-600" onchange="updateBulkToolbar()">
+          </td>
+
+          <td>
+            <span class="editable" data-field="sold_date" data-id="{{ d.id }}" data-type="date" data-value="{{ d.sold_date.isoformat() if d.sold_date else '' }}">
+              {{ d.sold_date.strftime('%-m/%-d') if d.sold_date else '—' }}
+            </span>
+            {% if d.sold_date and (d.sold_date.month != selected_month or d.sold_date.year != selected_year) %}
+              <span class="ml-0.5 text-[9px] font-semibold px-1 py-px rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">↪ carry</span>
+            {% endif %}
+          </td>
+
+          <td>
+            <span class="editable" data-field="delivered_date" data-id="{{ d.id }}" data-type="date" data-value="{{ d.delivered_date.isoformat() if d.delivered_date else '' }}">
+              {{ d.delivered_date.strftime('%-m/%-d') if d.delivered_date else '—' }}
+            </span>
+          </td>
+
+          <td class="font-medium dark:text-slate-200">
+            <span class="editable" data-field="customer" data-id="{{ d.id }}" data-type="text" data-value="{{ d.customer|e }}">{{ d.customer }}</span>
+          </td>
+
+          <td>
+            <span class="editable" data-field="business_manager" data-id="{{ d.id }}" data-type="select" data-value="{{ d.business_manager or '' }}" data-options="|RGO|KMC|DAB|JGA">
+              {{ d.business_manager or '—' }}
+            </span>
+          </td>
+
+          <td>
+            <span class="editable" data-field="stock_num" data-id="{{ d.id }}" data-type="text" data-value="{{ d.stock_num|e }}">{{ d.stock_num or '—' }}</span>
+          </td>
+
+          <td>
+            <span class="editable" data-field="model" data-id="{{ d.id }}" data-type="text" data-value="{{ d.model|e }}">{{ d.model or '—' }}</span>
+          </td>
+
+          <td>
+            <span class="editable" data-field="deal_type" data-id="{{ d.id }}" data-type="select" data-value="{{ d.deal_type or '' }}" data-options="|Finance|Cash/Sub-Vented|Lease">
+              {{ d.deal_type or '—' }}
+            </span>
+          </td>
+
+          <td>
+            <span class="editable" data-field="new_used" data-id="{{ d.id }}" data-type="select" data-value="{{ d.new_used or '' }}" data-options="|New|Used">
+              {{ d.new_used or '—' }}
+            </span>
+          </td>
+
+          <td class="col-comments">
+            <span class="editable" data-field="notes" data-id="{{ d.id }}" data-type="text" data-value="{{ (d.notes or '')|e }}" title="{{ d.notes or '' }}">
+              {{ d.notes or '—' }}
+            </span>
+          </td>
+
+          <td>
+            <span class="editable" data-field="status" data-id="{{ d.id }}" data-type="select" data-value="{{ d.status }}" data-options="Pending|Scheduled|Delivered|Dead">
+              <span class="inline-block px-1.5 py-px rounded text-[10px] font-semibold
+                {% if d.status == 'Delivered' %}bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300
+                {% elif d.status == 'Dead' %}bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400
+                {% elif d.status == 'Scheduled' %}bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300
+                {% else %}bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300{% endif %}">
+                {{ d.status }}{% if d.status == 'Scheduled' and d.scheduled_date %} {{ d.scheduled_date.strftime('%-m/%-d') }}{% endif %}
+              </span>
+            </span>
+          </td>
+
+          <td>
+            <span class="editable" data-field="tag" data-id="{{ d.id }}" data-type="select" data-value="{{ d.tag or '' }}" data-options="|Shop|Title|Inbound|FO|SPOT|LOCATE">
+              {{ d.tag or '—' }}
+            </span>
+          </td>
+
+          <td class="text-right">
+            <span class="editable" data-field="commission_override" data-id="{{ d.id }}" data-type="number" data-value="{{ d.commission_override if d.commission_override is not none else '' }}">
+              <span class="font-semibold {% if d.is_paid %}text-emerald-600 dark:text-emerald-400{% else %}dark:text-slate-200{% endif %}">
+                ${{ "{:,.0f}".format(d.total_deal_comm or 0) }}{% if d.commission_override is not none %}<span class="text-amber-400 text-[9px]">✎</span>{% endif %}
+              </span>
+            </span>
+          </td>
+
+          <!-- Actions: Edit · Pay? · Board — all as slim inline text links -->
+          <td class="text-right pr-3">
+            <span class="inline-flex items-center gap-2">
+              <a href="/deals/{{ d.id }}/edit" class="act-link">✎ Edit</a>
+              <span class="text-slate-300 dark:text-slate-600">·</span>
+              <button type="button" data-paid="{{ '1' if d.is_paid else '0' }}" onclick="togglePaid(this, {{ d.id }})"
+                class="act-link {% if d.is_paid %}paid{% endif %}">
+                {{ "✓ Paid" if d.is_paid else "Pay?" }}
+              </button>
+              {% if d.status in ('Pending', 'Scheduled') %}
+              <span class="text-slate-300 dark:text-slate-600">·</span>
+              <button type="button" onclick="openSchedModal({{ d.id }}, '{{ d.scheduled_date.isoformat() if d.scheduled_date else '' }}', {{ 'true' if d.on_delivery_board else 'false' }})"
+                class="act-link">→ Board</button>
+              {% endif %}
+            </span>
+          </td>
+
+        </tr>
+        {% endfor %}
+        {% if not deals %}
+        <tr><td colspan="14" class="py-8 text-center text-slate-400 dark:text-slate-500">No deals found.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- MOBILE CARDS -->
+  <div class="dt-mobile" style="display:none">
+    {% for d in deals %}
+    <div class="deal-card {% if d.status == 'Dead' %}dead-deal{% endif %}" data-id="{{ d.id }}">
+      <input type="checkbox" name="deal_ids" value="{{ d.id }}" class="deal-checkbox rounded accent-indigo-600 card-checkbox w-5 h-5" onchange="updateBulkToolbar()">
+
+      <div class="card-row">
+        <span class="card-label">Sold:</span>
+        <span class="card-value">{{ d.sold_date.strftime('%-m/%-d') if d.sold_date else '—' }}{% if d.sold_date and (d.sold_date.month != selected_month or d.sold_date.year != selected_year) %} <span class="text-[9px] font-semibold px-1 py-px rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300">↪ carry</span>{% endif %}</span>
+      </div>
+      <div class="card-row">
+        <span class="card-label">Delivered:</span>
+        <span class="card-value">{{ d.delivered_date.strftime('%-m/%-d') if d.delivered_date else '—' }}</span>
+      </div>
+      <div class="card-row">
+        <span class="card-label">Customer:</span>
+        <span class="card-value font-semibold">{{ d.customer or '—' }}</span>
+      </div>
+      <div class="card-row">
+        <span class="card-label">F&amp;I:</span>
+        <span class="card-value">{{ d.business_manager or '—' }}</span>
+      </div>
+      <div class="card-row">
+        <span class="card-label">Stock #:</span>
+        <span class="card-value">{{ d.stock_num or '—' }}</span>
+      </div>
+      <div class="card-row">
+        <span class="card-label">Model:</span>
+        <span class="card-value">{{ d.model or '—' }}</span>
+      </div>
+      <div class="card-row">
+        <span class="card-label">F/C/L:</span>
+        <span class="card-value">{{ d.deal_type or '—' }}</span>
+      </div>
+      <div class="card-row">
+        <span class="card-label">N/U:</span>
+        <span class="card-value">{{ d.new_used or '—' }}</span>
+      </div>
+      <div class="card-row">
+        <span class="card-label">Comments:</span>
+        <span class="card-value">{{ d.notes or '—' }}</span>
+      </div>
+      <div class="card-row">
+        <span class="card-label">Status:</span>
+        <span class="card-value">
+          <span class="inline-block px-2 py-0.5 rounded text-xs font-semibold
+            {% if d.status == 'Delivered' %}bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300
+            {% elif d.status == 'Dead' %}bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400
+            {% elif d.status == 'Scheduled' %}bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300
+            {% else %}bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300{% endif %}">
+            {{ d.status }}{% if d.status == 'Scheduled' and d.scheduled_date %} {{ d.scheduled_date.strftime('%-m/%-d') }}{% endif %}
+          </span>
+        </span>
+      </div>
+      <div class="card-row">
+        <span class="card-label">Tag:</span>
+        <span class="card-value">{{ d.tag or '—' }}</span>
+      </div>
+
+      <div class="card-footer">
+        <span class="text-xs text-slate-400 dark:text-slate-500 mr-auto">Commission:</span>
+        <span class="font-bold text-sm {% if d.is_paid %}text-emerald-600 dark:text-emerald-400{% else %}dark:text-white{% endif %}">
+          ${{ "{:,.0f}".format(d.total_deal_comm or 0) }}{% if d.commission_override is not none %}<span class="text-amber-400 text-[9px] ml-0.5">✎</span>{% endif %}
+        </span>
+        <button type="button" data-paid="{{ '1' if d.is_paid else '0' }}" onclick="togglePaid(this, {{ d.id }})"
+          class="act-link text-xs px-2 py-1 rounded border {% if d.is_paid %}border-emerald-300 dark:border-emerald-700 text-emerald-600 dark:text-emerald-400{% else %}border-slate-300 dark:border-slate-600{% endif %}">
+          {{ "✓ Paid" if d.is_paid else "Pay?" }}
+        </button>
+      </div>
+    </div>
+    {% endfor %}
+    {% if not deals %}
+    <div class="py-8 text-center text-slate-400 dark:text-slate-500 text-sm">No deals found.</div>
+    {% endif %}
+  </div>
+</form>
+
+<div id="saveToast" class="fixed bottom-5 right-5 z-50 hidden px-4 py-2 rounded-lg shadow-lg text-sm font-medium text-white bg-emerald-600">Saved ✓</div>
+<div id="errToast"  class="fixed bottom-5 right-5 z-50 hidden px-4 py-2 rounded-lg shadow-lg text-sm font-medium text-white bg-red-600">Failed to save</div>
+
+<script>
+(function () {
+  var activeEl = null;
+  function toast(id, ms) {
+    ms = ms || 1400;
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('hidden');
+    clearTimeout(el._t);
+    el._t = setTimeout(function(){ el.classList.add('hidden'); }, ms);
+  }
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    var p = iso.split('-');
+    return p.length === 3 ? (parseInt(p[1]) + '/' + parseInt(p[2])) : iso;
+  }
+  function fmtStatus(val, date) {
+    var map = {
+      Delivered:'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300',
+      Dead:'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400',
+      Scheduled:'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300',
+      Pending:'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300'
+    };
+    var label = val + (val === 'Scheduled' && date ? ' ' + date : '');
+    return '<span class="inline-block px-1.5 py-px rounded text-[10px] font-semibold ' + (map[val]||'bg-slate-100 text-slate-600') + '">' + label + '</span>';
+  }
+  function renderValue(field, value) {
+    if (field === 'sold_date' || field === 'delivered_date') return fmtDate(value);
+    if (field === 'status') return fmtStatus(value, '');
+    if (field === 'commission_override') {
+      if (!value && value !== 0) return '<span class="font-semibold dark:text-slate-200">—</span>';
+      return '<span class="font-semibold dark:text-slate-200">$' + Number(value).toLocaleString() + '<span class="text-amber-400 text-[9px]">✎</span></span>';
+    }
+    return value || '—';
+  }
+  async function save(span, field, dealId, value) {
+    try {
+      var res = await fetch('/deals/' + dealId + '/quick_update', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({field: field, value: value}),
+      });
+      var data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'err');
+      span.dataset.value = value;
+      span.innerHTML = renderValue(field, value);
+      span.classList.add('save-ok');
+      setTimeout(function(){ span.classList.remove('save-ok'); }, 700);
+      toast('saveToast');
+      activeEl = null;
+    } catch(e) {
+      span.classList.add('save-err');
+      setTimeout(function(){ span.classList.remove('save-err'); }, 700);
+      toast('errToast', 2500);
+    }
+  }
+  function cancelEdit(span) {
+    if (!span || !span._orig) return;
+    span.innerHTML = span._orig;
+    span.classList.remove('editing');
+    if (activeEl === span) activeEl = null;
+  }
+  function startEdit(span) {
+    if (activeEl && activeEl !== span) cancelEdit(activeEl);
+    activeEl = span;
+    span.classList.add('editing');
+    span._orig = span.innerHTML;
+    var field = span.dataset.field, type = span.dataset.type, cur = span.dataset.value !== undefined ? span.dataset.value : '', id = span.dataset.id;
+    var input;
+    if (type === 'select') {
+      input = document.createElement('select');
+      (span.dataset.options || '').split('|').forEach(function(o) {
+        var opt = document.createElement('option');
+        opt.value = o; opt.textContent = o || '—';
+        if (o === cur) opt.selected = true;
+        input.appendChild(opt);
+      });
+    } else {
+      input = document.createElement('input');
+      input.type = type === 'date' ? 'date' : type === 'number' ? 'number' : 'text';
+      input.value = cur;
+      if (type === 'number') { input.min = 0; input.step = 1; input.placeholder = 'Override $'; }
+    }
+    span.innerHTML = ''; span.appendChild(input); input.focus();
+    if (type === 'text') { try { input.select(); } catch(e) {} }
+    if (type === 'select') {
+      var committed = false;
+      input.addEventListener('change', function() {
+        var val = input.value; committed = true;
+        if (field === 'status' && val === 'Scheduled') { cancelEdit(span); openSchedModal(parseInt(id), '', false); return; }
+        cancelEdit(span); if (val !== cur) save(span, field, id, val);
+      });
+      input.addEventListener('blur', function() { if (!committed) cancelEdit(span); });
+    } else {
+      input.addEventListener('blur', function() {
+        var val = input.value; if (val === cur) { cancelEdit(span); return; } save(span, field, id, val);
+      });
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { e.preventDefault(); cancelEdit(span); }
+      });
+    }
+  }
+  document.addEventListener('click', function(e) {
+    var span = e.target.closest('.editable');
+    if (span && !span.classList.contains('editing')) { startEdit(span); return; }
+    if (!span && activeEl) cancelEdit(activeEl);
+  });
+})();
+
+// Toggle paid
+async function togglePaid(btn, dealId) {
+  btn.disabled = true; btn.style.opacity = '0.6';
+  try {
+    var res = await fetch('/deals/' + dealId + '/toggle_paid', {method:'POST', headers:{'Accept':'application/json'}});
+    var data = await res.json();
+    if (!data.ok) throw 0;
+    var paid = data.is_paid;
+    btn.dataset.paid = paid ? '1' : '0';
+    btn.textContent = paid ? '✓ Paid' : 'Pay?';
+    if (paid) btn.classList.add('paid'); else btn.classList.remove('paid');
+  } catch(e) { btn.textContent = 'Error'; }
+  finally { btn.disabled = false; btn.style.opacity = ''; }
+}
+
+// Bulk select
+var selectAll = document.getElementById('selectAll');
+var bulkToolbar = document.getElementById('bulkToolbar');
+var bulkCount = document.getElementById('bulkCount');
+function updateBulkToolbar() {
+  var checked = document.querySelectorAll('.deal-checkbox:checked');
+  if (bulkToolbar) bulkToolbar.classList.toggle('hidden', !checked.length);
+  if (bulkCount) bulkCount.textContent = checked.length + ' deal' + (checked.length !== 1 ? 's' : '') + ' selected';
+  if (selectAll) {
+    var all = document.querySelectorAll('.deal-checkbox');
+    selectAll.checked = all.length > 0 && checked.length === all.length;
+    selectAll.indeterminate = checked.length > 0 && checked.length < all.length;
+  }
+}
+function clearSelection() {
+  document.querySelectorAll('.deal-checkbox').forEach(function(cb){ cb.checked = false; });
+  if (selectAll) selectAll.checked = false;
+  if (bulkToolbar) bulkToolbar.classList.add('hidden');
+}
+if (selectAll) selectAll.addEventListener('change', function() {
+  document.querySelectorAll('.deal-checkbox').forEach(function(cb){ cb.checked = selectAll.checked; });
+  updateBulkToolbar();
+});
+
+var params = new URLSearchParams(window.location.search);
+if (params.get('deleted')) {
+  var n = document.createElement('div');
+  n.className = 'mb-2 p-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-amber-800 dark:text-amber-300 text-xs font-medium';
+  n.textContent = '✓ Deleted ' + params.get('deleted') + ' deal(s).';
+  document.querySelector('form')?.before(n);
+}
+</script>
+
+{% if request.query_params.get('embedded') == '1' %}
+<script>try { window.parent.postMessage({ type: 'ct_deal_saved' }, '*'); } catch(e) {}</script>
+{% endif %}
+{% endblock %}
