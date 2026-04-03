@@ -5385,28 +5385,48 @@ async def photos_upload_vauto(request: Request, vauto_file: UploadFile = File(..
 
     # ── Build stock->tag map (skip blanks and "nan"/"None") ──
     vauto_tags = {}
-    skip_vals = {"", "nan", "none", "null"}
+    skip_vals = {"", "nan", "none", "null", "0", "0.0"}
     for row in rows:
         stock = (row.get(col_stock, "") or "").strip().upper()
         tag = (row.get(col_tags, "") or "").strip()
         if stock and tag.lower() not in skip_vals:
             vauto_tags[stock] = tag
 
-    # ── Update matching PhotoVehicle notes ──
-    existing = (await db.execute(
+    # ── Load ALL photo tracker vehicles (including dismissed, for diagnostics) ──
+    active = (await db.execute(
         select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.dismissed == False)
     )).scalars().all()
 
+    dismissed_list = (await db.execute(
+        select(PhotoVehicle.stock_num).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.dismissed == True)
+    )).scalars().all()
+    dismissed_set = {s.strip().upper() for s in dismissed_list}
+
+    active_map = {v.stock_num.strip().upper(): v for v in active}
+
     updated = 0
-    for v in existing:
-        stock_key = v.stock_num.strip().upper()
-        if stock_key in vauto_tags:
-            v.notes = vauto_tags[stock_key]
+    not_in_tracker = []
+    in_dismissed = []
+
+    for stock, tag in vauto_tags.items():
+        if stock in active_map:
+            active_map[stock].notes = tag
             updated += 1
+        elif stock in dismissed_set:
+            in_dismissed.append(stock)
+        else:
+            not_in_tracker.append(stock)
 
     await db.commit()
 
-    msg = f"vAuto+sync:+{updated}+vehicle{'s' if updated != 1 else ''}+updated+with+tags+({len(vauto_tags)}+tagged+in+file)"
+    # ── Build detailed feedback message ──
+    parts = [f"vAuto sync: {updated} updated with tags ({len(vauto_tags)} tagged in file, {len(active_map)} in tracker)"]
+    if not_in_tracker:
+        parts.append(f"{len(not_in_tracker)} tagged but not in tracker: {', '.join(not_in_tracker[:10])}")
+    if in_dismissed:
+        parts.append(f"{len(in_dismissed)} tagged but dismissed: {', '.join(in_dismissed[:10])}")
+
+    msg = " | ".join(parts).replace(" ", "+")
     return RedirectResponse(url=f"/photos?msg={msg}&msg_type=success", status_code=303)
 
 @app.post("/photos/bulk/status")
