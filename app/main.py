@@ -3207,7 +3207,7 @@ async def reminder_delete(reminder_id: int, request: Request, db: AsyncSession =
     return JSONResponse({"ok": True})
 
 # ════════════════════════════════════════════════
-# LEASE CONVERTER
+# PAY PLAN
 # ════════════════════════════════════════════════
 @app.get("/lease-converter", response_class=HTMLResponse)
 async def lease_converter(request: Request, db: AsyncSession = Depends(get_db)):
@@ -3219,9 +3219,6 @@ async def lease_converter(request: Request, db: AsyncSession = Depends(get_db)):
     })
 
 
-# ════════════════════════════════════════════════
-# PAY PLAN
-# ════════════════════════════════════════════════
 @app.get("/payplan", response_class=HTMLResponse)
 async def payplan_get(request: Request, db: AsyncSession = Depends(get_db)):
     s = await get_or_create_settings(db, uid(request), user_dealership_id(request))
@@ -5285,6 +5282,132 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
         msg += f", {total_skipped} skipped (dismissed)"
     return RedirectResponse(url=f"/photos?msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)
 
+
+@app.post("/photos/upload-vauto")
+async def photos_upload_vauto(request: Request, vauto_file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+    """Upload a vAuto inventory export (.xls/.xlsx/.csv) to sync Tags into PhotoVehicle notes.
+    Only updates vehicles already in the Photo Tracker. Overwrites notes with the vAuto tag.
+    Vehicles with no tag in vAuto are left alone."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+    if not d_id:
+        return RedirectResponse(url="/photos", status_code=303)
+
+    import io
+    import csv as _csv_mod
+
+    fname = (vauto_file.filename or "").lower()
+    raw = await vauto_file.read()
+
+    # ── Parse the file into a list of {header: value} dicts ──
+    rows = []
+    headers = []
+
+    try:
+        if fname.endswith(".csv"):
+            text = raw.decode("utf-8-sig")
+            reader = _csv_mod.DictReader(io.StringIO(text))
+            headers = reader.fieldnames or []
+            rows = list(reader)
+
+        elif fname.endswith(".xlsx"):
+            from openpyxl import load_workbook
+            wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+            ws = wb.active
+            row_iter = ws.iter_rows(values_only=True)
+            raw_headers = next(row_iter, None)
+            if raw_headers:
+                headers = [str(h).replace("\n", " ").replace("\r", " ").strip() if h else "" for h in raw_headers]
+                for vals in row_iter:
+                    rows.append(dict(zip(headers, [str(v).strip() if v is not None else "" for v in vals])))
+            wb.close()
+
+        elif fname.endswith(".xls"):
+            try:
+                import xlrd
+                book = xlrd.open_workbook(file_contents=raw)
+                sheet = book.sheet_by_index(0)
+                raw_headers = [str(sheet.cell_value(0, c)).replace("\n", " ").replace("\r", " ").strip() for c in range(sheet.ncols)]
+                headers = raw_headers
+                for r in range(1, sheet.nrows):
+                    row_vals = [str(sheet.cell_value(r, c)).strip() if sheet.cell_value(r, c) is not None else "" for c in range(sheet.ncols)]
+                    rows.append(dict(zip(headers, row_vals)))
+            except ImportError:
+                try:
+                    from openpyxl import load_workbook
+                    wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+                    ws = wb.active
+                    row_iter = ws.iter_rows(values_only=True)
+                    raw_headers = next(row_iter, None)
+                    if raw_headers:
+                        headers = [str(h).replace("\n", " ").replace("\r", " ").strip() if h else "" for h in raw_headers]
+                        for vals in row_iter:
+                            rows.append(dict(zip(headers, [str(v).strip() if v is not None else "" for v in vals])))
+                    wb.close()
+                except Exception:
+                    pass
+
+        else:
+            try:
+                from openpyxl import load_workbook
+                wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+                ws = wb.active
+                row_iter = ws.iter_rows(values_only=True)
+                raw_headers = next(row_iter, None)
+                if raw_headers:
+                    headers = [str(h).replace("\n", " ").replace("\r", " ").strip() if h else "" for h in raw_headers]
+                    for vals in row_iter:
+                        rows.append(dict(zip(headers, [str(v).strip() if v is not None else "" for v in vals])))
+                wb.close()
+            except Exception:
+                text = raw.decode("utf-8-sig")
+                reader = _csv_mod.DictReader(io.StringIO(text))
+                headers = reader.fieldnames or []
+                rows = list(reader)
+    except Exception:
+        pass
+
+    if not rows or not headers:
+        return RedirectResponse(url="/photos?msg=Could+not+read+file.+Please+upload+a+.xls,+.xlsx,+or+.csv+from+vAuto.&msg_type=error", status_code=303)
+
+    # ── Find the Stock # and Tags columns (flexible matching) ──
+    col_stock = None
+    col_tags = None
+    for h in headers:
+        hl = h.lower().strip()
+        if "stock" in hl and col_stock is None:
+            col_stock = h
+        if "tag" in hl and col_tags is None:
+            col_tags = h
+
+    if not col_stock or not col_tags:
+        return RedirectResponse(url="/photos?msg=Could+not+find+Stock+or+Tags+columns+in+the+file.&msg_type=error", status_code=303)
+
+    # ── Build stock->tag map (skip blanks and "nan"/"None") ──
+    vauto_tags = {}
+    skip_vals = {"", "nan", "none", "null"}
+    for row in rows:
+        stock = (row.get(col_stock, "") or "").strip().upper()
+        tag = (row.get(col_tags, "") or "").strip()
+        if stock and tag.lower() not in skip_vals:
+            vauto_tags[stock] = tag
+
+    # ── Update matching PhotoVehicle notes ──
+    existing = (await db.execute(
+        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.dismissed == False)
+    )).scalars().all()
+
+    updated = 0
+    for v in existing:
+        stock_key = v.stock_num.strip().upper()
+        if stock_key in vauto_tags:
+            v.notes = vauto_tags[stock_key]
+            updated += 1
+
+    await db.commit()
+
+    msg = f"vAuto+sync:+{updated}+vehicle{'s' if updated != 1 else ''}+updated+with+tags+({len(vauto_tags)}+tagged+in+file)"
+    return RedirectResponse(url=f"/photos?msg={msg}&msg_type=success", status_code=303)
 
 @app.post("/photos/bulk/status")
 async def photos_bulk_status(request: Request, new_status: str = Form(""), db: AsyncSession = Depends(get_db)):

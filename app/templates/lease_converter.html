@@ -2,8 +2,8 @@
 {% block content %}
 <div class="flex items-end justify-between gap-3 mb-4">
   <div>
-    <h1 class="text-xl font-bold">Lease vs. Finance — True Cost of Ownership</h1>
-    <div class="text-sm text-slate-500 dark:text-slate-400">The numbers your customer doesn't see on the finance contract</div>
+    <h1 class="text-xl font-bold">Lease Converter</h1>
+    <div class="text-sm text-slate-500 dark:text-slate-400">Show the true cost of ownership — lease vs. finance side by side</div>
   </div>
 </div>
 
@@ -11,39 +11,69 @@
 <div class="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4 mb-6">
   <div class="flex items-start gap-3">
     <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-    <div class="flex-1">
-      <div class="font-semibold text-indigo-900 dark:text-indigo-200 text-sm flex items-center gap-2 flex-wrap">
-        IRS Standard Mileage Rate:
-        <span class="inline-flex items-center gap-1">
-          <input type="number" id="irsRate" value="72.5" step="0.5" class="w-20 border border-indigo-300 dark:border-indigo-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-0.5 text-sm text-center" oninput="calc()">
-          <span>¢/mile</span>
-        </span>
-      </div>
-      <div class="text-xs text-indigo-700 dark:text-indigo-400 mt-0.5">This is what the IRS says it <strong>actually costs</strong> to own &amp; operate a vehicle per mile — including depreciation, fuel, insurance, maintenance, repairs, tires &amp; financing. AAA confirms: the average new vehicle costs <strong>$11,577/year</strong> to own.</div>
+    <div>
+      <div class="font-semibold text-indigo-900 dark:text-indigo-200 text-sm">2026 IRS Standard Mileage Rate: 72.5¢/mile</div>
+      <div class="text-xs text-indigo-700 dark:text-indigo-400 mt-0.5">The IRS rate reflects the <strong>true total cost</strong> of owning &amp; operating a vehicle — depreciation, fuel, insurance, maintenance, repairs, tires, and financing. AAA's 2025 study found the average new vehicle costs <strong>$11,577/year</strong> to own.</div>
     </div>
   </div>
 </div>
 
 <!-- ── Inputs ── -->
 <div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4 mb-6">
-  <div class="font-semibold mb-1 dark:text-white">Deal Numbers</div>
-  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">Plug in the numbers you've already worked up</div>
+  <div class="font-semibold mb-1 dark:text-white">Vehicle &amp; Deal Info</div>
+  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">Presets auto-fill — tweak any field</div>
 
   <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
     <div>
-      <label class="text-xs text-slate-500 dark:text-slate-400">Vehicle Selling Price</label>
+      <label class="text-xs text-slate-500 dark:text-slate-400">Vehicle MSRP</label>
+      <div class="relative">
+        <span class="absolute left-3 top-2.5 text-slate-400">$</span>
+        <input type="number" id="msrp" value="38000" step="500" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" oninput="calc()">
+      </div>
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 dark:text-slate-400">Selling Price</label>
       <div class="relative">
         <span class="absolute left-3 top-2.5 text-slate-400">$</span>
         <input type="number" id="sellingPrice" value="36500" step="500" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" oninput="calc()">
       </div>
     </div>
     <div>
-      <label class="text-xs text-slate-500 dark:text-slate-400">Annual Miles Driven</label>
+      <label class="text-xs text-slate-500 dark:text-slate-400">Down Payment</label>
+      <div class="relative">
+        <span class="absolute left-3 top-2.5 text-slate-400">$</span>
+        <input type="number" id="downPayment" value="2000" step="500" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" oninput="calc()">
+      </div>
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 dark:text-slate-400">Trade-In Value</label>
+      <div class="relative">
+        <span class="absolute left-3 top-2.5 text-slate-400">$</span>
+        <input type="number" id="tradeIn" value="0" step="500" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" oninput="calc()">
+      </div>
+    </div>
+  </div>
+
+  <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+    <div>
+      <label class="text-xs text-slate-500 dark:text-slate-400">Annual Miles</label>
       <select id="annualMiles" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" onchange="calc()">
         <option value="10000">10,000</option>
         <option value="12000" selected>12,000</option>
         <option value="15000">15,000</option>
       </select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 dark:text-slate-400">Credit Tier</label>
+      <select id="creditTier" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" onchange="applyCreditTier();calc()">
+        <option value="excellent">Excellent (720+)</option>
+        <option value="good" selected>Good (680-719)</option>
+        <option value="average">Average (620-679)</option>
+      </select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-500 dark:text-slate-400">NY Sales Tax %</label>
+      <input type="number" id="taxRate" value="8" step="0.125" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" oninput="calc()">
     </div>
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">Comparison Period</label>
@@ -53,34 +83,14 @@
         <option value="108">9 Years (3 Lease Cycles)</option>
       </select>
     </div>
-    <div>
-      <label class="text-xs text-slate-500 dark:text-slate-400">Toyota TFS Disposal Fee</label>
-      <div class="relative">
-        <span class="absolute left-3 top-2.5 text-slate-400">$</span>
-        <input type="number" id="disposalFee" value="350" step="50" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" oninput="calc()">
-      </div>
-    </div>
   </div>
 
-  <!-- Lease vs Finance inputs -->
+  <!-- Lease vs Finance specific inputs -->
   <div class="grid sm:grid-cols-2 gap-4">
+    <!-- Lease Column -->
     <div class="bg-emerald-50 dark:bg-emerald-950/30 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
-      <div class="text-sm font-semibold text-emerald-800 dark:text-emerald-300 mb-2">Lease</div>
+      <div class="text-sm font-semibold text-emerald-800 dark:text-emerald-300 mb-2">Lease Terms</div>
       <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="text-xs text-slate-500 dark:text-slate-400">Monthly Payment</label>
-          <div class="relative">
-            <span class="absolute left-2 top-2 text-slate-400 text-sm">$</span>
-            <input type="number" id="leasePayment" value="389" step="1" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-6 pr-2 py-2 text-sm" oninput="calc()">
-          </div>
-        </div>
-        <div>
-          <label class="text-xs text-slate-500 dark:text-slate-400">Due at Signing</label>
-          <div class="relative">
-            <span class="absolute left-2 top-2 text-slate-400 text-sm">$</span>
-            <input type="number" id="leaseDAS" value="2000" step="100" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-6 pr-2 py-2 text-sm" oninput="calc()">
-          </div>
-        </div>
         <div>
           <label class="text-xs text-slate-500 dark:text-slate-400">Term (months)</label>
           <select id="leaseTerm" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm" onchange="calc()">
@@ -90,49 +100,28 @@
           </select>
         </div>
         <div>
-          <label class="text-xs text-slate-500 dark:text-slate-400">Miles/Year Allowed</label>
-          <select id="leaseAllowedMiles" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm" onchange="calc()">
-            <option value="10000">10,000</option>
-            <option value="12000" selected>12,000</option>
-            <option value="15000">15,000</option>
-          </select>
+          <label class="text-xs text-slate-500 dark:text-slate-400">Residual %</label>
+          <input type="number" id="residualPct" value="57" step="1" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm" oninput="calc()">
         </div>
         <div>
-          <label class="text-xs text-slate-500 dark:text-slate-400">Cost Per Mile</label>
-          <div class="relative">
-            <input type="number" id="leasePerMile" value="10" step="1" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 pr-6 py-2 text-sm text-right" oninput="calc()">
-            <span class="absolute right-2 top-2 text-slate-400 text-sm">¢</span>
-          </div>
-          <div class="text-[10px] text-slate-400 mt-0.5">Built into lease payment</div>
+          <label class="text-xs text-slate-500 dark:text-slate-400">Money Factor</label>
+          <input type="number" id="moneyFactor" value="0.00125" step="0.00001" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm" oninput="calc()">
+          <div class="text-[10px] text-slate-400 mt-0.5">≈ <span id="mfApr">3.0</span>% APR</div>
         </div>
         <div>
-          <label class="text-xs text-slate-500 dark:text-slate-400">Overage Penalty</label>
+          <label class="text-xs text-slate-500 dark:text-slate-400">Due at Signing</label>
           <div class="relative">
-            <input type="number" id="leaseOverage" value="15" step="1" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 pr-6 py-2 text-sm text-right" oninput="calc()">
-            <span class="absolute right-2 top-2 text-slate-400 text-sm">¢</span>
+            <span class="absolute left-2 top-2 text-slate-400 text-sm">$</span>
+            <input type="number" id="dueAtSigning" value="2000" step="100" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-6 pr-2 py-2 text-sm" oninput="calc()">
           </div>
-          <div class="text-[10px] text-slate-400 mt-0.5">Per mile over allowance</div>
         </div>
       </div>
     </div>
+    <!-- Finance Column -->
     <div class="bg-blue-50 dark:bg-blue-950/30 rounded-lg p-3 border border-blue-200 dark:border-blue-800">
-      <div class="text-sm font-semibold text-blue-800 dark:text-blue-300 mb-2">Finance</div>
+      <div class="text-sm font-semibold text-blue-800 dark:text-blue-300 mb-2">Finance Terms</div>
       <div class="grid grid-cols-2 gap-3">
         <div>
-          <label class="text-xs text-slate-500 dark:text-slate-400">Monthly Payment</label>
-          <div class="relative">
-            <span class="absolute left-2 top-2 text-slate-400 text-sm">$</span>
-            <input type="number" id="finPayment" value="649" step="1" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-6 pr-2 py-2 text-sm" oninput="calc()">
-          </div>
-        </div>
-        <div>
-          <label class="text-xs text-slate-500 dark:text-slate-400">Down Payment</label>
-          <div class="relative">
-            <span class="absolute left-2 top-2 text-slate-400 text-sm">$</span>
-            <input type="number" id="finDown" value="2000" step="100" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-6 pr-2 py-2 text-sm" oninput="calc()">
-          </div>
-        </div>
-        <div class="col-span-2">
           <label class="text-xs text-slate-500 dark:text-slate-400">Term (months)</label>
           <select id="financeTerm" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm" onchange="calc()">
             <option value="48">48</option>
@@ -141,6 +130,10 @@
             <option value="84">84</option>
           </select>
         </div>
+        <div>
+          <label class="text-xs text-slate-500 dark:text-slate-400">APR %</label>
+          <input type="number" id="financeApr" value="6.5" step="0.1" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm" oninput="calc()">
+        </div>
       </div>
     </div>
   </div>
@@ -148,7 +141,7 @@
 
 <!-- ── Results: Side by Side ── -->
 <div class="grid md:grid-cols-2 gap-4 mb-6">
-  <!-- Lease -->
+  <!-- Lease Card -->
   <div class="bg-white dark:bg-slate-800 rounded border-2 border-emerald-400 dark:border-emerald-600 p-4">
     <div class="flex items-center gap-2 mb-3">
       <div class="w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center">
@@ -157,22 +150,19 @@
       <div class="font-bold text-emerald-700 dark:text-emerald-300">LEASE</div>
     </div>
     <div class="space-y-2 text-sm">
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Monthly Payment</span><span id="outLM" class="font-semibold">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Due at Signing</span><span id="outLDAS" class="font-semibold">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Disposal Fee</span><span id="outLDisp" class="font-semibold">—</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Monthly Payment</span><span id="leaseMonthly" class="font-semibold">—</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Due at Signing</span><span id="leaseDAS" class="font-semibold">—</span></div>
       <div class="border-t border-slate-100 dark:border-slate-700 my-1"></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Total Payments (<span id="outLY">6</span> yrs)</span><span id="outLTP" class="font-semibold">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Est. Maintenance</span><span id="outLMaint" class="font-semibold">—</span></div>
-      <div id="overRow" class="flex justify-between hidden"><span class="text-slate-500 dark:text-slate-400">Est. Mileage Overage</span><span id="outLOver" class="font-semibold text-amber-600 dark:text-amber-400">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Depreciation Cost to You</span><span class="font-semibold text-emerald-600 dark:text-emerald-400">$0 (built in)</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Total Payments (<span id="leaseYears">6</span> yrs)</span><span id="leaseTotalPayments" class="font-semibold">—</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Est. Maintenance</span><span id="leaseMaint" class="font-semibold">—</span></div>
       <div class="border-t border-slate-100 dark:border-slate-700 my-1"></div>
-      <div class="flex justify-between text-base"><span class="font-semibold text-slate-700 dark:text-slate-200">Total Cost of Ownership</span><span id="outLTotal" class="font-bold text-emerald-600 dark:text-emerald-400">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Cost Per Mile (lease rate)</span><span id="outLCPM" class="font-bold text-emerald-600 dark:text-emerald-400">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Net Cost (nothing returned)</span><span id="outLNet" class="font-semibold">—</span></div>
-      <div class="mt-2 p-2 bg-emerald-50 dark:bg-emerald-900/30 rounded text-xs text-emerald-700 dark:text-emerald-400">✓ Always under factory warranty · ✓ New car every 3 years · ✓ Latest safety tech · ✓ No repair surprises</div>
+      <div class="flex justify-between text-base"><span class="font-semibold text-slate-700 dark:text-slate-200">Total Cost</span><span id="leaseTotalCost" class="font-bold text-emerald-600 dark:text-emerald-400">—</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Cost Per Mile</span><span id="leaseCPM" class="font-bold text-emerald-600 dark:text-emerald-400">—</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Vehicle at End</span><span class="text-emerald-600 dark:text-emerald-400 font-medium">New car every 3 yrs ✓</span></div>
     </div>
   </div>
-  <!-- Finance -->
+
+  <!-- Finance Card -->
   <div class="bg-white dark:bg-slate-800 rounded border-2 border-blue-300 dark:border-blue-700 p-4">
     <div class="flex items-center gap-2 mb-3">
       <div class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
@@ -181,258 +171,431 @@
       <div class="font-bold text-blue-700 dark:text-blue-300">FINANCE</div>
     </div>
     <div class="space-y-2 text-sm">
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Monthly Payment</span><span id="outFM" class="font-semibold">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Down Payment</span><span id="outFD" class="font-semibold">—</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Monthly Payment</span><span id="finMonthly" class="font-semibold">—</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Down Payment</span><span id="finDown" class="font-semibold">—</span></div>
       <div class="border-t border-slate-100 dark:border-slate-700 my-1"></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Total Payments (<span id="outFY">6</span> yrs)</span><span id="outFTP" class="font-semibold">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Est. Maintenance</span><span id="outFMaint" class="font-semibold">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Depreciation Loss</span><span id="outFDep" class="font-semibold text-red-500">—</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Total Payments (<span id="finYears">6</span> yrs)</span><span id="finTotalPayments" class="font-semibold">—</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Interest Paid</span><span id="finInterest" class="font-semibold text-red-500">—</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Est. Maintenance</span><span id="finMaint" class="font-semibold">—</span></div>
       <div class="border-t border-slate-100 dark:border-slate-700 my-1"></div>
-      <div class="flex justify-between text-base"><span class="font-semibold text-slate-700 dark:text-slate-200">Total Cost of Ownership</span><span id="outFTotal" class="font-bold text-blue-600 dark:text-blue-400">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">True Cost Per Mile</span><span id="outFCPM" class="font-bold text-blue-600 dark:text-blue-400">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Net Cost (after selling car)</span><span id="outFNet" class="font-semibold">—</span></div>
-      <div class="mt-2 p-2 bg-red-50 dark:bg-red-900/20 rounded text-xs text-red-700 dark:text-red-400">✗ Warranty expires yr 3 · ✗ Maintenance climbs yearly · ✗ Depreciation is your loss · ✗ Aging safety tech</div>
+      <div class="flex justify-between text-base"><span class="font-semibold text-slate-700 dark:text-slate-200">Total Cost</span><span id="finTotalCost" class="font-bold text-blue-600 dark:text-blue-400">—</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Cost Per Mile</span><span id="finCPM" class="font-bold text-blue-600 dark:text-blue-400">—</span></div>
+      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Vehicle Value at End</span><span id="finResidualVal" class="text-slate-600 dark:text-slate-300 font-medium">—</span></div>
     </div>
   </div>
 </div>
 
-<!-- ── Savings Banner ── -->
-<div id="savBanner" class="rounded-lg p-4 mb-6 hidden">
+<!-- ── Savings Summary ── -->
+<div id="savingsBanner" class="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 rounded-lg p-4 mb-6 hidden">
   <div class="flex items-center gap-3">
-    <div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0" id="savIcon">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+    <div class="w-10 h-10 rounded-full bg-emerald-200 dark:bg-emerald-800 flex items-center justify-center shrink-0">
+      <svg class="w-5 h-5 text-emerald-700 dark:text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
     </div>
     <div>
-      <div class="font-bold text-lg" id="savAmt">—</div>
-      <div class="text-sm" id="savDet">—</div>
+      <div class="font-bold text-emerald-800 dark:text-emerald-200 text-lg" id="savingsAmount">—</div>
+      <div class="text-sm text-emerald-700 dark:text-emerald-400" id="savingsDetail">—</div>
     </div>
   </div>
-</div>
-
-<!-- ── "What If You Trade at 3 Years" ── -->
-<div class="bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 rounded-lg p-4 mb-6">
-  <div class="font-semibold text-amber-900 dark:text-amber-200 mb-1">💡 "But I'll just trade it in at 3 years..."</div>
-  <div class="text-sm text-amber-800 dark:text-amber-300" id="tradeNote">—</div>
 </div>
 
 <!-- ── Cost Per Mile Chart ── -->
 <div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4 mb-6">
-  <div class="font-semibold mb-1 dark:text-white">True Cost Per Mile Over Time</div>
-  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">Everything included — payments, maintenance, depreciation. IRS benchmark for reference.</div>
-  <div class="relative" style="height:300px"><canvas id="cpmChart"></canvas></div>
+  <div class="font-semibold mb-1 dark:text-white">Cost Per Mile Over Time</div>
+  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">IRS benchmark: 72.5¢/mile — includes depreciation, fuel, insurance, maintenance, repairs, tires, &amp; financing</div>
+  <div class="relative" style="height: 300px;">
+    <canvas id="cpmChart"></canvas>
+  </div>
 </div>
 
 <!-- ── Cumulative Cost Chart ── -->
 <div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4 mb-6">
-  <div class="font-semibold mb-1 dark:text-white">Cumulative Cost of Ownership</div>
-  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">Total money spent over time — lease stays predictable, finance stacks up</div>
-  <div class="relative" style="height:300px"><canvas id="cumChart"></canvas></div>
-</div>
-
-<!-- ── Maintenance Curve ── -->
-<div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4 mb-6">
-  <div class="font-semibold mb-1 dark:text-white">Maintenance &amp; Repair Cost by Year</div>
-  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">Toyota data: costs roughly double every 3-4 years after warranty — lease resets to $0 risk every cycle</div>
-  <div class="relative" style="height:280px"><canvas id="maintChart"></canvas></div>
-</div>
-
-<!-- ── Depreciation Chart ── -->
-<div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4 mb-6">
-  <div class="font-semibold mb-1 dark:text-white">Where Your Money Really Goes — Depreciation</div>
-  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">The #1 cost of ownership that finance buyers don't see coming</div>
-  <div class="relative" style="height:280px"><canvas id="depChart"></canvas></div>
-  <div class="mt-3 p-3 bg-amber-50 dark:bg-amber-950/30 rounded border border-amber-200 dark:border-amber-800">
-    <div class="text-xs text-amber-800 dark:text-amber-300" id="eqNote">—</div>
+  <div class="font-semibold mb-1 dark:text-white">Cumulative Total Cost</div>
+  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">Running total of all payments + maintenance over time</div>
+  <div class="relative" style="height: 300px;">
+    <canvas id="cumChart"></canvas>
   </div>
 </div>
 
-<!-- ── Talking Points ── -->
+<!-- ── Maintenance Breakdown ── -->
 <div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4 mb-6">
-  <div class="font-semibold mb-3 dark:text-white">Key Talking Points</div>
-  <div class="grid sm:grid-cols-2 gap-3" id="tp"></div>
+  <div class="font-semibold mb-1 dark:text-white">Annual Maintenance Cost Curve</div>
+  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">Lease resets to warranty every 3 years — finance keeps climbing</div>
+  <div class="relative" style="height: 280px;">
+    <canvas id="maintChart"></canvas>
+  </div>
 </div>
 
+<!-- ── Key Talking Points ── -->
+<div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4 mb-6">
+  <div class="font-semibold mb-3 dark:text-white">Key Talking Points</div>
+  <div class="grid sm:grid-cols-2 gap-3" id="talkingPoints">
+    <!-- Populated by JS -->
+  </div>
+</div>
+
+<!-- ── Depreciation Reality Check ── -->
+<div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4 mb-6">
+  <div class="font-semibold mb-1 dark:text-white">Depreciation Reality Check</div>
+  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">What a financed vehicle is actually worth over time — the equity illusion</div>
+  <div class="relative" style="height: 280px;">
+    <canvas id="depChart"></canvas>
+  </div>
+  <div class="mt-3 p-3 bg-amber-50 dark:bg-amber-950/30 rounded border border-amber-200 dark:border-amber-800">
+    <div class="text-xs text-amber-800 dark:text-amber-300" id="equityNote">—</div>
+  </div>
+</div>
+
+<!-- ── Sources ── -->
 <div class="text-xs text-slate-400 dark:text-slate-500 mb-4">
-  Sources: IRS Notice 2026-10 (72.5¢/mi) · AAA Your Driving Costs 2025 ($11,577/yr avg) · CarEdge/Consumer Reports maintenance data · Industry depreciation curves. Estimates for comparison — actual costs vary.
+  Sources: IRS Notice 2026-10 (72.5¢/mi business rate) · AAA Your Driving Costs 2025 ($11,577/yr avg) · Industry average maintenance data.
+  This tool provides estimates for comparison purposes. Actual costs vary by vehicle, driving habits, and market conditions.
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script>
-var $=function(id){return document.getElementById(id)};
-var fmt=function(n){return'$'+n.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})};
-var fmtC=function(n){return n.toFixed(1)+'¢'};
-var cpmC,cumC,mntC,depC;
+// ── Globals ──
+const $ = id => document.getElementById(id);
+const fmt = n => '$'+n.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
+const fmtC = n => n.toFixed(1)+'¢';
+let cpmChart, cumChart, maintChart, depChart;
 
-// Toyota-specific maintenance by vehicle age (CarEdge data: ~$349 yr3 → $508 yr5 → $712 yr7, extrapolated)
-var MAINT=[200,250,350,500,650,800,1000,1250,1500,1800];
-// Depreciation: ~20% yr1, 15% yr2, 13% yr3, 10% yr4-5, 8% yr6+
-var DEP=[.20,.15,.13,.10,.10,.08,.08,.07,.07,.06];
+// Credit tier presets
+const TIERS = {
+  excellent: {mf: 0.00085, apr: 4.9, residual: 60},
+  good:      {mf: 0.00125, apr: 6.5, residual: 57},
+  average:   {mf: 0.00185, apr: 8.9, residual: 55},
+};
 
-function dk(){return document.documentElement.classList.contains('dark')}
-function cc(){return{
-  g:dk()?'rgba(148,163,184,.12)':'rgba(0,0,0,.06)',t:dk()?'#94a3b8':'#64748b',
-  l:'#10b981',lb:dk()?'rgba(16,185,129,.15)':'rgba(16,185,129,.1)',
-  f:'#3b82f6',fb:dk()?'rgba(59,130,246,.15)':'rgba(59,130,246,.1)',
-  irs:'#f59e0b',d:'#ef4444'
-}}
+// Avg annual maintenance by vehicle age (year 1, 2, 3, ... 10)
+// Based on industry averages: warranty years are cheap, then ramps up
+const MAINT_BY_YEAR = [350, 450, 550, 850, 1050, 1250, 1450, 1700, 1950, 2200];
 
-function calc(){
-  var sell=+$('sellingPrice').value||0,mi=+$('annualMiles').value,
-      cM=+$('compPeriod').value,cY=cM/12,irs=+$('irsRate').value||72.5,
-      disp=+$('disposalFee').value||0,
-      lP=+$('leasePayment').value||0,lD=+$('leaseDAS').value||0,
-      lT=+$('leaseTerm').value,lA=+$('leaseAllowedMiles').value,
-      lPM=+$('leasePerMile').value||0,lOR=+$('leaseOverage').value||0,
-      fP=+$('finPayment').value||0,fD=+$('finDown').value||0,fT=+$('financeTerm').value;
-
-  var lTY=lT/12,totAllow=lA*lTY,actCycle=mi*lTY,
-      overMi=Math.max(0,actCycle-totAllow),overCost=overMi*(lOR/100);
-
-  // ── LEASE ──
-  var lCyc=Math.ceil(cM/lT),lMo=Math.min(lCyc*lT,cM),
-      lTotPay=lP*lMo,lTotDAS=lD*lCyc,lTotDisp=disp*lCyc,lTotOver=overCost*lCyc,
-      lMaint=0;
-  for(var y=0;y<cY;y++){lMaint+=MAINT[Math.floor(y%(lT/12))]||MAINT[0]}
-  var lTotal=lTotPay+lTotDAS+lTotDisp+lMaint+lTotOver;
-  var lNet=lTotal; // you return the car, nothing back
-
-  // ── FINANCE ──
-  var fPayMo=Math.min(fT,cM),fTotPay=fP*fPayMo,fMaint=0;
-  for(var y=0;y<cY;y++){fMaint+=MAINT[Math.min(y,MAINT.length-1)]}
-
-  // Depreciation
-  var cv=sell,vBy=[sell];
-  for(var y=0;y<cY;y++){cv*=(1-DEP[Math.min(y,DEP.length-1)]);vBy.push(Math.round(cv))}
-  var endV=vBy[vBy.length-1],depLoss=sell-endV;
-
-  var fTotal=fTotPay+fD+fMaint; // what they actually paid out
-  var fNet=fTotal-endV; // net after selling the car
-  var totMi=mi*cY;
-  var fCPM=((fTotal+depLoss)/totMi)*100; // true cost per mile includes depreciation
-  var lCPMtrue=(lTotal/totMi)*100;
-
-  // ── UI ──
-  $('outLM').textContent=fmt(lP);
-  $('outLDAS').textContent=fmt(lD)+(lCyc>1?' × '+lCyc:'');
-  $('outLDisp').textContent=fmt(disp)+(lCyc>1?' × '+lCyc:'');
-  $('outLY').textContent=cY;
-  $('outLTP').textContent=fmt(Math.round(lTotPay+lTotDAS+lTotDisp));
-  $('outLMaint').textContent=fmt(Math.round(lMaint));
-  if(lTotOver>0){$('overRow').classList.remove('hidden');$('outLOver').textContent=fmt(Math.round(lTotOver))}
-  else{$('overRow').classList.add('hidden')}
-  $('outLTotal').textContent=fmt(Math.round(lTotal));
-  $('outLCPM').textContent=fmtC(lPM);
-  $('outLNet').textContent=fmt(Math.round(lNet));
-
-  $('outFM').textContent=fmt(fP);
-  $('outFD').textContent=fmt(fD);
-  $('outFY').textContent=cY;
-  $('outFTP').textContent=fmt(Math.round(fTotPay+fD));
-  $('outFMaint').textContent=fmt(Math.round(fMaint));
-  $('outFDep').textContent='-'+fmt(Math.round(depLoss));
-  $('outFTotal').textContent=fmt(Math.round(fTotal+depLoss));
-  $('outFCPM').textContent=fmtC(fCPM);
-  $('outFNet').textContent=fmt(Math.round(fNet));
-  $('outFinEndVal')&&0; // removed
-
-  // Banner
-  var diff=(fTotal+depLoss)-lTotal,b=$('savBanner');b.classList.remove('hidden');
-  if(diff>0){
-    b.className='bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 rounded-lg p-4 mb-6';
-    $('savIcon').className='w-10 h-10 rounded-full bg-emerald-200 dark:bg-emerald-800 flex items-center justify-center shrink-0 text-emerald-700 dark:text-emerald-300';
-    $('savAmt').className='font-bold text-emerald-800 dark:text-emerald-200 text-lg';
-    $('savDet').className='text-sm text-emerald-700 dark:text-emerald-400';
-    $('savAmt').textContent='True cost of ownership: Leasing saves '+fmt(Math.round(diff))+' over '+cY+' years';
-    $('savDet').textContent=fmt(Math.round(diff/cY))+'/year savings — while always driving a new car under full warranty.';
-  }else{
-    b.className='bg-blue-50 dark:bg-blue-950/40 border border-blue-300 dark:border-blue-700 rounded-lg p-4 mb-6';
-    $('savIcon').className='w-10 h-10 rounded-full bg-blue-200 dark:bg-blue-800 flex items-center justify-center shrink-0 text-blue-700 dark:text-blue-300';
-    $('savAmt').className='font-bold text-blue-800 dark:text-blue-200 text-lg';
-    $('savDet').className='text-sm text-blue-700 dark:text-blue-400';
-    $('savAmt').textContent='Finance total ownership cost is '+fmt(Math.round(Math.abs(diff)))+' less over '+cY+' years';
-    $('savDet').textContent='But you\'re driving a '+cY+'-year-old car worth '+fmt(endV)+' with rising maintenance.';
-  }
-
-  // Trade at 3 note
-  var v3=vBy[Math.min(3,vBy.length-1)],dep3=sell-v3,
-      fPaid3=fP*Math.min(36,fT)+fD,fMaint3=MAINT[0]+MAINT[1]+MAINT[2],
-      fNet3=fPaid3+fMaint3-v3,
-      lPaid3=lP*lT+lD+disp+MAINT[0]+MAINT[1]+MAINT[2];
-  $('tradeNote').innerHTML='If they finance and trade at 3 years: they\'ve paid <strong>'+fmt(Math.round(fPaid3))+'</strong> in payments, the car is worth <strong>'+fmt(v3)+'</strong> (lost '+fmt(Math.round(dep3))+' to depreciation), and they spent ~'+fmt(Math.round(fMaint3))+' on maintenance. Net cost: <strong>'+fmt(Math.round(fNet3))+'</strong>.<br>The same 3 years leasing costs <strong>'+fmt(Math.round(lPaid3))+'</strong> — and they walk into a brand new car. '+(fNet3>lPaid3?'<strong class="text-emerald-700 dark:text-emerald-400">Leasing saves '+fmt(Math.round(fNet3-lPaid3))+' even at just 3 years.</strong>':'');
-
-  // Equity
-  $('eqNote').innerHTML='<strong>Depreciation is the #1 cost:</strong> This '+fmt(sell)+' vehicle is worth just '+fmt(endV)+' after '+cY+' years — <strong>'+fmt(Math.round(depLoss))+' gone</strong>. With a lease, depreciation is Toyota\'s problem, not yours.';
-
-  // ── CHARTS ──
-  var c=cc(),yL=[];for(var i=0;i<=cY;i++)yL.push('Year '+i);
-  var opY=overMi>0?(overCost/lTY):0;
-
-  // CPM - true total cost per mile (payments+maint+depreciation for finance, payments+maint for lease)
-  var lCY=[null],fCY=[null],lR=0,fR=0;
-  for(var y=1;y<=cY;y++){
-    var cy=(y-1)%(lT/12);
-    lR+=(lP*12)+(cy===0?lD+disp:0)+MAINT[Math.floor(cy)]+opY;
-    lCY.push(+((lR/(mi*y))*100).toFixed(1));
-    var fm=Math.min(12,Math.max(0,fT-(y-1)*12));
-    var depY=vBy[y-1]-vBy[y]; // depreciation this year
-    fR+=(fP*fm)+(y===1?fD:0)+MAINT[Math.min(y-1,MAINT.length-1)]+depY;
-    fCY.push(+((fR/(mi*y))*100).toFixed(1));
-  }
-  if(cpmC)cpmC.destroy();
-  cpmC=new Chart($('cpmChart'),{type:'line',data:{labels:yL,datasets:[
-    {label:'Lease ¢/mi',data:lCY,borderColor:c.l,fill:false,tension:.3,pointRadius:4},
-    {label:'Finance ¢/mi (true cost)',data:fCY,borderColor:c.f,fill:false,tension:.3,pointRadius:4},
-    {label:'IRS Rate ('+irs+'¢)',data:Array(cY+1).fill(irs),borderColor:c.irs,borderDash:[6,4],borderWidth:2,pointRadius:0,fill:false}
-  ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:c.t,usePointStyle:true,pointStyle:'circle'}}},scales:{x:{ticks:{color:c.t},grid:{color:c.g}},y:{ticks:{color:c.t,callback:function(v){return v+'¢'}},grid:{color:c.g},beginAtZero:true}}}});
-
-  // Cumulative
-  var lCu=[0],fCu=[0],l2=0,f2=0;
-  for(var y=1;y<=cY;y++){
-    var cy=(y-1)%(lT/12);
-    l2+=(lP*12)+(cy===0?lD+disp:0)+MAINT[Math.floor(cy)]+opY;lCu.push(Math.round(l2));
-    var fm=Math.min(12,Math.max(0,fT-(y-1)*12));
-    f2+=(fP*fm)+(y===1?fD:0)+MAINT[Math.min(y-1,MAINT.length-1)];fCu.push(Math.round(f2));
-  }
-  if(cumC)cumC.destroy();
-  cumC=new Chart($('cumChart'),{type:'line',data:{labels:yL,datasets:[
-    {label:'Lease Total',data:lCu,borderColor:c.l,backgroundColor:c.lb,fill:true,tension:.3,pointRadius:4},
-    {label:'Finance Total (payments+maint)',data:fCu,borderColor:c.f,backgroundColor:c.fb,fill:true,tension:.3,pointRadius:4}
-  ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:c.t,usePointStyle:true,pointStyle:'circle'}}},scales:{x:{ticks:{color:c.t},grid:{color:c.g}},y:{ticks:{color:c.t,callback:function(v){return'$'+(v/1000).toFixed(0)+'k'}},grid:{color:c.g},beginAtZero:true}}}});
-
-  // Maintenance
-  var lMY=[],fMY=[];
-  for(var y=0;y<cY;y++){lMY.push(MAINT[Math.floor(y%(lT/12))]);fMY.push(MAINT[Math.min(y,MAINT.length-1)])}
-  if(mntC)mntC.destroy();
-  mntC=new Chart($('maintChart'),{type:'bar',data:{labels:Array.from({length:cY},function(_,i){return'Year '+(i+1)}),datasets:[
-    {label:'Lease',data:lMY,backgroundColor:c.l,borderRadius:4},
-    {label:'Finance',data:fMY,backgroundColor:c.f,borderRadius:4}
-  ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:c.t,usePointStyle:true,pointStyle:'circle'}}},scales:{x:{ticks:{color:c.t},grid:{display:false}},y:{ticks:{color:c.t,callback:function(v){return'$'+v}},grid:{color:c.g},beginAtZero:true}}}});
-
-  // Depreciation
-  if(depC)depC.destroy();
-  depC=new Chart($('depChart'),{type:'line',data:{labels:yL,datasets:[
-    {label:'Vehicle Value',data:vBy,borderColor:c.d,backgroundColor:'rgba(239,68,68,.08)',fill:true,tension:.3,pointRadius:4}
-  ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:c.t,usePointStyle:true,pointStyle:'circle'}}},scales:{x:{ticks:{color:c.t},grid:{color:c.g}},y:{ticks:{color:c.t,callback:function(v){return'$'+(v/1000).toFixed(0)+'k'}},grid:{color:c.g},beginAtZero:true}}}});
-
-  // Talking Points
-  var v3p=vBy[Math.min(3,vBy.length-1)];
-  var pts=[
-    {i:'💰',t:'Monthly Payment',x:lP<fP?'Lease: '+fmt(lP)+'/mo vs Finance: '+fmt(fP)+'/mo — that\'s '+fmt(Math.round(fP-lP))+' less per month, '+fmt(Math.round((fP-lP)*12))+'/year.':'Finance is '+fmt(Math.round(lP-fP))+'/mo less, but doesn\'t include the hidden costs below.'},
-    {i:'📉',t:'Depreciation — The Hidden Cost',x:'This vehicle loses '+fmt(Math.round(depLoss))+' in value over '+cY+' years. Finance buyers absorb that entire loss. Lease buyers? It\'s Toyota\'s problem — built into your payment.'},
-    {i:'🔧',t:'Maintenance After Warranty',x:'Years 1-3 under warranty: minimal cost. Years 4+: costs roughly double every 3 years. Finance maintenance over '+cY+' yrs: '+fmt(Math.round(fMaint))+'. Lease: '+fmt(Math.round(lMaint))+' — you\'re always in the cheap years.'},
-    {i:'🔄',t:'The Trade-In Trap',x:'If you finance and trade at 3 years, you\'ve paid '+fmt(Math.round(fPaid3))+' for a car now worth '+fmt(v3p)+'. That\'s basically leasing — but with a higher payment and negative equity risk.'},
-    {i:'🛡️',t:'Warranty Protection',x:'Toyota\'s factory warranty covers 3 years/36,000 miles bumper-to-bumper. Lease = always covered. Finance year 4+? A transmission repair alone runs $3,000-$9,000 out of your pocket.'},
-    {i:'🛣️',t:'Mileage',x:'Toyota charges '+lPM+'¢/mile built into the lease — just '+fmt(Math.round(lPM*mi/100))+'/year for '+mi.toLocaleString()+' miles.'+(overMi>0?' Going over costs '+lOR+'¢/mile. Stay within your allowance and it\'s $0 extra.':' Stay within your '+lA.toLocaleString()+' mi/year allowance and there\'s zero extra cost.')},
-    {i:'📊',t:'IRS Benchmark',x:'The IRS says it costs '+irs+'¢ per mile to own a car — that includes everything. Your lease rate: just '+lPM+'¢/mile. Finance true cost per mile: '+fmtC(fCPM)+'.'},
-    {i:'🚗',t:'Always New, Always Safe',x:'Every 3 years: latest Toyota Safety Sense, newest tech, best fuel economy. A financed car is frozen in time while safety standards advance around it.'},
-    {i:'⚡',t:'Net Cost Reality',x:'After '+cY+' years — Lease net cost: '+fmt(Math.round(lNet))+' (walk away clean). Finance net cost after selling the car: '+fmt(Math.round(fNet))+'. '+(lNet<fNet?'Leasing costs '+fmt(Math.round(fNet-lNet))+' less when you account for everything.':'Finance nets '+fmt(Math.round(lNet-fNet))+' less, but you\'re keeping a '+cY+'-year-old car.')}
-  ];
-  $('tp').innerHTML=pts.map(function(p){return'<div class="flex gap-2 p-3 rounded-lg bg-slate-50 dark:bg-slate-700/50"><span class="text-lg shrink-0">'+p.i+'</span><div><div class="text-sm font-semibold dark:text-white">'+p.t+'</div><div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">'+p.x+'</div></div></div>'}).join('');
+function applyCreditTier(){
+  const tier = TIERS[$('creditTier').value];
+  $('moneyFactor').value = tier.mf;
+  $('financeApr').value = tier.apr;
+  $('residualPct').value = tier.residual;
 }
 
-var _ot=window.toggleDarkMode;
-if(_ot){window.toggleDarkMode=function(){_ot();setTimeout(calc,50)}}
-window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(){setTimeout(calc,50)});
+function isDark(){ return document.documentElement.classList.contains('dark'); }
+
+function chartColors(){
+  return {
+    grid: isDark() ? 'rgba(148,163,184,0.12)' : 'rgba(0,0,0,0.06)',
+    text: isDark() ? '#94a3b8' : '#64748b',
+    lease: '#10b981',
+    leaseBg: isDark() ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.1)',
+    finance: '#3b82f6',
+    financeBg: isDark() ? 'rgba(59,130,246,0.15)' : 'rgba(59,130,246,0.1)',
+    irs: '#f59e0b',
+    depreciation: '#ef4444',
+    loanBal: '#8b5cf6',
+  };
+}
+
+function calc(){
+  const msrp = +$('msrp').value || 0;
+  const sellPrice = +$('sellingPrice').value || 0;
+  const down = +$('downPayment').value || 0;
+  const trade = +$('tradeIn').value || 0;
+  const annualMiles = +$('annualMiles').value;
+  const taxPct = (+$('taxRate').value || 0) / 100;
+  const compMonths = +$('compPeriod').value;
+  const compYears = compMonths / 12;
+
+  // Lease inputs
+  const lTermMonths = +$('leaseTerm').value;
+  const residualPct = (+$('residualPct').value || 0) / 100;
+  const mf = +$('moneyFactor').value || 0;
+  const das = +$('dueAtSigning').value || 0;
+
+  // Finance inputs
+  const fTermMonths = +$('financeTerm').value;
+  const fApr = (+$('financeApr').value || 0) / 100;
+
+  // Show MF as APR
+  $('mfApr').textContent = (mf * 2400).toFixed(1);
+
+  // ── LEASE CALCULATION ──
+  const residualVal = msrp * residualPct;
+  const leaseCapCost = sellPrice - down - trade;
+  const leaseDepreciation = leaseCapCost - residualVal;
+  const leaseDepPerMonth = leaseDepreciation / lTermMonths;
+  const leaseRentCharge = (leaseCapCost + residualVal) * mf;
+  const leaseMonthlyPreTax = leaseDepPerMonth + leaseRentCharge;
+  const leaseMonthly = leaseMonthlyPreTax * (1 + taxPct);
+
+  // How many lease cycles in the comparison period?
+  const leaseCycles = Math.ceil(compMonths / lTermMonths);
+  const totalLeaseMonths = Math.min(leaseCycles * lTermMonths, compMonths);
+  const totalLeasePayments = leaseMonthly * totalLeaseMonths;
+  const totalLeaseDAS = das * leaseCycles;
+
+  // Lease maintenance: always years 1-3 of the curve, repeating
+  let leaseMaintTotal = 0;
+  for(let y = 0; y < compYears; y++){
+    const ageInCycle = y % (lTermMonths/12);
+    leaseMaintTotal += MAINT_BY_YEAR[Math.floor(ageInCycle)] || MAINT_BY_YEAR[0];
+  }
+
+  const leaseTotalCost = totalLeasePayments + totalLeaseDAS + leaseMaintTotal;
+  const totalLeaseMiles = annualMiles * compYears;
+  const leaseCPM = (leaseTotalCost / totalLeaseMiles) * 100;
+
+  // ── FINANCE CALCULATION ──
+  const finAmount = sellPrice + (sellPrice * taxPct) - down - trade;
+  const monthlyRate = fApr / 12;
+  let finMonthly;
+  if(monthlyRate > 0){
+    finMonthly = finAmount * (monthlyRate * Math.pow(1+monthlyRate, fTermMonths)) / (Math.pow(1+monthlyRate, fTermMonths)-1);
+  } else {
+    finMonthly = finAmount / fTermMonths;
+  }
+
+  // Payments over the comparison period (stop at loan payoff)
+  const finPaymentMonths = Math.min(fTermMonths, compMonths);
+  const totalFinPayments = finMonthly * finPaymentMonths;
+
+  // Total interest paid
+  const totalFinPaid = finMonthly * fTermMonths;
+  const totalInterest = totalFinPaid - finAmount;
+
+  // Finance maintenance: continuous aging
+  let finMaintTotal = 0;
+  for(let y = 0; y < compYears; y++){
+    finMaintTotal += MAINT_BY_YEAR[Math.min(y, MAINT_BY_YEAR.length-1)];
+  }
+
+  // Depreciation curve for the financed vehicle
+  // Roughly: 20% yr1, 15% yr2, 13% yr3, 10% yr4-5, 8% yr6+
+  const depRates = [0.20, 0.15, 0.13, 0.10, 0.10, 0.08, 0.08, 0.07, 0.07, 0.06];
+  let finCarValue = sellPrice;
+  const finValueByYear = [sellPrice];
+  for(let y = 0; y < compYears; y++){
+    const rate = depRates[Math.min(y, depRates.length-1)];
+    finCarValue *= (1 - rate);
+    finValueByYear.push(Math.round(finCarValue));
+  }
+
+  // Loan balance over time
+  let balance = finAmount;
+  const loanBalByYear = [finAmount];
+  for(let y = 0; y < compYears; y++){
+    for(let m = 0; m < 12; m++){
+      if(balance <= 0) break;
+      const intCharge = balance * monthlyRate;
+      const princ = finMonthly - intCharge;
+      balance = Math.max(0, balance - princ);
+    }
+    loanBalByYear.push(Math.max(0, Math.round(balance)));
+  }
+
+  const finTotalCost = totalFinPayments + down + finMaintTotal;
+  const totalFinMiles = annualMiles * compYears;
+  const finCPM = (finTotalCost / totalFinMiles) * 100;
+
+  // ── UPDATE UI ──
+  $('leaseMonthly').textContent = fmt(Math.round(leaseMonthly));
+  $('leaseDAS').textContent = fmt(das) + (leaseCycles > 1 ? ' × '+leaseCycles : '');
+  $('leaseYears').textContent = compYears;
+  $('leaseTotalPayments').textContent = fmt(Math.round(totalLeasePayments + totalLeaseDAS));
+  $('leaseMaint').textContent = fmt(Math.round(leaseMaintTotal));
+  $('leaseTotalCost').textContent = fmt(Math.round(leaseTotalCost));
+  $('leaseCPM').textContent = fmtC(leaseCPM);
+
+  $('finMonthly').textContent = fmt(Math.round(finMonthly));
+  $('finDown').textContent = fmt(down);
+  $('finYears').textContent = compYears;
+  $('finTotalPayments').textContent = fmt(Math.round(totalFinPayments + down));
+  $('finInterest').textContent = fmt(Math.round(totalInterest));
+  $('finMaint').textContent = fmt(Math.round(finMaintTotal));
+  $('finTotalCost').textContent = fmt(Math.round(finTotalCost));
+  $('finCPM').textContent = fmtC(finCPM);
+  $('finResidualVal').textContent = '~' + fmt(finValueByYear[finValueByYear.length-1]) + ' (depreciating)';
+
+  // Savings banner
+  const diff = finTotalCost - leaseTotalCost;
+  const banner = $('savingsBanner');
+  if(diff > 0){
+    banner.classList.remove('hidden');
+    $('savingsAmount').textContent = 'Leasing saves ' + fmt(Math.round(diff)) + ' over ' + compYears + ' years';
+    $('savingsDetail').textContent = `That's ${fmt(Math.round(diff/compYears))}/year or ${fmtC(finCPM - leaseCPM)} less per mile — and you're always in a new car with full warranty.`;
+  } else {
+    banner.classList.remove('hidden');
+    banner.className = banner.className.replace('emerald','blue');
+    $('savingsAmount').textContent = 'Finance costs ' + fmt(Math.round(Math.abs(diff))) + ' less over ' + compYears + ' years';
+    $('savingsDetail').textContent = 'But the financed vehicle will be ' + compYears + ' years old with higher maintenance ahead.';
+  }
+
+  // Equity note
+  const endEquity = finValueByYear[finValueByYear.length-1] - loanBalByYear[loanBalByYear.length-1];
+  $('equityNote').innerHTML = `<strong>After ${compYears} years:</strong> The financed vehicle is worth ~${fmt(finValueByYear[finValueByYear.length-1])} — that's ${fmt(Math.round(sellPrice - finValueByYear[finValueByYear.length-1]))} lost to depreciation. ` +
+    (loanBalByYear[loanBalByYear.length-1] > 0
+      ? `You still owe ${fmt(loanBalByYear[loanBalByYear.length-1])}, so your equity is only ${fmt(Math.round(endEquity))}.`
+      : `The loan is paid off, giving you ${fmt(Math.round(endEquity))} in equity — in an aging vehicle with rising maintenance costs.`);
+
+  // ── CHARTS ──
+  const c = chartColors();
+  const yearLabels = Array.from({length: compYears+1}, (_,i) => 'Year '+i);
+
+  // Cost Per Mile chart
+  const leaseCpmByYear = [];
+  const finCpmByYear = [];
+  let lRunning = 0, fRunning = 0;
+  for(let y = 0; y <= compYears; y++){
+    if(y === 0){ leaseCpmByYear.push(null); finCpmByYear.push(null); continue; }
+    // Lease running cost
+    const lCycleYear = ((y-1) % (lTermMonths/12));
+    const lMonthsThisYear = 12;
+    lRunning += (leaseMonthly * lMonthsThisYear) + (lCycleYear === 0 ? das : 0) + MAINT_BY_YEAR[Math.floor(lCycleYear)];
+    leaseCpmByYear.push(+((lRunning / (annualMiles * y)) * 100).toFixed(1));
+
+    // Finance running cost
+    const fMonthsThisYear = Math.min(12, Math.max(0, fTermMonths - (y-1)*12));
+    const fLeftoverMonths = 12 - fMonthsThisYear;
+    fRunning += (finMonthly * fMonthsThisYear) + (y===1 ? down : 0) + MAINT_BY_YEAR[Math.min(y-1, MAINT_BY_YEAR.length-1)];
+    finCpmByYear.push(+((fRunning / (annualMiles * y)) * 100).toFixed(1));
+  }
+
+  // IRS reference line
+  const irsLine = Array(compYears+1).fill(72.5);
+
+  if(cpmChart) cpmChart.destroy();
+  cpmChart = new Chart($('cpmChart'), {
+    type: 'line',
+    data: {
+      labels: yearLabels,
+      datasets: [
+        {label:'Lease ¢/mi', data:leaseCpmByYear, borderColor:c.lease, backgroundColor:c.leaseBg, fill:false, tension:0.3, pointRadius:4},
+        {label:'Finance ¢/mi', data:finCpmByYear, borderColor:c.finance, backgroundColor:c.financeBg, fill:false, tension:0.3, pointRadius:4},
+        {label:'IRS Rate (72.5¢)', data:irsLine, borderColor:c.irs, borderDash:[6,4], borderWidth:2, pointRadius:0, fill:false},
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:c.text, usePointStyle:true, pointStyle:'circle'}}},
+      scales:{
+        x:{ticks:{color:c.text}, grid:{color:c.grid}},
+        y:{ticks:{color:c.text, callback:v=>v+'¢'}, grid:{color:c.grid}, beginAtZero:true}
+      }
+    }
+  });
+
+  // Cumulative cost chart
+  const leaseCum = [0], finCum = [0];
+  let lCum = 0, fCum = 0;
+  for(let y = 1; y <= compYears; y++){
+    const lCycleYear = ((y-1) % (lTermMonths/12));
+    lCum += (leaseMonthly * 12) + (lCycleYear === 0 ? das : 0) + MAINT_BY_YEAR[Math.floor(lCycleYear)];
+    leaseCum.push(Math.round(lCum));
+
+    const fMonths = Math.min(12, Math.max(0, fTermMonths - (y-1)*12));
+    fCum += (finMonthly * fMonths) + (y===1 ? down : 0) + MAINT_BY_YEAR[Math.min(y-1, MAINT_BY_YEAR.length-1)];
+    finCum.push(Math.round(fCum));
+  }
+
+  if(cumChart) cumChart.destroy();
+  cumChart = new Chart($('cumChart'), {
+    type: 'line',
+    data: {
+      labels: yearLabels,
+      datasets: [
+        {label:'Lease Total', data:leaseCum, borderColor:c.lease, backgroundColor:c.leaseBg, fill:true, tension:0.3, pointRadius:4},
+        {label:'Finance Total', data:finCum, borderColor:c.finance, backgroundColor:c.financeBg, fill:true, tension:0.3, pointRadius:4},
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:c.text, usePointStyle:true, pointStyle:'circle'}}},
+      scales:{
+        x:{ticks:{color:c.text}, grid:{color:c.grid}},
+        y:{ticks:{color:c.text, callback:v=>'$'+(v/1000).toFixed(0)+'k'}, grid:{color:c.grid}, beginAtZero:true}
+      }
+    }
+  });
+
+  // Maintenance chart
+  const lMaintYearly = [], fMaintYearly = [];
+  for(let y = 0; y < compYears; y++){
+    const lCycleYear = y % (lTermMonths/12);
+    lMaintYearly.push(MAINT_BY_YEAR[Math.floor(lCycleYear)]);
+    fMaintYearly.push(MAINT_BY_YEAR[Math.min(y, MAINT_BY_YEAR.length-1)]);
+  }
+
+  if(maintChart) maintChart.destroy();
+  maintChart = new Chart($('maintChart'), {
+    type: 'bar',
+    data: {
+      labels: Array.from({length:compYears}, (_,i) => 'Year '+(i+1)),
+      datasets: [
+        {label:'Lease Maint.', data:lMaintYearly, backgroundColor:c.lease, borderRadius:4},
+        {label:'Finance Maint.', data:fMaintYearly, backgroundColor:c.finance, borderRadius:4},
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:c.text, usePointStyle:true, pointStyle:'circle'}}},
+      scales:{
+        x:{ticks:{color:c.text}, grid:{display:false}},
+        y:{ticks:{color:c.text, callback:v=>'$'+v}, grid:{color:c.grid}, beginAtZero:true}
+      }
+    }
+  });
+
+  // Depreciation chart
+  if(depChart) depChart.destroy();
+  depChart = new Chart($('depChart'), {
+    type: 'line',
+    data: {
+      labels: yearLabels,
+      datasets: [
+        {label:'Vehicle Value', data:finValueByYear, borderColor:c.depreciation, backgroundColor:'rgba(239,68,68,0.08)', fill:true, tension:0.3, pointRadius:4},
+        {label:'Loan Balance', data:loanBalByYear, borderColor:c.loanBal, borderDash:[5,3], fill:false, tension:0.3, pointRadius:4},
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:c.text, usePointStyle:true, pointStyle:'circle'}}},
+      scales:{
+        x:{ticks:{color:c.text}, grid:{color:c.grid}},
+        y:{ticks:{color:c.text, callback:v=>'$'+(v/1000).toFixed(0)+'k'}, grid:{color:c.grid}, beginAtZero:true}
+      }
+    }
+  });
+
+  // ── TALKING POINTS ──
+  const points = [
+    {icon:'💰', title:'Monthly Savings', text: leaseMonthly < finMonthly ? `Lease saves ${fmt(Math.round(finMonthly - leaseMonthly))}/month — that's ${fmt(Math.round((finMonthly - leaseMonthly)*12))}/year back in your pocket.` : `Finance is ${fmt(Math.round(leaseMonthly - finMonthly))}/month less, but you absorb all depreciation.`},
+    {icon:'🔧', title:'Maintenance Advantage', text:`Lease maintenance over ${compYears} years: ${fmt(Math.round(leaseMaintTotal))}. Finance: ${fmt(Math.round(finMaintTotal))}. That's ${fmt(Math.round(finMaintTotal - leaseMaintTotal))} more on a car that keeps aging.`},
+    {icon:'📉', title:'Depreciation Trap', text:`A financed vehicle loses ~${fmt(Math.round(sellPrice - finValueByYear[3]))} in value in just 3 years. With a lease, that depreciation is built into the payment — you never feel the hit.`},
+    {icon:'🔄', title:'Trade at 3 Years?', text:`If you finance and trade at 3 years anyway, you're essentially leasing with worse terms — higher payment, negative equity risk, and more hassle.`},
+    {icon:'🛡️', title:'Always Under Warranty', text:`Leasing keeps you in the factory warranty window. No surprise repair bills for transmission, AC, suspension — the things that hit at years 4-7.`},
+    {icon:'🚗', title:'Newest Safety Tech', text:`Every 3 years you get the latest safety features, better fuel economy, and updated technology. A financed car is stuck in time.`},
+    {icon:'📊', title:'IRS Says It All', text:`The IRS sets the mileage rate at 72.5¢/mile for 2026 — that's what it truly costs to own and operate a vehicle per mile. Your lease cost per mile: ${fmtC(leaseCPM)}.`},
+    {icon:'⚡', title:'Cost Per Mile', text:`Lease: ${fmtC(leaseCPM)}/mile vs Finance: ${fmtC(finCPM)}/mile. Over ${(annualMiles*compYears).toLocaleString()} miles, that adds up fast.`},
+  ];
+
+  $('talkingPoints').innerHTML = points.map(p =>
+    `<div class="flex gap-2 p-3 rounded-lg bg-slate-50 dark:bg-slate-700/50">
+      <span class="text-lg shrink-0">${p.icon}</span>
+      <div><div class="text-sm font-semibold dark:text-white">${p.title}</div><div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">${p.text}</div></div>
+    </div>`
+  ).join('');
+}
+
+// Re-render charts on theme change
+const _origToggle = window.toggleDarkMode;
+if(_origToggle){
+  window.toggleDarkMode = function(){
+    _origToggle();
+    setTimeout(calc, 50);
+  };
+}
+
+// Also watch for system theme changes
+window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change', () => setTimeout(calc, 50));
+
+// Init
 calc();
 </script>
 {% endblock %}
