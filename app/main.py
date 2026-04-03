@@ -5302,15 +5302,18 @@ async def photos_upload_vauto(request: Request, vauto_file: UploadFile = File(..
     # ── Parse the file into a list of {header: value} dicts ──
     rows = []
     headers = []
+    parse_method = ""
 
     try:
         if fname.endswith(".csv"):
+            parse_method = "csv"
             text = raw.decode("utf-8-sig")
             reader = _csv_mod.DictReader(io.StringIO(text))
             headers = reader.fieldnames or []
             rows = list(reader)
 
         elif fname.endswith(".xlsx"):
+            parse_method = "openpyxl"
             from openpyxl import load_workbook
             wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
             ws = wb.active
@@ -5325,6 +5328,7 @@ async def photos_upload_vauto(request: Request, vauto_file: UploadFile = File(..
         elif fname.endswith(".xls"):
             try:
                 import xlrd
+                parse_method = "xlrd"
                 book = xlrd.open_workbook(file_contents=raw)
                 sheet = book.sheet_by_index(0)
                 raw_headers = [str(sheet.cell_value(0, c)).replace("\n", " ").replace("\r", " ").strip() for c in range(sheet.ncols)]
@@ -5334,6 +5338,7 @@ async def photos_upload_vauto(request: Request, vauto_file: UploadFile = File(..
                     rows.append(dict(zip(headers, row_vals)))
             except ImportError:
                 try:
+                    parse_method = "openpyxl-fallback"
                     from openpyxl import load_workbook
                     wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
                     ws = wb.active
@@ -5345,10 +5350,11 @@ async def photos_upload_vauto(request: Request, vauto_file: UploadFile = File(..
                             rows.append(dict(zip(headers, [str(v).strip() if v is not None else "" for v in vals])))
                     wb.close()
                 except Exception:
-                    pass
+                    parse_method = "failed"
 
         else:
             try:
+                parse_method = "openpyxl-guess"
                 from openpyxl import load_workbook
                 wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
                 ws = wb.active
@@ -5360,12 +5366,13 @@ async def photos_upload_vauto(request: Request, vauto_file: UploadFile = File(..
                         rows.append(dict(zip(headers, [str(v).strip() if v is not None else "" for v in vals])))
                 wb.close()
             except Exception:
+                parse_method = "csv-guess"
                 text = raw.decode("utf-8-sig")
                 reader = _csv_mod.DictReader(io.StringIO(text))
                 headers = reader.fieldnames or []
                 rows = list(reader)
     except Exception:
-        pass
+        parse_method = "error"
 
     if not rows or not headers:
         return RedirectResponse(url="/photos?msg=Could+not+read+file.+Please+upload+a+.xls,+.xlsx,+or+.csv+from+vAuto.&msg_type=error", status_code=303)
@@ -5392,39 +5399,42 @@ async def photos_upload_vauto(request: Request, vauto_file: UploadFile = File(..
         if stock and tag.lower() not in skip_vals:
             vauto_tags[stock] = tag
 
-    # ── Load ALL photo tracker vehicles (including dismissed, for diagnostics) ──
+    # ── Load photo tracker vehicles ──
     active = (await db.execute(
         select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.dismissed == False)
     )).scalars().all()
 
-    dismissed_list = (await db.execute(
-        select(PhotoVehicle.stock_num).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.dismissed == True)
-    )).scalars().all()
-    dismissed_set = {s.strip().upper() for s in dismissed_list}
-
     active_map = {v.stock_num.strip().upper(): v for v in active}
 
     updated = 0
-    not_in_tracker = []
-    in_dismissed = []
-
     for stock, tag in vauto_tags.items():
         if stock in active_map:
             active_map[stock].notes = tag
             updated += 1
-        elif stock in dismissed_set:
-            in_dismissed.append(stock)
-        else:
-            not_in_tracker.append(stock)
 
     await db.commit()
 
-    # ── Build detailed feedback message ──
-    parts = [f"vAuto sync: {updated} updated with tags ({len(vauto_tags)} tagged in file, {len(active_map)} in tracker)"]
-    if not_in_tracker:
-        parts.append(f"{len(not_in_tracker)} tagged but not in tracker: {', '.join(not_in_tracker[:10])}")
-    if in_dismissed:
-        parts.append(f"{len(in_dismissed)} tagged but dismissed: {', '.join(in_dismissed[:10])}")
+    # ── Build debug info: which tracker vehicles have a vAuto tag but didn't match? ──
+    # These are vehicles in the tracker whose stock SHOULD be in vauto_tags but aren't
+    tracker_not_tagged = []
+    tracker_tagged = []
+    for db_stock, v in active_map.items():
+        if db_stock in vauto_tags:
+            tracker_tagged.append(f"{db_stock}={vauto_tags[db_stock]}")
+        else:
+            # Check if this stock is in the vAuto file at ALL (even without a tag)
+            tracker_not_tagged.append(db_stock)
+
+    vauto_not_in_tracker = [s for s in vauto_tags if s not in active_map]
+
+    # Build a concise but useful message
+    parts = [f"vAuto sync ({parse_method}): {updated} updated"]
+    parts.append(f"File: {len(vauto_tags)} tagged, {len(rows)} total rows")
+    parts.append(f"Tracker: {len(active_map)} vehicles")
+    if vauto_not_in_tracker:
+        parts.append(f"{len(vauto_not_in_tracker)} tagged not in tracker: {' '.join(vauto_not_in_tracker[:15])}")
+    if updated > 0:
+        parts.append(f"Updated: {' '.join(tracker_tagged[:15])}")
 
     msg = " | ".join(parts).replace(" ", "+")
     return RedirectResponse(url=f"/photos?msg={msg}&msg_type=success", status_code=303)
