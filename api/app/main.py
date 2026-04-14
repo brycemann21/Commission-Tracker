@@ -2185,6 +2185,7 @@ async def dashboard(
         "pending_in_month_count": len(pend_month),
         "goals": goals, "milestones": milestones, "todays_deliveries": todays,
         "overdue_reminders": overdue_count,
+        "has_new_posts": await get_new_community_posts(db, user_id),
     })
     resp.set_cookie("ct_year", str(sel_y), httponly=False, samesite="lax")
     resp.set_cookie("ct_month", str(sel_m), httponly=False, samesite="lax")
@@ -3821,11 +3822,6 @@ async def team_remove_member(
     return RedirectResponse(url="/team?tab=members", status_code=303)
 
 
-    return RedirectResponse(url="/team", status_code=303)
-    return RedirectResponse(url="/team", status_code=303)
-    return RedirectResponse(url="/team", status_code=303)
-
-
 @app.post("/team/invite/{invite_id}/cancel")
 async def team_cancel_invite(
     invite_id: int, request: Request, db: AsyncSession = Depends(get_db),
@@ -4850,6 +4846,169 @@ async def admin_verify_user(user_id: int, request: Request, db: AsyncSession = D
     return RedirectResponse(url="/admin", status_code=303)
 
 
+
+
+@app.get("/wishlist", response_class=HTMLResponse)
+async def wishlist_page(request: Request, tab: str = "waiting", q: str = "", db: AsyncSession = Depends(get_db)):
+    """Vehicle wishlist — track customers waiting for specific vehicles."""
+    user_id = uid(request)
+    d_id = user_dealership_id(request)
+
+    search = q.strip() if q else ""
+
+    # Base query: user's own wishlist items within their dealership
+    query = select(WishlistVehicle).where(WishlistVehicle.user_id == user_id)
+    if d_id:
+        query = query.where(WishlistVehicle.dealership_id == d_id)
+
+    if search:
+        query = query.where(
+            (WishlistVehicle.customer_name.ilike(f"%{search}%")) |
+            (WishlistVehicle.vehicle_description.ilike(f"%{search}%")) |
+            (WishlistVehicle.customer_phone.ilike(f"%{search}%"))
+        )
+
+    # Get all for counts (unfiltered by tab)
+    all_items = (await db.execute(
+        select(WishlistVehicle).where(WishlistVehicle.user_id == user_id).where(
+            WishlistVehicle.dealership_id == d_id if d_id else True
+        )
+    )).scalars().all()
+
+    waiting_count = sum(1 for i in all_items if i.status == "waiting")
+    contacted_count = sum(1 for i in all_items if i.status == "contacted")
+    sold_count = sum(1 for i in all_items if i.status == "sold")
+    canceled_count = sum(1 for i in all_items if i.status == "canceled")
+
+    # Apply tab filter
+    if tab != "all":
+        query = query.where(WishlistVehicle.status == tab)
+
+    query = query.order_by(WishlistVehicle.created_at.desc())
+    items = (await db.execute(query)).scalars().all()
+
+    msg = request.query_params.get("msg", "")
+    msg_type = request.query_params.get("msg_type", "success")
+
+    return templates.TemplateResponse("wishlist.html", {
+        "request": request,
+        "user": await _user(request, db),
+        "items": items,
+        "total": len(all_items),
+        "waiting_count": waiting_count,
+        "contacted_count": contacted_count,
+        "sold_count": sold_count,
+        "canceled_count": canceled_count,
+        "current_tab": tab,
+        "search": search,
+        "message": msg,
+        "msg_type": msg_type,
+        "overdue_reminders": await get_overdue_reminders(db, user_id),
+        "has_new_posts": await get_new_community_posts(db, user_id),
+    })
+
+
+@app.post("/wishlist/add")
+async def wishlist_add(
+    request: Request,
+    customer_name: str = Form(""),
+    customer_phone: str = Form(""),
+    vehicle_description: str = Form(""),
+    color_preference: str = Form(""),
+    notes: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a customer to the vehicle wishlist."""
+    user_id = uid(request)
+    d_id = user_dealership_id(request)
+
+    if not customer_name.strip() or not vehicle_description.strip():
+        return RedirectResponse(url="/wishlist?msg=Customer+name+and+vehicle+required&msg_type=error", status_code=303)
+
+    item = WishlistVehicle(
+        user_id=user_id,
+        dealership_id=d_id,
+        customer_name=customer_name.strip(),
+        customer_phone=customer_phone.strip(),
+        vehicle_description=vehicle_description.strip(),
+        color_preference=color_preference.strip(),
+        notes=notes.strip(),
+        status="waiting",
+        created_at=_utcnow(),
+    )
+    db.add(item)
+    await db.commit()
+    return RedirectResponse(url="/wishlist?msg=Added+to+wishlist&msg_type=success", status_code=303)
+
+
+@app.post("/wishlist/{item_id}/status")
+async def wishlist_update_status(item_id: int, request: Request, new_status: str = Form(...), db: AsyncSession = Depends(get_db)):
+    """Update wishlist item status."""
+    user_id = uid(request)
+    item = (await db.execute(
+        select(WishlistVehicle).where(WishlistVehicle.id == item_id, WishlistVehicle.user_id == user_id)
+    )).scalar_one_or_none()
+    if item and new_status in ("waiting", "contacted", "sold", "canceled"):
+        item.status = new_status
+        await db.commit()
+    tab = request.query_params.get("tab", "waiting")
+    return RedirectResponse(url=f"/wishlist?tab={tab}", status_code=303)
+
+
+@app.post("/wishlist/{item_id}/note")
+async def wishlist_update_note(item_id: int, request: Request, notes: str = Form(""), db: AsyncSession = Depends(get_db)):
+    """Update notes on a wishlist item."""
+    user_id = uid(request)
+    item = (await db.execute(
+        select(WishlistVehicle).where(WishlistVehicle.id == item_id, WishlistVehicle.user_id == user_id)
+    )).scalar_one_or_none()
+    if item:
+        item.notes = notes.strip()
+        await db.commit()
+    return RedirectResponse(url="/wishlist", status_code=303)
+
+
+@app.post("/wishlist/{item_id}/edit")
+async def wishlist_edit(
+    item_id: int,
+    request: Request,
+    customer_name: str = Form(""),
+    customer_phone: str = Form(""),
+    vehicle_description: str = Form(""),
+    color_preference: str = Form(""),
+    notes: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    """Edit a wishlist item."""
+    user_id = uid(request)
+    item = (await db.execute(
+        select(WishlistVehicle).where(WishlistVehicle.id == item_id, WishlistVehicle.user_id == user_id)
+    )).scalar_one_or_none()
+    if item:
+        if customer_name.strip():
+            item.customer_name = customer_name.strip()
+        if vehicle_description.strip():
+            item.vehicle_description = vehicle_description.strip()
+        item.customer_phone = customer_phone.strip()
+        item.color_preference = color_preference.strip()
+        item.notes = notes.strip()
+        await db.commit()
+    return RedirectResponse(url="/wishlist?msg=Updated&msg_type=success", status_code=303)
+
+
+@app.post("/wishlist/{item_id}/delete")
+async def wishlist_delete(item_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Delete a wishlist item."""
+    user_id = uid(request)
+    item = (await db.execute(
+        select(WishlistVehicle).where(WishlistVehicle.id == item_id, WishlistVehicle.user_id == user_id)
+    )).scalar_one_or_none()
+    if item:
+        await db.delete(item)
+        await db.commit()
+    return RedirectResponse(url="/wishlist?msg=Removed&msg_type=success", status_code=303)
+
+
 # ════════════════════════════════════════════════
 # PHOTO TRACKER — vehicles needing photos
 # ════════════════════════════════════════════════
@@ -5773,8 +5932,11 @@ async def photos_progress_pdf(request: Request, db: AsyncSession = Depends(get_d
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
 
     from starlette.responses import FileResponse
+    from starlette.background import BackgroundTask
+    import os as _os
     filename = f"photo_progress_report_{today().strftime('%Y%m%d')}.pdf"
-    return FileResponse(tmp.name, media_type="application/pdf", filename=filename)
+    return FileResponse(tmp.name, media_type="application/pdf", filename=filename,
+                        background=BackgroundTask(_os.unlink, tmp.name))
 
 
 @app.get("/photos/pdf/{list_type}")
@@ -5858,8 +6020,11 @@ async def photos_pdf(list_type: str, request: Request, db: AsyncSession = Depend
     doc.build(story)
 
     from starlette.responses import FileResponse
+    from starlette.background import BackgroundTask
+    import os as _os
     filename = f"{list_type}_checklist_{today().strftime('%Y%m%d')}.pdf"
-    return FileResponse(tmp.name, media_type="application/pdf", filename=filename)
+    return FileResponse(tmp.name, media_type="application/pdf", filename=filename,
+                        background=BackgroundTask(_os.unlink, tmp.name))
 
 
 # ════════════════════════════════════════════════

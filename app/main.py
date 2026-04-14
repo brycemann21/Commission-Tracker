@@ -2206,6 +2206,7 @@ async def dashboard(
         "pending_in_month_count": len(pend_month),
         "goals": goals, "milestones": milestones, "todays_deliveries": todays,
         "overdue_reminders": overdue_count,
+        "has_new_posts": await get_new_community_posts(db, user_id),
     })
     resp.set_cookie("ct_year", str(sel_y), httponly=False, samesite="lax")
     resp.set_cookie("ct_month", str(sel_m), httponly=False, samesite="lax")
@@ -3840,11 +3841,6 @@ async def team_remove_member(
         _cache_delete_user(user_id)
         logger.info(f"User {user_id} removed and sessions destroyed")
     return RedirectResponse(url="/team?tab=members", status_code=303)
-
-
-    return RedirectResponse(url="/team", status_code=303)
-    return RedirectResponse(url="/team", status_code=303)
-    return RedirectResponse(url="/team", status_code=303)
 
 
 @app.post("/team/invite/{invite_id}/cancel")
@@ -5960,8 +5956,11 @@ async def photos_progress_pdf(request: Request, db: AsyncSession = Depends(get_d
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
 
     from starlette.responses import FileResponse
+    from starlette.background import BackgroundTask
+    import os as _os
     filename = f"photo_progress_report_{today().strftime('%Y%m%d')}.pdf"
-    return FileResponse(tmp.name, media_type="application/pdf", filename=filename)
+    return FileResponse(tmp.name, media_type="application/pdf", filename=filename,
+                        background=BackgroundTask(_os.unlink, tmp.name))
 
 
 @app.get("/photos/pdf/{list_type}")
@@ -6045,8 +6044,11 @@ async def photos_pdf(list_type: str, request: Request, db: AsyncSession = Depend
     doc.build(story)
 
     from starlette.responses import FileResponse
+    from starlette.background import BackgroundTask
+    import os as _os
     filename = f"{list_type}_checklist_{today().strftime('%Y%m%d')}.pdf"
-    return FileResponse(tmp.name, media_type="application/pdf", filename=filename)
+    return FileResponse(tmp.name, media_type="application/pdf", filename=filename,
+                        background=BackgroundTask(_os.unlink, tmp.name))
 
 
 # ════════════════════════════════════════════════

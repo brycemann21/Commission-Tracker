@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-3 mb-4">
+  <div>
+    <h1 class="text-xl font-bold">Vehicle Wishlist</h1>
+    <div class="text-sm text-slate-500 dark:text-slate-400">Customers waiting for a vehicle — add them here so you know who to call when it arrives</div>
+  </div>
+  <div class="flex items-center gap-2">
+    <button onclick="document.getElementById('addWishlistRow').classList.toggle('hidden')" class="px-4 py-2 rounded bg-slate-900 dark:bg-indigo-600 text-white text-sm hover:bg-slate-700 dark:hover:bg-indigo-700 transition flex items-center gap-1.5">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      Add Customer
+    </button>
+  </div>
+</div>
+
+<!-- Add new wishlist entry (hidden by default) -->
+<div id="addWishlistRow" class="hidden mb-4 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4">
+  <div class="text-sm font-semibold mb-3 dark:text-white">Add Customer to Wishlist</div>
+  <form method="post" action="/wishlist/add">
+    {{ csrf_hidden|safe }}
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Customer Name <span class="text-red-500">*</span></label>
+        <input type="text" name="customer_name" required placeholder="e.g. John Smith" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Phone Number</label>
+        <input type="tel" name="customer_phone" placeholder="e.g. (845) 555-1234" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Vehicle They Want <span class="text-red-500">*</span></label>
+        <input type="text" name="vehicle_description" required placeholder="e.g. 2025 Toyota RAV4 XLE AWD" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Color Preference</label>
+        <input type="text" name="color_preference" placeholder="e.g. Blue or Black" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+      </div>
+      <div class="sm:col-span-2">
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Notes</label>
+        <input type="text" name="notes" placeholder="e.g. Needs AWD, budget $35k, trading in a 2019 Camry" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+      </div>
+    </div>
+    <button type="submit" class="px-4 py-2 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-700 transition">Add to Wishlist</button>
+  </form>
+</div>
+
+{% if message is defined and message %}
+<div class="mb-4 rounded border {{ 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' if msg_type == 'success' else 'border-red-300 bg-red-50 text-red-800 dark:border-red-700 dark:bg-red-900/30 dark:text-red-300' }} px-4 py-3 text-sm">
+  {{ message }}
+</div>
+{% endif %}
+
+<!-- Summary counters -->
+<div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-5">
+  <a href="/wishlist?tab=all" class="rounded border {{ 'border-slate-400 dark:border-slate-500 ring-2 ring-slate-400/30' if current_tab == 'all' else 'border-slate-200 dark:border-slate-700' }} bg-white dark:bg-slate-800 px-4 py-3 text-center transition hover:border-slate-300 dark:hover:border-slate-600">
+    <div class="text-2xl font-bold dark:text-white">{{ total }}</div>
+    <div class="text-xs text-slate-500 dark:text-slate-400">Total</div>
+  </a>
+  <a href="/wishlist?tab=waiting" class="rounded border {{ 'border-amber-400 dark:border-amber-500 ring-2 ring-amber-400/30' if current_tab == 'waiting' else 'border-amber-300 dark:border-amber-700' }} bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-center transition hover:bg-amber-100 dark:hover:bg-amber-900/30">
+    <div class="text-2xl font-bold text-amber-700 dark:text-amber-400">{{ waiting_count }}</div>
+    <div class="text-xs text-amber-600 dark:text-amber-400">Waiting</div>
+  </a>
+  <a href="/wishlist?tab=contacted" class="rounded border {{ 'border-blue-400 dark:border-blue-500 ring-2 ring-blue-400/30' if current_tab == 'contacted' else 'border-blue-300 dark:border-blue-700' }} bg-blue-50 dark:bg-blue-900/20 px-4 py-3 text-center transition hover:bg-blue-100 dark:hover:bg-blue-900/30">
+    <div class="text-2xl font-bold text-blue-700 dark:text-blue-400">{{ contacted_count }}</div>
+    <div class="text-xs text-blue-600 dark:text-blue-400">Contacted</div>
+  </a>
+  <a href="/wishlist?tab=sold" class="rounded border {{ 'border-emerald-400 dark:border-emerald-500 ring-2 ring-emerald-400/30' if current_tab == 'sold' else 'border-emerald-300 dark:border-emerald-700' }} bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 text-center transition hover:bg-emerald-100 dark:hover:bg-emerald-900/30">
+    <div class="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{{ sold_count }}</div>
+    <div class="text-xs text-emerald-600 dark:text-emerald-400">Sold</div>
+  </a>
+  <a href="/wishlist?tab=canceled" class="rounded border {{ 'border-slate-400 dark:border-slate-500 ring-2 ring-slate-400/30' if current_tab == 'canceled' else 'border-slate-200 dark:border-slate-700' }} bg-slate-50 dark:bg-slate-800 px-4 py-3 text-center transition hover:bg-slate-100 dark:hover:bg-slate-700">
+    <div class="text-2xl font-bold text-slate-500 dark:text-slate-400">{{ canceled_count }}</div>
+    <div class="text-xs text-slate-500 dark:text-slate-400">Canceled</div>
+  </a>
+</div>
+
+<!-- Search -->
+{% if total > 0 %}
+<div class="mb-4">
+  <form method="get" action="/wishlist" class="flex gap-2">
+    <input type="hidden" name="tab" value="{{ current_tab }}">
+    <input type="text" name="q" value="{{ search }}" placeholder="Search by customer, vehicle, or phone…"
+           class="flex-1 max-w-sm border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+    <button type="submit" class="px-4 py-2 rounded bg-slate-100 dark:bg-slate-700 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition">Search</button>
+    {% if search %}<a href="/wishlist?tab={{ current_tab }}" class="px-3 py-2 text-sm text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition">Clear</a>{% endif %}
+  </form>
+</div>
+{% endif %}
+
+<!-- Wishlist table -->
+{% if items %}
+<div class="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="bg-slate-50 dark:bg-slate-900/50 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+        <th class="px-3 py-3">Customer</th>
+        <th class="px-3 py-3">Phone</th>
+        <th class="px-3 py-3">Vehicle</th>
+        <th class="px-3 py-3">Color Pref</th>
+        <th class="px-3 py-3 text-center">Status</th>
+        <th class="px-3 py-3">Notes</th>
+        <th class="px-3 py-3 text-center">Added</th>
+        <th class="px-3 py-3 text-center w-20">Actions</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+      {% for item in items %}
+      <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors" id="row_{{ item.id }}">
+        <!-- Customer Name -->
+        <td class="px-3 py-3 font-medium dark:text-white whitespace-nowrap">
+          {{ item.customer_name }}
+        </td>
+
+        <!-- Phone — click to call -->
+        <td class="px-3 py-3 dark:text-slate-300 whitespace-nowrap">
+          {% if item.customer_phone %}
+          <a href="tel:{{ item.customer_phone }}" class="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>
+            {{ item.customer_phone }}
+          </a>
+          {% else %}
+          <span class="text-slate-400">—</span>
+          {% endif %}
+        </td>
+
+        <!-- Vehicle -->
+        <td class="px-3 py-3 dark:text-slate-200">
+          {{ item.vehicle_description }}
+        </td>
+
+        <!-- Color Preference -->
+        <td class="px-3 py-3 dark:text-slate-300">
+          {% if item.color_preference %}{{ item.color_preference }}{% else %}<span class="text-slate-400">Any</span>{% endif %}
+        </td>
+
+        <!-- Status -->
+        <td class="px-3 py-3 text-center">
+          <div class="inline-flex items-center gap-1">
+            {% if item.status == 'waiting' %}
+            <a href="#" onclick="event.preventDefault();updateStatus({{ item.id }},'contacted')" class="px-2.5 py-1 rounded text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/60 transition cursor-pointer" title="Click → mark Contacted">
+              Waiting →
+            </a>
+            {% elif item.status == 'contacted' %}
+            <a href="#" onclick="event.preventDefault();updateStatus({{ item.id }},'waiting')" class="px-1.5 py-1 rounded text-xs text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:text-amber-400 dark:hover:bg-amber-900/30 transition cursor-pointer" title="Back to Waiting">←</a>
+            <a href="#" onclick="event.preventDefault();updateStatus({{ item.id }},'sold')" class="px-2.5 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/60 transition cursor-pointer" title="Click → mark Sold">
+              Contacted →
+            </a>
+            {% elif item.status == 'sold' %}
+            <a href="#" onclick="event.preventDefault();updateStatus({{ item.id }},'contacted')" class="px-1.5 py-1 rounded text-xs text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:text-blue-400 dark:hover:bg-blue-900/30 transition cursor-pointer" title="Back to Contacted">←</a>
+            <span class="px-2.5 py-1 rounded text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">Sold ✓</span>
+            {% elif item.status == 'canceled' %}
+            <a href="#" onclick="event.preventDefault();updateStatus({{ item.id }},'waiting')" class="px-1.5 py-1 rounded text-xs text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:text-amber-400 dark:hover:bg-amber-900/30 transition cursor-pointer" title="Reactivate → Waiting">↩</a>
+            <span class="px-2.5 py-1 rounded text-xs font-medium bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400 line-through">Canceled</span>
+            {% endif %}
+          </div>
+        </td>
+
+        <!-- Notes -->
+        <td class="px-3 py-2">
+          <div class="flex gap-1">
+            <input type="text" id="note_{{ item.id }}" value="{{ item.notes or '' }}" placeholder="Add note…"
+                   class="flex-1 min-w-0 border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-2 py-1 text-xs focus:outline-none focus:border-indigo-400">
+            <button onclick="saveNote({{ item.id }})" class="text-xs text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition px-1">Save</button>
+          </div>
+        </td>
+
+        <!-- Added date -->
+        <td class="px-3 py-3 text-center text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
+          {{ item.created_at.strftime('%b %-d') if item.created_at else '' }}
+        </td>
+
+        <!-- Actions -->
+        <td class="px-3 py-3 text-center">
+          <div class="flex items-center justify-center gap-2">
+            {% if item.status != 'canceled' and item.status != 'sold' %}
+            <button onclick="if(confirm('Cancel this wishlist entry?')) updateStatus({{ item.id }},'canceled')" class="text-xs text-slate-400 hover:text-orange-500 dark:hover:text-orange-400 transition" title="Cancel">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+            </button>
+            {% endif %}
+            <button onclick="openEdit({{ item.id }})" class="text-xs text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 transition" title="Edit">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+            </button>
+            <button onclick="if(confirm('Permanently delete this entry?')) deleteItem({{ item.id }})" class="text-xs text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 transition" title="Delete">✕</button>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="text-center py-16 text-slate-400 dark:text-slate-500">
+  <svg class="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+  {% if search %}
+  <div class="text-lg font-medium mb-1">No matches found</div>
+  <div class="text-sm">Try a different search term or <a href="/wishlist" class="text-indigo-500 hover:underline">clear the search</a>.</div>
+  {% elif current_tab != 'all' and current_tab != 'waiting' %}
+  <div class="text-lg font-medium mb-1">No {{ current_tab }} entries</div>
+  <div class="text-sm">Entries will appear here as you update their status.</div>
+  {% else %}
+  <div class="text-lg font-medium mb-1">No customers on the wishlist yet</div>
+  <div class="text-sm">Click <b>Add Customer</b> to track someone waiting for a vehicle.</div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Edit modal -->
+<div id="editModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40" onclick="if(event.target===this)closeEdit()">
+  <div class="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-lg font-bold dark:text-white">Edit Wishlist Entry</h3>
+      <button onclick="closeEdit()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">&times;</button>
+    </div>
+    <form id="editForm" method="post">
+      {{ csrf_hidden|safe }}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+        <div>
+          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Customer Name</label>
+          <input type="text" name="customer_name" id="edit_customer_name" required class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Phone</label>
+          <input type="tel" name="customer_phone" id="edit_customer_phone" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Vehicle</label>
+          <input type="text" name="vehicle_description" id="edit_vehicle_description" required class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Color Preference</label>
+          <input type="text" name="color_preference" id="edit_color_preference" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Notes</label>
+          <input type="text" name="notes" id="edit_notes" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+        </div>
+      </div>
+      <div class="flex justify-end gap-2">
+        <button type="button" onclick="closeEdit()" class="px-4 py-2 rounded text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition">Cancel</button>
+        <button type="submit" class="px-4 py-2 rounded bg-indigo-600 text-white text-sm hover:bg-indigo-700 transition">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// Store item data for edit modal
+const itemData = {
+  {% for item in items %}
+  {{ item.id }}: {
+    customer_name: {{ item.customer_name|tojson }},
+    customer_phone: {{ item.customer_phone|tojson }},
+    vehicle_description: {{ item.vehicle_description|tojson }},
+    color_preference: {{ item.color_preference|tojson }},
+    notes: {{ item.notes|tojson }}
+  },
+  {% endfor %}
+};
+
+function updateStatus(id, newStatus) {
+  fetch('/wishlist/' + id + '/status', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'new_status=' + newStatus + '&csrf_token={{ csrf_token }}'
+  }).then(() => location.reload());
+}
+
+function saveNote(id) {
+  const val = document.getElementById('note_' + id).value;
+  fetch('/wishlist/' + id + '/note', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'notes=' + encodeURIComponent(val) + '&csrf_token={{ csrf_token }}'
+  }).then(() => {
+    const btn = event.target;
+    btn.textContent = '✓';
+    setTimeout(() => btn.textContent = 'Save', 1500);
+  });
+}
+
+function deleteItem(id) {
+  fetch('/wishlist/' + id + '/delete', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'csrf_token={{ csrf_token }}'
+  }).then(() => location.reload());
+}
+
+function openEdit(id) {
+  const data = itemData[id];
+  if (!data) return;
+  document.getElementById('editForm').action = '/wishlist/' + id + '/edit';
+  document.getElementById('edit_customer_name').value = data.customer_name;
+  document.getElementById('edit_customer_phone').value = data.customer_phone;
+  document.getElementById('edit_vehicle_description').value = data.vehicle_description;
+  document.getElementById('edit_color_preference').value = data.color_preference;
+  document.getElementById('edit_notes').value = data.notes;
+  document.getElementById('editModal').classList.remove('hidden');
+}
+
+function closeEdit() {
+  document.getElementById('editModal').classList.add('hidden');
+}
+
+// Close modal on Escape
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeEdit();
+});
+</script>
+
+{% endblock %}
