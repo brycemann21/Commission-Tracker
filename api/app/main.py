@@ -5107,6 +5107,79 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
     return RedirectResponse(url=f"/photos?msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)
 
 
+@app.post("/photos/vauto-tags")
+async def photos_vauto_tags(request: Request, xls_file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+    """Upload vAuto Full Inventory XLS and sync Tags column into vehicle notes."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+    if not d_id:
+        return RedirectResponse(url="/photos", status_code=303)
+
+    try:
+        import xlrd as _xlrd
+    except ImportError:
+        return RedirectResponse(url="/photos?msg=xlrd+not+installed&msg_type=error", status_code=303)
+
+    try:
+        content_bytes = await xls_file.read()
+        wb = _xlrd.open_workbook(file_contents=content_bytes)
+        ws = wb.sheet_by_index(0)
+        headers = [ws.cell_value(0, c) for c in range(ws.ncols)]
+
+        def _col(candidates):
+            for cand in candidates:
+                for i, h in enumerate(headers):
+                    if cand in h.strip().lower().replace(" ", "_").replace("\n", "_"):
+                        return i
+            return None
+
+        col_stock = _col(["stock_#", "stock#", "stock_num", "stock"])
+        col_tags  = _col(["tags"])
+
+        if col_stock is None or col_tags is None:
+            return RedirectResponse(url="/photos?msg=Could+not+find+Stock+or+Tags+columns&msg_type=error", status_code=303)
+
+        tag_map: dict[str, str] = {}
+        for r in range(1, ws.nrows):
+            stock = str(ws.cell_value(r, col_stock)).strip().upper()
+            tags  = str(ws.cell_value(r, col_tags)).strip()
+            if stock and tags:
+                tag_map[stock] = tags
+
+        if not tag_map:
+            return RedirectResponse(url="/photos?msg=No+tagged+vehicles+found+in+file&msg_type=error", status_code=303)
+
+        vehicles = (await db.execute(
+            select(PhotoVehicle).where(
+                PhotoVehicle.dealership_id == d_id,
+                PhotoVehicle.stock_num != "__SEED_MARKER__",
+                PhotoVehicle.dismissed == False,
+            )
+        )).scalars().all()
+
+        updated = 0
+        cleared = 0
+        for v in vehicles:
+            stock = v.stock_num.strip().upper()
+            if stock in tag_map:
+                v.notes = tag_map[stock][:500]
+                updated += 1
+            elif v.notes and v.notes.strip():
+                v.notes = ""
+                cleared += 1
+
+        await db.commit()
+
+        parts = [f"vAuto tags synced: {updated} updated"]
+        if cleared:
+            parts.append(f"{cleared} cleared")
+        msg = ", ".join(parts).replace(" ", "+")
+        return RedirectResponse(url=f"/photos?msg={msg}&msg_type=success", status_code=303)
+
+    except Exception as exc:
+        err = str(exc)[:80].replace(" ", "+")
+        return RedirectResponse(url=f"/photos?msg=Error+reading+XLS:+{err}&msg_type=error", status_code=303)
+
 @app.post("/photos/bulk/status")
 async def photos_bulk_status(request: Request, new_status: str = Form(""), db: AsyncSession = Depends(get_db)):
     """Bulk change status for selected vehicles."""
