@@ -5162,6 +5162,7 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
     total_skipped = 0
     files_processed = 0
     today_d = today()
+    seen_in_upload: set[str] = set()  # track every stock# seen across all uploaded CSVs
 
     for csv_file in csv_files:
         try:
@@ -5212,6 +5213,9 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
                 except (ValueError, TypeError):
                     age = 0
 
+                # Track every stock# seen across all uploaded files
+                seen_in_upload.add(stock)
+
                 # Skip dismissed vehicles — they were manually removed
                 if stock in dismissed_set:
                     total_skipped += 1
@@ -5244,7 +5248,13 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
         except Exception:
             continue
 
-    # Vehicles NOT in today's CSV stay where they are — user manually marks Done
+    # Vehicles NOT in today's CSV: if they were stamped today by a previous upload,
+    # roll their last_seen_date back to yesterday so they correctly appear as "Not in CSV"
+    import datetime as _dt
+    yesterday_d = today_d - _dt.timedelta(days=1)
+    for v in existing_map.values():
+        if v.stock_num.strip().upper() not in seen_in_upload and v.last_seen_date == today_d:
+            v.last_seen_date = yesterday_d
 
     await db.commit()
 
@@ -5282,162 +5292,6 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
         msg += f", {total_skipped} skipped (dismissed)"
     return RedirectResponse(url=f"/photos?msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)
 
-
-@app.post("/photos/upload-vauto")
-async def photos_upload_vauto(request: Request, vauto_file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
-    """Upload a vAuto inventory export (.xls/.xlsx/.csv) to sync Tags into PhotoVehicle notes.
-    Only updates vehicles already in the Photo Tracker. Overwrites notes with the vAuto tag.
-    Vehicles with no tag in vAuto are left alone."""
-    _require_super_admin(request)
-    d_id = user_dealership_id(request)
-    if not d_id:
-        return RedirectResponse(url="/photos", status_code=303)
-
-    import io
-    import csv as _csv_mod
-
-    fname = (vauto_file.filename or "").lower()
-    raw = await vauto_file.read()
-
-    # ── Parse the file into a list of {header: value} dicts ──
-    rows = []
-    headers = []
-    parse_method = ""
-
-    try:
-        if fname.endswith(".csv"):
-            parse_method = "csv"
-            text = raw.decode("utf-8-sig")
-            reader = _csv_mod.DictReader(io.StringIO(text))
-            headers = reader.fieldnames or []
-            rows = list(reader)
-
-        elif fname.endswith(".xlsx"):
-            parse_method = "openpyxl"
-            from openpyxl import load_workbook
-            wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
-            ws = wb.active
-            row_iter = ws.iter_rows(values_only=True)
-            raw_headers = next(row_iter, None)
-            if raw_headers:
-                headers = [str(h).replace("\n", " ").replace("\r", " ").strip() if h else "" for h in raw_headers]
-                for vals in row_iter:
-                    rows.append(dict(zip(headers, [str(v).strip() if v is not None else "" for v in vals])))
-            wb.close()
-
-        elif fname.endswith(".xls"):
-            try:
-                import xlrd
-                parse_method = "xlrd"
-                book = xlrd.open_workbook(file_contents=raw)
-                sheet = book.sheet_by_index(0)
-                raw_headers = [str(sheet.cell_value(0, c)).replace("\n", " ").replace("\r", " ").strip() for c in range(sheet.ncols)]
-                headers = raw_headers
-                for r in range(1, sheet.nrows):
-                    row_vals = [str(sheet.cell_value(r, c)).strip() if sheet.cell_value(r, c) is not None else "" for c in range(sheet.ncols)]
-                    rows.append(dict(zip(headers, row_vals)))
-            except ImportError:
-                try:
-                    parse_method = "openpyxl-fallback"
-                    from openpyxl import load_workbook
-                    wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
-                    ws = wb.active
-                    row_iter = ws.iter_rows(values_only=True)
-                    raw_headers = next(row_iter, None)
-                    if raw_headers:
-                        headers = [str(h).replace("\n", " ").replace("\r", " ").strip() if h else "" for h in raw_headers]
-                        for vals in row_iter:
-                            rows.append(dict(zip(headers, [str(v).strip() if v is not None else "" for v in vals])))
-                    wb.close()
-                except Exception:
-                    parse_method = "failed"
-
-        else:
-            try:
-                parse_method = "openpyxl-guess"
-                from openpyxl import load_workbook
-                wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
-                ws = wb.active
-                row_iter = ws.iter_rows(values_only=True)
-                raw_headers = next(row_iter, None)
-                if raw_headers:
-                    headers = [str(h).replace("\n", " ").replace("\r", " ").strip() if h else "" for h in raw_headers]
-                    for vals in row_iter:
-                        rows.append(dict(zip(headers, [str(v).strip() if v is not None else "" for v in vals])))
-                wb.close()
-            except Exception:
-                parse_method = "csv-guess"
-                text = raw.decode("utf-8-sig")
-                reader = _csv_mod.DictReader(io.StringIO(text))
-                headers = reader.fieldnames or []
-                rows = list(reader)
-    except Exception:
-        parse_method = "error"
-
-    if not rows or not headers:
-        return RedirectResponse(url="/photos?msg=Could+not+read+file.+Please+upload+a+.xls,+.xlsx,+or+.csv+from+vAuto.&msg_type=error", status_code=303)
-
-    # ── Find the Stock # and Tags columns (flexible matching) ──
-    col_stock = None
-    col_tags = None
-    for h in headers:
-        hl = h.lower().strip()
-        if "stock" in hl and col_stock is None:
-            col_stock = h
-        if "tag" in hl and col_tags is None:
-            col_tags = h
-
-    if not col_stock or not col_tags:
-        return RedirectResponse(url="/photos?msg=Could+not+find+Stock+or+Tags+columns+in+the+file.&msg_type=error", status_code=303)
-
-    # ── Build stock->tag map (skip blanks and "nan"/"None") ──
-    vauto_tags = {}
-    skip_vals = {"", "nan", "none", "null", "0", "0.0"}
-    for row in rows:
-        stock = (row.get(col_stock, "") or "").strip().upper()
-        tag = (row.get(col_tags, "") or "").strip()
-        if stock and tag.lower() not in skip_vals:
-            vauto_tags[stock] = tag
-
-    # ── Load photo tracker vehicles ──
-    active = (await db.execute(
-        select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.dismissed == False)
-    )).scalars().all()
-
-    active_map = {v.stock_num.strip().upper(): v for v in active}
-
-    updated = 0
-    for stock, tag in vauto_tags.items():
-        if stock in active_map:
-            active_map[stock].notes = tag
-            updated += 1
-
-    await db.commit()
-
-    # ── Build debug info: which tracker vehicles have a vAuto tag but didn't match? ──
-    # These are vehicles in the tracker whose stock SHOULD be in vauto_tags but aren't
-    tracker_not_tagged = []
-    tracker_tagged = []
-    for db_stock, v in active_map.items():
-        if db_stock in vauto_tags:
-            tracker_tagged.append(f"{db_stock}={vauto_tags[db_stock]}")
-        else:
-            # Check if this stock is in the vAuto file at ALL (even without a tag)
-            tracker_not_tagged.append(db_stock)
-
-    vauto_not_in_tracker = [s for s in vauto_tags if s not in active_map]
-
-    # Build a concise but useful message
-    parts = [f"vAuto sync ({parse_method}): {updated} updated"]
-    parts.append(f"File: {len(vauto_tags)} tagged, {len(rows)} total rows")
-    parts.append(f"Tracker: {len(active_map)} vehicles")
-    if vauto_not_in_tracker:
-        parts.append(f"{len(vauto_not_in_tracker)} tagged not in tracker: {' '.join(vauto_not_in_tracker[:15])}")
-    if updated > 0:
-        parts.append(f"Updated: {' '.join(tracker_tagged[:15])}")
-
-    msg = " | ".join(parts).replace(" ", "+")
-    return RedirectResponse(url=f"/photos?msg={msg}&msg_type=success", status_code=303)
 
 @app.post("/photos/bulk/status")
 async def photos_bulk_status(request: Request, new_status: str = Form(""), db: AsyncSession = Depends(get_db)):
