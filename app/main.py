@@ -3214,7 +3214,7 @@ async def reminder_delete(reminder_id: int, request: Request, db: AsyncSession =
 async def lease_converter(request: Request, db: AsyncSession = Depends(get_db)):
     user = await _user(request, db)
     return templates.TemplateResponse("lease_converter.html", {
-        "request": request, "user": user, "title": "Lease Converter",
+        "request": request, "user": user, "title": "Fuel Savings",
         "overdue_reminders": await get_overdue_reminders(db, uid(request)),
         "has_new_posts": await get_new_community_posts(db, uid(request)),
     })
