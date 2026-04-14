@@ -5315,8 +5315,7 @@ async def photos_vauto_tags(request: Request, xls_file: UploadFile = File(...), 
         def _col(candidates):
             for cand in candidates:
                 for i, h in enumerate(headers):
-                    if cand in h.strip().lower().replace(" ", "_").replace("
-", "_"):
+                    if cand in h.strip().lower().replace(" ", "_").replace("\n", "_"):
                         return i
             return None
 
