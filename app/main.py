@@ -1081,6 +1081,7 @@ async def _run_startup_migrations():
             # Add dismissed_at timestamp column if missing
             try:
                 await conn.execute("ALTER TABLE photo_vehicles ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMP")
+                await conn.execute("ALTER TABLE photo_vehicles ADD COLUMN IF NOT EXISTS status_before_dismiss VARCHAR(24)")
                 # Backfill dismissed_at for existing dismissed vehicles using last_seen_date as best proxy
                 await conn.execute("""
                     UPDATE photo_vehicles
@@ -5464,28 +5465,12 @@ async def photos_bulk_remove(request: Request, db: AsyncSession = Depends(get_db
             select(PhotoVehicle).where(PhotoVehicle.id.in_(ids), PhotoVehicle.dealership_id == d_id)
         )).scalars().all()
         for v in vehicles:
+            v.status_before_dismiss = v.status  # save so restore knows where to send it back
             v.dismissed = True
             v.dismissed_at = _utcnow()
             v.status = "done"
         await db.commit()
     return RedirectResponse(url="/photos", status_code=303)
-
-
-@app.post("/photos/{vehicle_id}/restore")
-async def photos_restore(vehicle_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    """Restore a dismissed vehicle back to the active board."""
-    _require_super_admin(request)
-    d_id = user_dealership_id(request)
-    v = (await db.execute(
-        select(PhotoVehicle).where(PhotoVehicle.id == vehicle_id, PhotoVehicle.dealership_id == d_id)
-    )).scalar_one_or_none()
-    if v:
-        v.dismissed = False
-        # Restore to needs_detail if it was set to done as part of dismissal
-        if v.status == "done":
-            v.status = "needs_detail"
-        await db.commit()
-    return RedirectResponse(url="/photos?tab=dismissed", status_code=303)
 
 
 @app.post("/photos/bulk/restore")
@@ -5502,12 +5487,30 @@ async def photos_bulk_restore(request: Request, db: AsyncSession = Depends(get_d
         )).scalars().all()
         for v in vehicles:
             v.dismissed = False
-            if v.status == "done":
-                v.status = "needs_detail"
+            # Restore to original pre-dismissal status, fall back to needs_detail
+            v.status = v.status_before_dismiss or "needs_detail"
+            v.status_before_dismiss = None
             restored += 1
         await db.commit()
     msg = f"{restored} vehicle{'s' if restored != 1 else ''} restored to board"
-    return RedirectResponse(url=f"/photos?tab=dismissed&msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)
+    return RedirectResponse(url=f"/photos?tab=dismissed&msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)@app.post("/photos/{vehicle_id}/restore")
+async def photos_restore(vehicle_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Restore a dismissed vehicle back to the active board."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+    v = (await db.execute(
+        select(PhotoVehicle).where(PhotoVehicle.id == vehicle_id, PhotoVehicle.dealership_id == d_id)
+    )).scalar_one_or_none()
+    if v:
+        v.dismissed = False
+        # Restore to original pre-dismissal status, fall back to needs_detail
+        v.status = v.status_before_dismiss or "needs_detail"
+        v.status_before_dismiss = None
+        await db.commit()
+    return RedirectResponse(url="/photos?tab=dismissed", status_code=303)
+
+
+
 
 @app.post("/photos/inventory")
 async def photos_save_inventory(request: Request, total_inventory: int = Form(0), db: AsyncSession = Depends(get_db)):
@@ -5615,6 +5618,7 @@ async def photos_remove(vehicle_id: int, request: Request, db: AsyncSession = De
         select(PhotoVehicle).where(PhotoVehicle.id == vehicle_id, PhotoVehicle.dealership_id == user_dealership_id(request))
     )).scalar_one_or_none()
     if v:
+        v.status_before_dismiss = v.status  # save so restore knows where to send it back
         v.dismissed = True
         v.dismissed_at = _utcnow()
         v.status = "done"
