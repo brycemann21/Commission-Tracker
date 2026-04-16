@@ -164,7 +164,7 @@
 </div>
 
 <!-- Vehicle table with bulk actions -->
-{% if vehicles|length > 0 %}
+{% if current_tab != 'dismissed' and vehicles|length > 0 %}
 <form method="post" action="/photos/bulk/status" id="bulkForm">
   {{ csrf_hidden|safe }}
   <input type="hidden" name="new_status" value="" id="bulkStatus">
