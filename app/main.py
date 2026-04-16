@@ -5047,30 +5047,40 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
     search = q.strip().upper() if q else ""
 
     # Query vehicles with optional search and tab filter
-    query = select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == False)
-    if search:
-        query = query.where(
-            (PhotoVehicle.stock_num.ilike(f"%{search}%")) | (PhotoVehicle.year_make_model.ilike(f"%{search}%"))
-        )
-    if tab == "needs_detail":
-        query = query.where(PhotoVehicle.status == "needs_detail")
-    elif tab == "ready_for_photos":
-        query = query.where(PhotoVehicle.status == "ready_for_photos")
-    elif tab == "done":
-        query = query.where(PhotoVehicle.status == "done")
-    elif tab == "not_in_csv":
-        # We'll filter in Python after computing last_upload_date
-        pass
+    if tab == "dismissed":
+        query = select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == True)
+        if search:
+            query = query.where(
+                (PhotoVehicle.stock_num.ilike(f"%{search}%")) | (PhotoVehicle.year_make_model.ilike(f"%{search}%"))
+            )
+        query = query.order_by(PhotoVehicle.age_days.desc())
+        vehicles = (await db.execute(query)).scalars().all()
+    else:
+        query = select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == False)
+        if search:
+            query = query.where(
+                (PhotoVehicle.stock_num.ilike(f"%{search}%")) | (PhotoVehicle.year_make_model.ilike(f"%{search}%"))
+            )
+        if tab == "needs_detail":
+            query = query.where(PhotoVehicle.status == "needs_detail")
+        elif tab == "ready_for_photos":
+            query = query.where(PhotoVehicle.status == "ready_for_photos")
+        elif tab == "done":
+            query = query.where(PhotoVehicle.status == "done")
+        elif tab == "not_in_csv":
+            # We'll filter in Python after computing last_upload_date
+            pass
     # Sort: status priority (needs_detail → ready_for_photos → done), then oldest first
-    from sqlalchemy import case as sa_case
-    status_order = sa_case(
-        (PhotoVehicle.status == "needs_detail", 1),
-        (PhotoVehicle.status == "ready_for_photos", 2),
-        (PhotoVehicle.status == "done", 3),
-        else_=4,
-    )
-    query = query.order_by(status_order, PhotoVehicle.age_days.desc())
-    vehicles = (await db.execute(query)).scalars().all()
+    if tab != "dismissed":
+        from sqlalchemy import case as sa_case
+        status_order = sa_case(
+            (PhotoVehicle.status == "needs_detail", 1),
+            (PhotoVehicle.status == "ready_for_photos", 2),
+            (PhotoVehicle.status == "done", 3),
+            else_=4,
+        )
+        query = query.order_by(status_order, PhotoVehicle.age_days.desc())
+        vehicles = (await db.execute(query)).scalars().all()
 
     # Counts
     all_vehicles = (await db.execute(
@@ -5081,6 +5091,9 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
     ready = sum(1 for v in all_vehicles if v.status == "ready_for_photos")
     done_count = sum(1 for v in all_vehicles if v.status == "done")
     new_today = sum(1 for v in all_vehicles if v.first_seen_date == today())
+    dismissed_count = (await db.execute(
+        select(func.count()).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == True)
+    )).scalar() or 0
 
     # Determine the most recent upload date (max last_seen_date across all vehicles)
     last_upload_date = max((v.last_seen_date for v in all_vehicles if v.last_seen_date), default=None)
@@ -5110,6 +5123,7 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
         "done": done_count,
         "new_today": new_today,
         "not_in_csv": not_in_csv,
+        "dismissed_count": dismissed_count,
         "last_upload_date": last_upload_date,
         "total_inventory": total_inventory,
         "today_date": today(),
@@ -5418,6 +5432,44 @@ async def photos_bulk_remove(request: Request, db: AsyncSession = Depends(get_db
         await db.commit()
     return RedirectResponse(url="/photos", status_code=303)
 
+
+@app.post("/photos/{vehicle_id}/restore")
+async def photos_restore(vehicle_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Restore a dismissed vehicle back to the active board."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+    v = (await db.execute(
+        select(PhotoVehicle).where(PhotoVehicle.id == vehicle_id, PhotoVehicle.dealership_id == d_id)
+    )).scalar_one_or_none()
+    if v:
+        v.dismissed = False
+        # Restore to needs_detail if it was set to done as part of dismissal
+        if v.status == "done":
+            v.status = "needs_detail"
+        await db.commit()
+    return RedirectResponse(url="/photos?tab=dismissed", status_code=303)
+
+
+@app.post("/photos/bulk/restore")
+async def photos_bulk_restore(request: Request, db: AsyncSession = Depends(get_db)):
+    """Restore multiple dismissed vehicles back to the active board."""
+    _require_super_admin(request)
+    d_id = user_dealership_id(request)
+    form = await request.form()
+    ids = [int(v) for v in form.getlist("vehicle_ids") if v.isdigit()]
+    restored = 0
+    if ids:
+        vehicles = (await db.execute(
+            select(PhotoVehicle).where(PhotoVehicle.id.in_(ids), PhotoVehicle.dealership_id == d_id)
+        )).scalars().all()
+        for v in vehicles:
+            v.dismissed = False
+            if v.status == "done":
+                v.status = "needs_detail"
+            restored += 1
+        await db.commit()
+    msg = f"{restored} vehicle{'s' if restored != 1 else ''} restored to board"
+    return RedirectResponse(url=f"/photos?tab=dismissed&msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)
 
 @app.post("/photos/inventory")
 async def photos_save_inventory(request: Request, total_inventory: int = Form(0), db: AsyncSession = Depends(get_db)):
