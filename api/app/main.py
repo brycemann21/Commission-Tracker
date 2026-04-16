@@ -5469,7 +5469,10 @@ async def photos_bulk_restore(request: Request, db: AsyncSession = Depends(get_d
             restored += 1
         await db.commit()
     msg = f"{restored} vehicle{'s' if restored != 1 else ''} restored to board"
-    return RedirectResponse(url=f"/photos?tab=dismissed&msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)@app.post("/photos/{vehicle_id}/restore")
+    return RedirectResponse(url=f"/photos?tab=dismissed&msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)
+
+
+@app.post("/photos/{vehicle_id}/restore")
 async def photos_restore(vehicle_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     """Restore a dismissed vehicle back to the active board."""
     _require_super_admin(request)
