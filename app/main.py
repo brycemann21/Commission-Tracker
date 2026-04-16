@@ -1081,6 +1081,21 @@ async def _run_startup_migrations():
             # Add dismissed_at timestamp column if missing
             try:
                 await conn.execute("ALTER TABLE photo_vehicles ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMP")
+                # Backfill dismissed_at for existing dismissed vehicles using last_seen_date as best proxy
+                await conn.execute("""
+                    UPDATE photo_vehicles
+                    SET dismissed_at = (last_seen_date::timestamp + interval '12 hours')
+                    WHERE dismissed = true
+                      AND dismissed_at IS NULL
+                      AND last_seen_date IS NOT NULL
+                """)
+                # Vehicles with no last_seen_date get created_at as fallback
+                await conn.execute("""
+                    UPDATE photo_vehicles
+                    SET dismissed_at = created_at
+                    WHERE dismissed = true
+                      AND dismissed_at IS NULL
+                """)
             except Exception:
                 pass
         except Exception:
@@ -5062,11 +5077,16 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
         vehicles = (await db.execute(query)).scalars().all()
         # Group by dismissed date for the template
         from collections import defaultdict as _dd
-        import datetime as _dt
         dismissed_groups = _dd(list)
         for v in vehicles:
             if v.dismissed_at:
-                day_key = v.dismissed_at.strftime("%B %-d, %Y")
+                dt = v.dismissed_at
+            elif v.created_at:
+                dt = v.created_at  # fallback for pre-migration dismissals
+            else:
+                dt = None
+            if dt:
+                day_key = dt.strftime("%B") + " " + str(dt.day) + ", " + str(dt.year)
             else:
                 day_key = "Earlier"
             dismissed_groups[day_key].append(v)
