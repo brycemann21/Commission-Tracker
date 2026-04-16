@@ -1078,6 +1078,11 @@ async def _run_startup_migrations():
                 await conn.execute("ALTER TABLE photo_vehicles ADD COLUMN IF NOT EXISTS dismissed BOOLEAN DEFAULT false")
             except Exception:
                 pass
+            # Add dismissed_at timestamp column if missing
+            try:
+                await conn.execute("ALTER TABLE photo_vehicles ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMP")
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -5030,8 +5035,19 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
             query = query.where(
                 (PhotoVehicle.stock_num.ilike(f"%{search}%")) | (PhotoVehicle.year_make_model.ilike(f"%{search}%"))
             )
-        query = query.order_by(PhotoVehicle.age_days.desc())
+        query = query.order_by(PhotoVehicle.dismissed_at.desc().nullslast(), PhotoVehicle.age_days.desc())
         vehicles = (await db.execute(query)).scalars().all()
+        # Group by dismissed date for the template
+        from collections import defaultdict as _dd
+        import datetime as _dt
+        dismissed_groups = _dd(list)
+        for v in vehicles:
+            if v.dismissed_at:
+                day_key = v.dismissed_at.strftime("%B %-d, %Y")
+            else:
+                day_key = "Earlier"
+            dismissed_groups[day_key].append(v)
+        dismissed_groups = dict(dismissed_groups)  # preserve insertion order
     else:
         query = select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == False)
         if search:
@@ -5101,6 +5117,7 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
         "new_today": new_today,
         "not_in_csv": not_in_csv,
         "dismissed_count": dismissed_count,
+        "dismissed_groups": dismissed_groups if tab == "dismissed" else {},
         "last_upload_date": last_upload_date,
         "total_inventory": total_inventory,
         "today_date": today(),
@@ -5404,6 +5421,7 @@ async def photos_bulk_remove(request: Request, db: AsyncSession = Depends(get_db
         )).scalars().all()
         for v in vehicles:
             v.dismissed = True
+            v.dismissed_at = _utcnow()
             v.status = "done"
         await db.commit()
     return RedirectResponse(url="/photos", status_code=303)
@@ -5554,6 +5572,7 @@ async def photos_remove(vehicle_id: int, request: Request, db: AsyncSession = De
     )).scalar_one_or_none()
     if v:
         v.dismissed = True
+        v.dismissed_at = _utcnow()
         v.status = "done"
         await db.commit()
     return RedirectResponse(url="/photos", status_code=303)

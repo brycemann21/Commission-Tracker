@@ -380,6 +380,7 @@ class PhotoVehicle(Base):
     # needs_detail | ready_for_photos | done
     dismissed: Mapped[bool] = mapped_column(Boolean, default=False)
     # dismissed = removed from board, CSV upload will skip it
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="")
     first_seen_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     last_seen_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
