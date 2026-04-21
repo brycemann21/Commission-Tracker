@@ -2084,7 +2084,7 @@ async def dashboard(
 
     prev_units = prev_row.cnt or 0
     prev_comm = float(prev_row.comm or 0)
-    spots_mtd = sum(1 for d in delivered_mtd if d.spot_sold)
+    spots_mtd = sum(1 for d in delivered_mtd if d.spot_sold or (d.tag or "").upper() == "SPOT")
 
     # ── Closing rates (query DealProduct table for accurate product tracking) ──
     deal_count_mtd = len(delivered_mtd)  # total deals (not split-adjusted)
@@ -2130,7 +2130,7 @@ async def dashboard(
         spot_tiers = [(15,None,float(s.spot_bonus_13_plus)),(10,14,float(s.spot_bonus_10_12)),(5,9,float(s.spot_bonus_5_9))]
         vol_amt, vol_tier = _tiered(units_mtd, vol_tiers)
         used_amt, used_tier = _tiered(used_mtd, used_tiers)
-        spots = sum(1 for d in delivered_mtd if d.spot_sold)
+        spots = sum(1 for d in delivered_mtd if d.spot_sold or (d.tag or "").upper() == "SPOT")
         spot_total, spot_per, spot_tier = _tiered_spot(spots, spot_tiers)
         q_hit = qtd_count >= int(s.quarterly_bonus_threshold_units or 0)
         q_bonus = float(s.quarterly_bonus_amount) if q_hit else 0.0
@@ -2154,7 +2154,7 @@ async def dashboard(
         }
     else:
         # ── Custom bonus calculation ──
-        spots = sum(1 for d in delivered_mtd if d.spot_sold)
+        spots = sum(1 for d in delivered_mtd if d.spot_sold or (d.tag or "").upper() == "SPOT")
         pend_month = [d for d in pending_all if d.sold_date and start_m <= d.sold_date < end_m]
         proj_units = units_mtd + sum(_deal_units(d) for d in pend_month)
         proj_used = used_mtd + sum(_deal_units(d) for d in pend_month if (d.new_used or "").lower() == "used")
@@ -2461,6 +2461,9 @@ async def deal_save(
     effective_spot = bool(spot_sold)
     if deal_id and existing and not spot_sold:
         effective_spot = existing.spot_sold  # keep existing if not explicitly unchecked
+    # SPOT tag always means it's a spot deal
+    if (tag or "").strip().upper() == "SPOT":
+        effective_spot = True
     # Re-apply spot logic with effective value
     if effective_spot:
         status = "Delivered"
@@ -2621,6 +2624,14 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
         deal.total_deal_comm = deal.commission_override if deal.commission_override is not None else tot
     elif field == "spot_sold":
         deal.spot_sold = value in ("1", "true", "True", True)
+    elif field == "tag":
+        deal.tag = str(value)
+        # Syncing: SPOT tag = spot deal
+        if str(value).upper() == "SPOT":
+            deal.spot_sold = True
+        elif deal.spot_sold and str(value).upper() != "SPOT":
+            # Don't auto-clear spot_sold when tag changes — let user do that explicitly
+            pass
     else:
         setattr(deal, field, value)
 
