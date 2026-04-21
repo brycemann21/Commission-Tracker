@@ -1862,6 +1862,65 @@ async def session_extend(request: Request):
 
 
 
+@app.get("/api/debug/spots")
+async def debug_spots(request: Request, db: AsyncSession = Depends(get_db)):
+    """Debug endpoint — shows all delivered deals this month and their spot_sold flag."""
+    from datetime import date
+    user_id = uid(request)
+    td = today()
+    start_m = date(td.year, td.month, 1)
+    end_m = date(td.year + 1, 1, 1) if td.month == 12 else date(td.year, td.month + 1, 1)
+
+    # All delivered this month
+    delivered = (await db.execute(
+        select(Deal).where(
+            Deal.user_id == user_id,
+            Deal.status == "Delivered",
+            Deal.delivered_date >= start_m,
+            Deal.delivered_date < end_m,
+        ).order_by(Deal.delivered_date)
+    )).scalars().all()
+
+    # Also check for spot deals outside the month window
+    all_spots = (await db.execute(
+        select(Deal).where(
+            Deal.user_id == user_id,
+            Deal.spot_sold == True,
+        ).order_by(Deal.delivered_date.desc().nullslast())
+    )).scalars().all()
+
+    return JSONResponse({
+        "month": f"{td.year}-{td.month:02d}",
+        "window": {"start": str(start_m), "end": str(end_m)},
+        "delivered_this_month": [
+            {
+                "id": d.id,
+                "customer": d.customer,
+                "stock": d.stock_num,
+                "delivered_date": str(d.delivered_date),
+                "sold_date": str(d.sold_date),
+                "spot_sold": d.spot_sold,
+                "status": d.status,
+            }
+            for d in delivered
+        ],
+        "spots_counted": sum(1 for d in delivered if d.spot_sold),
+        "all_spot_deals_ever": [
+            {
+                "id": d.id,
+                "customer": d.customer,
+                "stock": d.stock_num,
+                "delivered_date": str(d.delivered_date),
+                "sold_date": str(d.sold_date),
+                "status": d.status,
+                "in_window": bool(d.delivered_date and start_m <= d.delivered_date < end_m),
+            }
+            for d in all_spots
+        ],
+    })
+
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
