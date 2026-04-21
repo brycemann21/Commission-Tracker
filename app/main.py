@@ -2418,12 +2418,23 @@ async def deal_save(
         if not existing: return RedirectResponse(url="/deals", status_code=303)
         if delivered is None: delivered = existing.delivered_date
 
+    # For edits: if spot_sold checkbox wasn't submitted (unchecked = no value sent),
+    # preserve the existing value rather than silently clearing it
+    effective_spot = bool(spot_sold)
+    if deal_id and existing and not spot_sold:
+        effective_spot = existing.spot_sold  # keep existing if not explicitly unchecked
+    # Re-apply spot logic with effective value
+    if effective_spot:
+        status = "Delivered"
+        if not delivered:
+            delivered = existing.delivered_date if existing else today()
+
     deal_in = DealIn(
         sold_date=sold, delivered_date=delivered, scheduled_date=sched, status=status,
         tag=(tag or "").strip(), customer=customer.strip(),
         stock_num=(stock_num or "").strip(), model=(model or "").strip(),
         new_used=new_used or "", deal_type=dt, business_manager=(business_manager or ""),
-        spot_sold=bool(spot_sold), discount_gt_200=(discount_gt_200 or "No").strip().lower() in ("yes","y","true","1"),
+        spot_sold=effective_spot, discount_gt_200=(discount_gt_200 or "No").strip().lower() in ("yes","y","true","1"),
         aim_presentation=(aim_presentation or "X"),
         permaplate=bool(permaplate), nitro_fill=bool(nitro_fill), pulse=bool(pulse),
         finance_non_subvented=bool(dt in ("Finance","Lease") or finance_non_subvented),
