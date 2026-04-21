@@ -327,10 +327,16 @@ document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeSche
             </span>
           </td>
 
-          <!-- Actions: Edit · Pay? · Board — all as slim inline text links -->
+          <!-- Actions: Edit · Spot · Pay? · Board -->
           <td class="text-right pr-3">
             <span class="inline-flex items-center gap-2">
               <a href="/deals/{{ d.id }}/edit" class="act-link">✎ Edit</a>
+              <span class="text-slate-300 dark:text-slate-600">·</span>
+              <button type="button" id="spot-btn-{{ d.id }}" onclick="toggleSpot(this, {{ d.id }})"
+                class="act-link {% if d.spot_sold %}font-bold text-violet-600 dark:text-violet-400{% endif %}"
+                title="{{ 'Spot deal — click to unmark' if d.spot_sold else 'Mark as spot deal' }}">
+                {{ "⚡ Spot" if d.spot_sold else "Spot?" }}
+              </button>
               <span class="text-slate-300 dark:text-slate-600">·</span>
               <button type="button" data-paid="{{ '1' if d.is_paid else '0' }}" onclick="togglePaid(this, {{ d.id }})"
                 class="act-link {% if d.is_paid %}paid{% endif %}">
@@ -543,6 +549,32 @@ document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeSche
 })();
 
 // Toggle paid
+async function toggleSpot(btn, dealId) {
+  const isSpot = btn.textContent.trim().startsWith('⚡');
+  const newVal = isSpot ? '0' : '1';
+  try {
+    const res = await fetch(`/deals/${dealId}/quick_update`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({field: 'spot_sold', value: newVal})
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error();
+    if (newVal === '1') {
+      btn.textContent = '⚡ Spot';
+      btn.classList.add('font-bold', 'text-violet-600', 'dark:text-violet-400');
+      btn.title = 'Spot deal — click to unmark';
+    } else {
+      btn.textContent = 'Spot?';
+      btn.classList.remove('font-bold', 'text-violet-600', 'dark:text-violet-400');
+      btn.title = 'Mark as spot deal';
+    }
+  } catch(e) {
+    btn.textContent = 'Error';
+    setTimeout(() => location.reload(), 800);
+  }
+}
+
 async function togglePaid(btn, dealId) {
   btn.disabled = true; btn.style.opacity = '0.6';
   try {

@@ -2531,7 +2531,7 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
 
     ALLOWED = {"notes", "status", "tag", "sold_date", "delivered_date", "scheduled_date",
                "customer", "stock_num", "model", "new_used", "deal_type",
-               "business_manager", "commission_override"}
+               "business_manager", "commission_override", "spot_sold"}
     if field not in ALLOWED:
         return JSONResponse({"ok": False, "error": "Field not allowed"}, status_code=400)
 
@@ -2560,6 +2560,8 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
         uc, ao, th, tot = calc_commission(deal_in, settings)
         tot += float(deal.aim_amount or 0)
         deal.total_deal_comm = deal.commission_override if deal.commission_override is not None else tot
+    elif field == "spot_sold":
+        deal.spot_sold = value in ("1", "true", "True", True)
     else:
         setattr(deal, field, value)
 
