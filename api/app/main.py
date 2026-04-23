@@ -1078,27 +1078,6 @@ async def _run_startup_migrations():
                 await conn.execute("ALTER TABLE photo_vehicles ADD COLUMN IF NOT EXISTS dismissed BOOLEAN DEFAULT false")
             except Exception:
                 pass
-            # Add dismissed_at timestamp column if missing
-            try:
-                await conn.execute("ALTER TABLE photo_vehicles ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMP")
-                await conn.execute("ALTER TABLE photo_vehicles ADD COLUMN IF NOT EXISTS status_before_dismiss VARCHAR(24)")
-                # Backfill dismissed_at for existing dismissed vehicles using last_seen_date as best proxy
-                await conn.execute("""
-                    UPDATE photo_vehicles
-                    SET dismissed_at = (last_seen_date::timestamp + interval '12 hours')
-                    WHERE dismissed = true
-                      AND dismissed_at IS NULL
-                      AND last_seen_date IS NOT NULL
-                """)
-                # Vehicles with no last_seen_date get created_at as fallback
-                await conn.execute("""
-                    UPDATE photo_vehicles
-                    SET dismissed_at = created_at
-                    WHERE dismissed = true
-                      AND dismissed_at IS NULL
-                """)
-            except Exception:
-                pass
         except Exception:
             pass
 
@@ -1862,65 +1841,6 @@ async def session_extend(request: Request):
 
 
 
-@app.get("/api/debug/spots")
-async def debug_spots(request: Request, db: AsyncSession = Depends(get_db)):
-    """Debug endpoint — shows all delivered deals this month and their spot_sold flag."""
-    from datetime import date
-    user_id = uid(request)
-    td = today()
-    start_m = date(td.year, td.month, 1)
-    end_m = date(td.year + 1, 1, 1) if td.month == 12 else date(td.year, td.month + 1, 1)
-
-    # All delivered this month
-    delivered = (await db.execute(
-        select(Deal).where(
-            Deal.user_id == user_id,
-            Deal.status == "Delivered",
-            Deal.delivered_date >= start_m,
-            Deal.delivered_date < end_m,
-        ).order_by(Deal.delivered_date)
-    )).scalars().all()
-
-    # Also check for spot deals outside the month window
-    all_spots = (await db.execute(
-        select(Deal).where(
-            Deal.user_id == user_id,
-            Deal.spot_sold == True,
-        ).order_by(Deal.delivered_date.desc().nullslast())
-    )).scalars().all()
-
-    return JSONResponse({
-        "month": f"{td.year}-{td.month:02d}",
-        "window": {"start": str(start_m), "end": str(end_m)},
-        "delivered_this_month": [
-            {
-                "id": d.id,
-                "customer": d.customer,
-                "stock": d.stock_num,
-                "delivered_date": str(d.delivered_date),
-                "sold_date": str(d.sold_date),
-                "spot_sold": d.spot_sold,
-                "status": d.status,
-            }
-            for d in delivered
-        ],
-        "spots_counted": sum(1 for d in delivered if d.spot_sold),
-        "all_spot_deals_ever": [
-            {
-                "id": d.id,
-                "customer": d.customer,
-                "stock": d.stock_num,
-                "delivered_date": str(d.delivered_date),
-                "sold_date": str(d.sold_date),
-                "status": d.status,
-                "in_window": bool(d.delivered_date and start_m <= d.delivered_date < end_m),
-            }
-            for d in all_spots
-        ],
-    })
-
-
-
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(
     request: Request,
@@ -2084,7 +2004,7 @@ async def dashboard(
 
     prev_units = prev_row.cnt or 0
     prev_comm = float(prev_row.comm or 0)
-    spots_mtd = sum(1 for d in delivered_mtd if d.spot_sold or (d.tag or "").upper() == "SPOT")
+    spots_mtd = sum(1 for d in delivered_mtd if d.spot_sold)
 
     # ── Closing rates (query DealProduct table for accurate product tracking) ──
     deal_count_mtd = len(delivered_mtd)  # total deals (not split-adjusted)
@@ -2130,7 +2050,7 @@ async def dashboard(
         spot_tiers = [(15,None,float(s.spot_bonus_13_plus)),(10,14,float(s.spot_bonus_10_12)),(5,9,float(s.spot_bonus_5_9))]
         vol_amt, vol_tier = _tiered(units_mtd, vol_tiers)
         used_amt, used_tier = _tiered(used_mtd, used_tiers)
-        spots = sum(1 for d in delivered_mtd if d.spot_sold or (d.tag or "").upper() == "SPOT")
+        spots = sum(1 for d in delivered_mtd if d.spot_sold)
         spot_total, spot_per, spot_tier = _tiered_spot(spots, spot_tiers)
         q_hit = qtd_count >= int(s.quarterly_bonus_threshold_units or 0)
         q_bonus = float(s.quarterly_bonus_amount) if q_hit else 0.0
@@ -2154,7 +2074,7 @@ async def dashboard(
         }
     else:
         # ── Custom bonus calculation ──
-        spots = sum(1 for d in delivered_mtd if d.spot_sold or (d.tag or "").upper() == "SPOT")
+        spots = sum(1 for d in delivered_mtd if d.spot_sold)
         pend_month = [d for d in pending_all if d.sold_date and start_m <= d.sold_date < end_m]
         proj_units = units_mtd + sum(_deal_units(d) for d in pend_month)
         proj_used = used_mtd + sum(_deal_units(d) for d in pend_month if (d.new_used or "").lower() == "used")
@@ -2265,7 +2185,6 @@ async def dashboard(
         "pending_in_month_count": len(pend_month),
         "goals": goals, "milestones": milestones, "todays_deliveries": todays,
         "overdue_reminders": overdue_count,
-        "has_new_posts": await get_new_community_posts(db, user_id),
     })
     resp.set_cookie("ct_year", str(sel_y), httponly=False, samesite="lax")
     resp.set_cookie("ct_month", str(sel_m), httponly=False, samesite="lax")
@@ -2456,26 +2375,12 @@ async def deal_save(
         if not existing: return RedirectResponse(url="/deals", status_code=303)
         if delivered is None: delivered = existing.delivered_date
 
-    # For edits: if spot_sold checkbox wasn't submitted (unchecked = no value sent),
-    # preserve the existing value rather than silently clearing it
-    effective_spot = bool(spot_sold)
-    if deal_id and existing and not spot_sold:
-        effective_spot = existing.spot_sold  # keep existing if not explicitly unchecked
-    # SPOT tag always means it's a spot deal
-    if (tag or "").strip().upper() == "SPOT":
-        effective_spot = True
-    # Re-apply spot logic with effective value
-    if effective_spot:
-        status = "Delivered"
-        if not delivered:
-            delivered = existing.delivered_date if existing else today()
-
     deal_in = DealIn(
         sold_date=sold, delivered_date=delivered, scheduled_date=sched, status=status,
         tag=(tag or "").strip(), customer=customer.strip(),
         stock_num=(stock_num or "").strip(), model=(model or "").strip(),
         new_used=new_used or "", deal_type=dt, business_manager=(business_manager or ""),
-        spot_sold=effective_spot, discount_gt_200=(discount_gt_200 or "No").strip().lower() in ("yes","y","true","1"),
+        spot_sold=bool(spot_sold), discount_gt_200=(discount_gt_200 or "No").strip().lower() in ("yes","y","true","1"),
         aim_presentation=(aim_presentation or "X"),
         permaplate=bool(permaplate), nitro_fill=bool(nitro_fill), pulse=bool(pulse),
         finance_non_subvented=bool(dt in ("Finance","Lease") or finance_non_subvented),
@@ -2593,7 +2498,7 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
 
     ALLOWED = {"notes", "status", "tag", "sold_date", "delivered_date", "scheduled_date",
                "customer", "stock_num", "model", "new_used", "deal_type",
-               "business_manager", "commission_override", "spot_sold"}
+               "business_manager", "commission_override"}
     if field not in ALLOWED:
         return JSONResponse({"ok": False, "error": "Field not allowed"}, status_code=400)
 
@@ -2622,16 +2527,6 @@ async def quick_update_deal(deal_id: int, request: Request, db: AsyncSession = D
         uc, ao, th, tot = calc_commission(deal_in, settings)
         tot += float(deal.aim_amount or 0)
         deal.total_deal_comm = deal.commission_override if deal.commission_override is not None else tot
-    elif field == "spot_sold":
-        deal.spot_sold = value in ("1", "true", "True", True)
-    elif field == "tag":
-        deal.tag = str(value)
-        # Syncing: SPOT tag = spot deal
-        if str(value).upper() == "SPOT":
-            deal.spot_sold = True
-        elif deal.spot_sold and str(value).upper() != "SPOT":
-            # Don't auto-clear spot_sold when tag changes — let user do that explicitly
-            pass
     else:
         setattr(deal, field, value)
 
@@ -3297,7 +3192,7 @@ async def reminder_delete(reminder_id: int, request: Request, db: AsyncSession =
 async def lease_converter(request: Request, db: AsyncSession = Depends(get_db)):
     user = await _user(request, db)
     return templates.TemplateResponse("lease_converter.html", {
-        "request": request, "user": user, "title": "Fuel Savings",
+        "request": request, "user": user, "title": "Lease Converter",
         "overdue_reminders": await get_overdue_reminders(db, uid(request)),
         "has_new_posts": await get_new_community_posts(db, uid(request)),
     })
@@ -3924,6 +3819,11 @@ async def team_remove_member(
         _cache_delete_user(user_id)
         logger.info(f"User {user_id} removed and sessions destroyed")
     return RedirectResponse(url="/team?tab=members", status_code=303)
+
+
+    return RedirectResponse(url="/team", status_code=303)
+    return RedirectResponse(url="/team", status_code=303)
+    return RedirectResponse(url="/team", status_code=303)
 
 
 @app.post("/team/invite/{invite_id}/cancel")
@@ -4950,169 +4850,6 @@ async def admin_verify_user(user_id: int, request: Request, db: AsyncSession = D
     return RedirectResponse(url="/admin", status_code=303)
 
 
-
-
-@app.get("/wishlist", response_class=HTMLResponse)
-async def wishlist_page(request: Request, tab: str = "waiting", q: str = "", db: AsyncSession = Depends(get_db)):
-    """Vehicle wishlist — track customers waiting for specific vehicles."""
-    user_id = uid(request)
-    d_id = user_dealership_id(request)
-
-    search = q.strip() if q else ""
-
-    # Base query: user's own wishlist items within their dealership
-    query = select(WishlistVehicle).where(WishlistVehicle.user_id == user_id)
-    if d_id:
-        query = query.where(WishlistVehicle.dealership_id == d_id)
-
-    if search:
-        query = query.where(
-            (WishlistVehicle.customer_name.ilike(f"%{search}%")) |
-            (WishlistVehicle.vehicle_description.ilike(f"%{search}%")) |
-            (WishlistVehicle.customer_phone.ilike(f"%{search}%"))
-        )
-
-    # Get all for counts (unfiltered by tab)
-    all_items = (await db.execute(
-        select(WishlistVehicle).where(WishlistVehicle.user_id == user_id).where(
-            WishlistVehicle.dealership_id == d_id if d_id else True
-        )
-    )).scalars().all()
-
-    waiting_count = sum(1 for i in all_items if i.status == "waiting")
-    contacted_count = sum(1 for i in all_items if i.status == "contacted")
-    sold_count = sum(1 for i in all_items if i.status == "sold")
-    canceled_count = sum(1 for i in all_items if i.status == "canceled")
-
-    # Apply tab filter
-    if tab != "all":
-        query = query.where(WishlistVehicle.status == tab)
-
-    query = query.order_by(WishlistVehicle.created_at.desc())
-    items = (await db.execute(query)).scalars().all()
-
-    msg = request.query_params.get("msg", "")
-    msg_type = request.query_params.get("msg_type", "success")
-
-    return templates.TemplateResponse("wishlist.html", {
-        "request": request,
-        "user": await _user(request, db),
-        "items": items,
-        "total": len(all_items),
-        "waiting_count": waiting_count,
-        "contacted_count": contacted_count,
-        "sold_count": sold_count,
-        "canceled_count": canceled_count,
-        "current_tab": tab,
-        "search": search,
-        "message": msg,
-        "msg_type": msg_type,
-        "overdue_reminders": await get_overdue_reminders(db, user_id),
-        "has_new_posts": await get_new_community_posts(db, user_id),
-    })
-
-
-@app.post("/wishlist/add")
-async def wishlist_add(
-    request: Request,
-    customer_name: str = Form(""),
-    customer_phone: str = Form(""),
-    vehicle_description: str = Form(""),
-    color_preference: str = Form(""),
-    notes: str = Form(""),
-    db: AsyncSession = Depends(get_db),
-):
-    """Add a customer to the vehicle wishlist."""
-    user_id = uid(request)
-    d_id = user_dealership_id(request)
-
-    if not customer_name.strip() or not vehicle_description.strip():
-        return RedirectResponse(url="/wishlist?msg=Customer+name+and+vehicle+required&msg_type=error", status_code=303)
-
-    item = WishlistVehicle(
-        user_id=user_id,
-        dealership_id=d_id,
-        customer_name=customer_name.strip(),
-        customer_phone=customer_phone.strip(),
-        vehicle_description=vehicle_description.strip(),
-        color_preference=color_preference.strip(),
-        notes=notes.strip(),
-        status="waiting",
-        created_at=_utcnow(),
-    )
-    db.add(item)
-    await db.commit()
-    return RedirectResponse(url="/wishlist?msg=Added+to+wishlist&msg_type=success", status_code=303)
-
-
-@app.post("/wishlist/{item_id}/status")
-async def wishlist_update_status(item_id: int, request: Request, new_status: str = Form(...), db: AsyncSession = Depends(get_db)):
-    """Update wishlist item status."""
-    user_id = uid(request)
-    item = (await db.execute(
-        select(WishlistVehicle).where(WishlistVehicle.id == item_id, WishlistVehicle.user_id == user_id)
-    )).scalar_one_or_none()
-    if item and new_status in ("waiting", "contacted", "sold", "canceled"):
-        item.status = new_status
-        await db.commit()
-    tab = request.query_params.get("tab", "waiting")
-    return RedirectResponse(url=f"/wishlist?tab={tab}", status_code=303)
-
-
-@app.post("/wishlist/{item_id}/note")
-async def wishlist_update_note(item_id: int, request: Request, notes: str = Form(""), db: AsyncSession = Depends(get_db)):
-    """Update notes on a wishlist item."""
-    user_id = uid(request)
-    item = (await db.execute(
-        select(WishlistVehicle).where(WishlistVehicle.id == item_id, WishlistVehicle.user_id == user_id)
-    )).scalar_one_or_none()
-    if item:
-        item.notes = notes.strip()
-        await db.commit()
-    return RedirectResponse(url="/wishlist", status_code=303)
-
-
-@app.post("/wishlist/{item_id}/edit")
-async def wishlist_edit(
-    item_id: int,
-    request: Request,
-    customer_name: str = Form(""),
-    customer_phone: str = Form(""),
-    vehicle_description: str = Form(""),
-    color_preference: str = Form(""),
-    notes: str = Form(""),
-    db: AsyncSession = Depends(get_db),
-):
-    """Edit a wishlist item."""
-    user_id = uid(request)
-    item = (await db.execute(
-        select(WishlistVehicle).where(WishlistVehicle.id == item_id, WishlistVehicle.user_id == user_id)
-    )).scalar_one_or_none()
-    if item:
-        if customer_name.strip():
-            item.customer_name = customer_name.strip()
-        if vehicle_description.strip():
-            item.vehicle_description = vehicle_description.strip()
-        item.customer_phone = customer_phone.strip()
-        item.color_preference = color_preference.strip()
-        item.notes = notes.strip()
-        await db.commit()
-    return RedirectResponse(url="/wishlist?msg=Updated&msg_type=success", status_code=303)
-
-
-@app.post("/wishlist/{item_id}/delete")
-async def wishlist_delete(item_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    """Delete a wishlist item."""
-    user_id = uid(request)
-    item = (await db.execute(
-        select(WishlistVehicle).where(WishlistVehicle.id == item_id, WishlistVehicle.user_id == user_id)
-    )).scalar_one_or_none()
-    if item:
-        await db.delete(item)
-        await db.commit()
-    return RedirectResponse(url="/wishlist?msg=Removed&msg_type=success", status_code=303)
-
-
 # ════════════════════════════════════════════════
 # PHOTO TRACKER — vehicles needing photos
 # ════════════════════════════════════════════════
@@ -5128,56 +4865,30 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
     search = q.strip().upper() if q else ""
 
     # Query vehicles with optional search and tab filter
-    if tab == "dismissed":
-        query = select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == True)
-        if search:
-            query = query.where(
-                (PhotoVehicle.stock_num.ilike(f"%{search}%")) | (PhotoVehicle.year_make_model.ilike(f"%{search}%"))
-            )
-        query = query.order_by(PhotoVehicle.dismissed_at.desc().nullslast(), PhotoVehicle.age_days.desc())
-        vehicles = (await db.execute(query)).scalars().all()
-        # Group by dismissed date for the template
-        from collections import defaultdict as _dd
-        dismissed_groups = _dd(list)
-        for v in vehicles:
-            if v.dismissed_at:
-                dt = v.dismissed_at
-            elif v.created_at:
-                dt = v.created_at  # fallback for pre-migration dismissals
-            else:
-                dt = None
-            if dt:
-                day_key = dt.strftime("%B") + " " + str(dt.day) + ", " + str(dt.year)
-            else:
-                day_key = "Earlier"
-            dismissed_groups[day_key].append(v)
-        dismissed_groups = dict(dismissed_groups)  # preserve insertion order
-    else:
-        query = select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == False)
-        if search:
-            query = query.where(
-                (PhotoVehicle.stock_num.ilike(f"%{search}%")) | (PhotoVehicle.year_make_model.ilike(f"%{search}%"))
-            )
-        if tab == "needs_detail":
-            query = query.where(PhotoVehicle.status == "needs_detail")
-        elif tab == "ready_for_photos":
-            query = query.where(PhotoVehicle.status == "ready_for_photos")
-        elif tab == "done":
-            query = query.where(PhotoVehicle.status == "done")
-        elif tab == "not_in_csv":
-            # We'll filter in Python after computing last_upload_date
-            pass
-    # Sort: status priority (needs_detail → ready_for_photos → done), then oldest first
-    if tab != "dismissed":
-        from sqlalchemy import case as sa_case
-        status_order = sa_case(
-            (PhotoVehicle.status == "needs_detail", 1),
-            (PhotoVehicle.status == "ready_for_photos", 2),
-            (PhotoVehicle.status == "done", 3),
-            else_=4,
+    query = select(PhotoVehicle).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == False)
+    if search:
+        query = query.where(
+            (PhotoVehicle.stock_num.ilike(f"%{search}%")) | (PhotoVehicle.year_make_model.ilike(f"%{search}%"))
         )
-        query = query.order_by(status_order, PhotoVehicle.age_days.desc())
-        vehicles = (await db.execute(query)).scalars().all()
+    if tab == "needs_detail":
+        query = query.where(PhotoVehicle.status == "needs_detail")
+    elif tab == "ready_for_photos":
+        query = query.where(PhotoVehicle.status == "ready_for_photos")
+    elif tab == "done":
+        query = query.where(PhotoVehicle.status == "done")
+    elif tab == "not_in_csv":
+        # We'll filter in Python after computing last_upload_date
+        pass
+    # Sort: status priority (needs_detail → ready_for_photos → done), then oldest first
+    from sqlalchemy import case as sa_case
+    status_order = sa_case(
+        (PhotoVehicle.status == "needs_detail", 1),
+        (PhotoVehicle.status == "ready_for_photos", 2),
+        (PhotoVehicle.status == "done", 3),
+        else_=4,
+    )
+    query = query.order_by(status_order, PhotoVehicle.age_days.desc())
+    vehicles = (await db.execute(query)).scalars().all()
 
     # Counts
     all_vehicles = (await db.execute(
@@ -5188,9 +4899,6 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
     ready = sum(1 for v in all_vehicles if v.status == "ready_for_photos")
     done_count = sum(1 for v in all_vehicles if v.status == "done")
     new_today = sum(1 for v in all_vehicles if v.first_seen_date == today())
-    dismissed_count = (await db.execute(
-        select(func.count()).where(PhotoVehicle.dealership_id == d_id, PhotoVehicle.stock_num != '__SEED_MARKER__', PhotoVehicle.dismissed == True)
-    )).scalar() or 0
 
     # Determine the most recent upload date (max last_seen_date across all vehicles)
     last_upload_date = max((v.last_seen_date for v in all_vehicles if v.last_seen_date), default=None)
@@ -5220,8 +4928,6 @@ async def photos_page(request: Request, tab: str = "all", q: str = "", db: Async
         "done": done_count,
         "new_today": new_today,
         "not_in_csv": not_in_csv,
-        "dismissed_count": dismissed_count,
-        "dismissed_groups": dismissed_groups if tab == "dismissed" else {},
         "last_upload_date": last_upload_date,
         "total_inventory": total_inventory,
         "today_date": today(),
@@ -5270,7 +4976,6 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
     total_skipped = 0
     files_processed = 0
     today_d = today()
-    seen_in_upload: set[str] = set()  # track every stock# seen across all uploaded CSVs
 
     for csv_file in csv_files:
         try:
@@ -5321,9 +5026,6 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
                 except (ValueError, TypeError):
                     age = 0
 
-                # Track every stock# seen across all uploaded files
-                seen_in_upload.add(stock)
-
                 # Skip dismissed vehicles — they were manually removed
                 if stock in dismissed_set:
                     total_skipped += 1
@@ -5356,13 +5058,7 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
         except Exception:
             continue
 
-    # Vehicles NOT in today's CSV: if they were stamped today by a previous upload,
-    # roll their last_seen_date back to yesterday so they correctly appear as "Not in CSV"
-    import datetime as _dt
-    yesterday_d = today_d - _dt.timedelta(days=1)
-    for v in existing_map.values():
-        if v.stock_num.strip().upper() not in seen_in_upload and v.last_seen_date == today_d:
-            v.last_seen_date = yesterday_d
+    # Vehicles NOT in today's CSV stay where they are — user manually marks Done
 
     await db.commit()
 
@@ -5400,79 +5096,6 @@ async def photos_upload(request: Request, csv_files: list[UploadFile] = File(...
         msg += f", {total_skipped} skipped (dismissed)"
     return RedirectResponse(url=f"/photos?msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)
 
-
-@app.post("/photos/vauto-tags")
-async def photos_vauto_tags(request: Request, xls_file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
-    """Upload vAuto Full Inventory XLS and sync Tags column into vehicle notes."""
-    _require_super_admin(request)
-    d_id = user_dealership_id(request)
-    if not d_id:
-        return RedirectResponse(url="/photos", status_code=303)
-
-    try:
-        import xlrd as _xlrd
-    except ImportError:
-        return RedirectResponse(url="/photos?msg=xlrd+not+installed&msg_type=error", status_code=303)
-
-    try:
-        content_bytes = await xls_file.read()
-        wb = _xlrd.open_workbook(file_contents=content_bytes)
-        ws = wb.sheet_by_index(0)
-        headers = [ws.cell_value(0, c) for c in range(ws.ncols)]
-
-        def _col(candidates):
-            for cand in candidates:
-                for i, h in enumerate(headers):
-                    if cand in h.strip().lower().replace(" ", "_").replace("\n", "_"):
-                        return i
-            return None
-
-        col_stock = _col(["stock_#", "stock#", "stock_num", "stock"])
-        col_tags  = _col(["tags"])
-
-        if col_stock is None or col_tags is None:
-            return RedirectResponse(url="/photos?msg=Could+not+find+Stock+or+Tags+columns&msg_type=error", status_code=303)
-
-        tag_map: dict[str, str] = {}
-        for r in range(1, ws.nrows):
-            stock = str(ws.cell_value(r, col_stock)).strip().upper()
-            tags  = str(ws.cell_value(r, col_tags)).strip()
-            if stock and tags:
-                tag_map[stock] = tags
-
-        if not tag_map:
-            return RedirectResponse(url="/photos?msg=No+tagged+vehicles+found+in+file&msg_type=error", status_code=303)
-
-        vehicles = (await db.execute(
-            select(PhotoVehicle).where(
-                PhotoVehicle.dealership_id == d_id,
-                PhotoVehicle.stock_num != "__SEED_MARKER__",
-                PhotoVehicle.dismissed == False,
-            )
-        )).scalars().all()
-
-        updated = 0
-        cleared = 0
-        for v in vehicles:
-            stock = v.stock_num.strip().upper()
-            if stock in tag_map:
-                v.notes = tag_map[stock][:500]
-                updated += 1
-            elif v.notes and v.notes.strip():
-                v.notes = ""
-                cleared += 1
-
-        await db.commit()
-
-        parts = [f"vAuto tags synced: {updated} updated"]
-        if cleared:
-            parts.append(f"{cleared} cleared")
-        msg = ", ".join(parts).replace(" ", "+")
-        return RedirectResponse(url=f"/photos?msg={msg}&msg_type=success", status_code=303)
-
-    except Exception as exc:
-        err = str(exc)[:80].replace(" ", "+")
-        return RedirectResponse(url=f"/photos?msg=Error+reading+XLS:+{err}&msg_type=error", status_code=303)
 
 @app.post("/photos/bulk/status")
 async def photos_bulk_status(request: Request, new_status: str = Form(""), db: AsyncSession = Depends(get_db)):
@@ -5524,54 +5147,10 @@ async def photos_bulk_remove(request: Request, db: AsyncSession = Depends(get_db
             select(PhotoVehicle).where(PhotoVehicle.id.in_(ids), PhotoVehicle.dealership_id == d_id)
         )).scalars().all()
         for v in vehicles:
-            v.status_before_dismiss = v.status  # save so restore knows where to send it back
             v.dismissed = True
-            v.dismissed_at = _utcnow()
             v.status = "done"
         await db.commit()
     return RedirectResponse(url="/photos", status_code=303)
-
-
-@app.post("/photos/bulk/restore")
-async def photos_bulk_restore(request: Request, db: AsyncSession = Depends(get_db)):
-    """Restore multiple dismissed vehicles back to the active board."""
-    _require_super_admin(request)
-    d_id = user_dealership_id(request)
-    form = await request.form()
-    ids = [int(v) for v in form.getlist("vehicle_ids") if v.isdigit()]
-    restored = 0
-    if ids:
-        vehicles = (await db.execute(
-            select(PhotoVehicle).where(PhotoVehicle.id.in_(ids), PhotoVehicle.dealership_id == d_id)
-        )).scalars().all()
-        for v in vehicles:
-            v.dismissed = False
-            # Restore to original pre-dismissal status, fall back to needs_detail
-            v.status = v.status_before_dismiss or "needs_detail"
-            v.status_before_dismiss = None
-            restored += 1
-        await db.commit()
-    msg = f"{restored} vehicle{'s' if restored != 1 else ''} restored to board"
-    return RedirectResponse(url=f"/photos?tab=dismissed&msg={msg.replace(' ', '+')}&msg_type=success", status_code=303)
-
-
-@app.post("/photos/{vehicle_id}/restore")
-async def photos_restore(vehicle_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    """Restore a dismissed vehicle back to the active board."""
-    _require_super_admin(request)
-    d_id = user_dealership_id(request)
-    v = (await db.execute(
-        select(PhotoVehicle).where(PhotoVehicle.id == vehicle_id, PhotoVehicle.dealership_id == d_id)
-    )).scalar_one_or_none()
-    if v:
-        v.dismissed = False
-        # Restore to original pre-dismissal status, fall back to needs_detail
-        v.status = v.status_before_dismiss or "needs_detail"
-        v.status_before_dismiss = None
-        await db.commit()
-    return RedirectResponse(url="/photos?tab=dismissed", status_code=303)
-
-
 
 
 @app.post("/photos/inventory")
@@ -5680,9 +5259,7 @@ async def photos_remove(vehicle_id: int, request: Request, db: AsyncSession = De
         select(PhotoVehicle).where(PhotoVehicle.id == vehicle_id, PhotoVehicle.dealership_id == user_dealership_id(request))
     )).scalar_one_or_none()
     if v:
-        v.status_before_dismiss = v.status  # save so restore knows where to send it back
         v.dismissed = True
-        v.dismissed_at = _utcnow()
         v.status = "done"
         await db.commit()
     return RedirectResponse(url="/photos", status_code=303)
@@ -6113,11 +5690,8 @@ async def photos_progress_pdf(request: Request, db: AsyncSession = Depends(get_d
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
 
     from starlette.responses import FileResponse
-    from starlette.background import BackgroundTask
-    import os as _os
     filename = f"photo_progress_report_{today().strftime('%Y%m%d')}.pdf"
-    return FileResponse(tmp.name, media_type="application/pdf", filename=filename,
-                        background=BackgroundTask(_os.unlink, tmp.name))
+    return FileResponse(tmp.name, media_type="application/pdf", filename=filename)
 
 
 @app.get("/photos/pdf/{list_type}")
@@ -6201,11 +5775,8 @@ async def photos_pdf(list_type: str, request: Request, db: AsyncSession = Depend
     doc.build(story)
 
     from starlette.responses import FileResponse
-    from starlette.background import BackgroundTask
-    import os as _os
     filename = f"{list_type}_checklist_{today().strftime('%Y%m%d')}.pdf"
-    return FileResponse(tmp.name, media_type="application/pdf", filename=filename,
-                        background=BackgroundTask(_os.unlink, tmp.name))
+    return FileResponse(tmp.name, media_type="application/pdf", filename=filename)
 
 
 # ════════════════════════════════════════════════

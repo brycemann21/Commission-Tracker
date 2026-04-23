@@ -2,9 +2,26 @@
 {% block content %}
 
 <div class="mb-5">
-  <h1 class="text-xl font-bold dark:text-white">Fuel Savings Comparison</h1>
-  <div class="text-sm text-slate-500 dark:text-slate-400">Compare two vehicles side-by-side — real EPA MPG data, annual fuel cost, and total cost of ownership. Powered by <a href="https://www.fueleconomy.gov" target="_blank" class="underline hover:text-indigo-600">fueleconomy.gov</a>.</div>
+  <h1 class="text-xl font-bold dark:text-white">Fuel Savings &amp; Finance Calculator</h1>
+  <div class="text-sm text-slate-500 dark:text-slate-400">Compare fuel costs between vehicles, or run a cash vs. finance analysis for your customer.</div>
 </div>
+
+<!-- Tab switcher -->
+<div class="flex gap-1 mb-5 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg w-fit">
+  <button id="tabFuel" onclick="switchTab('fuel')"
+    class="px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow-sm">
+    ⛽ Fuel Savings
+  </button>
+  <button id="tabFinance" onclick="switchTab('finance')"
+    class="px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
+    💰 Cash vs. Finance
+  </button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- FUEL SAVINGS TAB                                        -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div id="panelFuel">
 
 <!-- Driving Profile -->
 <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 mb-5">
@@ -293,6 +310,139 @@
   <div class="text-sm font-medium mb-1">Select both vehicles to compare</div>
   <div class="text-xs">Use the dropdowns above to pick Year, Make, Model, and Trim for each vehicle.</div>
 </div>
+
+</div><!-- end #panelFuel -->
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- CASH VS. FINANCE TAB                                    -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div id="panelFinance" class="hidden">
+
+  <!-- Inputs -->
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-5 mb-5">
+    <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-4">Loan Details</div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Vehicle Price</label>
+        <div class="flex items-center border border-slate-300 dark:border-slate-600 rounded overflow-hidden">
+          <span class="px-3 py-2 bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm border-r border-slate-300 dark:border-slate-600">$</span>
+          <input type="number" id="cvfPrice" value="28000" min="1000" max="500000" step="500"
+                 class="flex-1 px-3 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                 oninput="calcCVF()">
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Loan Interest Rate</label>
+        <div class="flex items-center border border-slate-300 dark:border-slate-600 rounded overflow-hidden">
+          <input type="number" id="cvfLoanRate" value="6.5" min="0" max="30" step="0.1"
+                 class="flex-1 px-3 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                 oninput="calcCVF()">
+          <span class="px-3 py-2 bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm border-l border-slate-300 dark:border-slate-600">%</span>
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Loan Term</label>
+        <select id="cvfMonths" class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400" onchange="calcCVF()">
+          <option value="24">24 months (2 yr)</option>
+          <option value="36">36 months (3 yr)</option>
+          <option value="48">48 months (4 yr)</option>
+          <option value="60" selected>60 months (5 yr)</option>
+          <option value="72">72 months (6 yr)</option>
+          <option value="84">84 months (7 yr)</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">HYSA / Savings Rate</label>
+        <div class="flex items-center border border-slate-300 dark:border-slate-600 rounded overflow-hidden">
+          <input type="number" id="cvfSavingsRate" value="3.5" min="0" max="15" step="0.1"
+                 class="flex-1 px-3 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                 oninput="calcCVF()">
+          <span class="px-3 py-2 bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm border-l border-slate-300 dark:border-slate-600">%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div id="cvfResults" class="space-y-4">
+
+    <!-- Two option cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+      <!-- Option A: Pay Cash -->
+      <div class="bg-white dark:bg-slate-800 rounded-lg border-2 border-red-200 dark:border-red-800 p-5">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 text-xs font-bold">A</span>
+          <div class="font-semibold text-slate-800 dark:text-white text-sm">Pay Cash from Savings</div>
+        </div>
+        <div class="space-y-2 text-sm text-slate-600 dark:text-slate-300 mb-4">
+          <div class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span>Withdraw the full amount — savings account depletes</div>
+          <div class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span>No monthly car payment</div>
+          <div class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span>Your money stops earning compound interest</div>
+        </div>
+        <div class="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 border border-red-100 dark:border-red-800">
+          <div class="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">What you give up</div>
+          <div class="text-2xl font-bold text-red-600 dark:text-red-400" id="cvfHysaLost">-</div>
+          <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">in lost savings interest over <span id="cvfYrsA">5</span> yrs</div>
+        </div>
+      </div>
+
+      <!-- Option B: Finance -->
+      <div class="bg-white dark:bg-slate-800 rounded-lg border-2 border-emerald-200 dark:border-emerald-800 p-5">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 text-xs font-bold">B</span>
+          <div class="font-semibold text-slate-800 dark:text-white text-sm">Finance — Keep Savings Working</div>
+        </div>
+        <div class="space-y-2 text-sm text-slate-600 dark:text-slate-300 mb-4">
+          <div class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span>Savings stays in the bank, keeps compounding</div>
+          <div class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span>Monthly payment: <strong class="text-slate-800 dark:text-slate-100" id="cvfMonthlyInline">-</strong></div>
+          <div class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span>Pay interest on the loan over the term</div>
+        </div>
+        <div class="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 border border-emerald-100 dark:border-emerald-800">
+          <div class="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">What you pay in loan interest</div>
+          <div class="text-2xl font-bold text-emerald-700 dark:text-emerald-400" id="cvfLoanInterest">-</div>
+          <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">total interest over <span id="cvfYrsB">5</span> yrs</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Verdict banner -->
+    <div id="cvfVerdict" class="rounded-lg p-5 text-center border-2">
+      <div class="text-xs font-semibold uppercase tracking-wide mb-1 opacity-70" id="cvfVerdictEyebrow">Recommendation</div>
+      <div class="text-xl font-bold mb-1" id="cvfVerdictTitle">-</div>
+      <div class="text-sm opacity-80" id="cvfVerdictSub">-</div>
+    </div>
+
+    <!-- Year-by-year table -->
+    <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+      <div class="px-5 py-3 border-b border-slate-100 dark:border-slate-700">
+        <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Year-by-Year Breakdown</div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="bg-slate-50 dark:bg-slate-900/40 text-slate-500 dark:text-slate-400">
+              <th class="px-4 py-2.5 text-left font-semibold">Year</th>
+              <th class="px-4 py-2.5 text-right font-semibold">Savings Balance</th>
+              <th class="px-4 py-2.5 text-right font-semibold">Loan Balance</th>
+              <th class="px-4 py-2.5 text-right font-semibold text-emerald-600 dark:text-emerald-400">Interest Earned</th>
+              <th class="px-4 py-2.5 text-right font-semibold text-red-500 dark:text-red-400">Interest Paid</th>
+            </tr>
+          </thead>
+          <tbody id="cvfTableBody" class="divide-y divide-slate-100 dark:divide-slate-700">
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Rate spread note -->
+    <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg px-4 py-3 text-xs text-amber-800 dark:text-amber-300">
+      <strong>How to read this:</strong> When your loan rate is higher than your savings rate, paying cash saves money. When they're close (or savings earns more), financing can come out ahead — because your money keeps compounding the whole time.
+      The <strong>rate spread</strong> is currently <strong id="cvfSpread">-</strong>. <span id="cvfSpreadNote"></span>
+    </div>
+
+  </div>
+</div><!-- end #panelFinance -->
 
 <script>
 const vehicles = { 1: null, 2: null };
@@ -626,6 +776,131 @@ function updateTCO() {
 }
 
 loadYears();
+
+// ── Tab switching ──────────────────────────────────────────────────────────
+function switchTab(tab) {
+  const isFuel = tab === 'fuel';
+  document.getElementById('panelFuel').classList.toggle('hidden', !isFuel);
+  document.getElementById('panelFinance').classList.toggle('hidden', isFuel);
+
+  const activeClass = 'bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow-sm';
+  const inactiveClass = 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200';
+
+  const tabFuel = document.getElementById('tabFuel');
+  const tabFinance = document.getElementById('tabFinance');
+
+  if (isFuel) {
+    tabFuel.className = `px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 ${activeClass}`;
+    tabFinance.className = `px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 ${inactiveClass}`;
+  } else {
+    tabFinance.className = `px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 ${activeClass}`;
+    tabFuel.className = `px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 ${inactiveClass}`;
+    calcCVF();
+  }
+}
+
+// ── Cash vs. Finance calculator ───────────────────────────────────────────
+function calcCVF() {
+  const price       = parseFloat(document.getElementById('cvfPrice').value) || 0;
+  const loanRate    = parseFloat(document.getElementById('cvfLoanRate').value) || 0;
+  const savingsRate = parseFloat(document.getElementById('cvfSavingsRate').value) || 0;
+  const months      = parseInt(document.getElementById('cvfMonths').value) || 60;
+  const years       = months / 12;
+
+  if (price <= 0) return;
+
+  // HYSA interest lost if withdrawn
+  const hysaFuture  = price * Math.pow(1 + savingsRate / 100, years);
+  const hysaLost    = hysaFuture - price;
+
+  // Loan monthly payment & total interest
+  const r = loanRate / 100 / 12;
+  const monthly = r === 0
+    ? price / months
+    : price * r * Math.pow(1+r, months) / (Math.pow(1+r, months) - 1);
+  const loanInterest = monthly * months - price;
+
+  // Net: positive = financing wins, negative = cash wins
+  const netAdvantage = hysaLost - loanInterest; // +ve means HYSA earns more than loan costs
+
+  // Update card values
+  document.getElementById('cvfHysaLost').textContent    = fmt(hysaLost);
+  document.getElementById('cvfLoanInterest').textContent = fmt(loanInterest);
+  document.getElementById('cvfMonthlyInline').textContent = fmt(monthly) + '/mo';
+  document.getElementById('cvfYrsA').textContent = years % 1 === 0 ? years : years.toFixed(1);
+  document.getElementById('cvfYrsB').textContent = years % 1 === 0 ? years : years.toFixed(1);
+
+  // Verdict
+  const verdictEl  = document.getElementById('cvfVerdict');
+  const titleEl    = document.getElementById('cvfVerdictTitle');
+  const subEl      = document.getElementById('cvfVerdictSub');
+
+  if (Math.abs(netAdvantage) < 50) {
+    verdictEl.className = 'rounded-lg p-5 text-center border-2 bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300';
+    titleEl.textContent = "It's essentially a tie";
+    subEl.textContent = `The difference is only ${fmt(Math.abs(netAdvantage))} — both options are nearly equal. Other factors (liquidity, cash flow) should guide the decision.`;
+  } else if (netAdvantage > 0) {
+    // Finance wins (HYSA earns more than loan costs)
+    verdictEl.className = 'rounded-lg p-5 text-center border-2 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-400 dark:border-emerald-600 text-emerald-800 dark:text-emerald-200';
+    titleEl.textContent = `✓ Financing saves ${fmt(netAdvantage)} — keep your money in savings`;
+    subEl.textContent = `Your savings earns ${fmt(hysaLost)} in interest while you finance. The loan only costs ${fmt(loanInterest)}. You come out ${fmt(netAdvantage)} ahead by financing.`;
+  } else {
+    // Pay cash wins
+    verdictEl.className = 'rounded-lg p-5 text-center border-2 bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-600 text-red-800 dark:text-red-200';
+    titleEl.textContent = `✓ Paying cash saves ${fmt(Math.abs(netAdvantage))} — avoid the higher loan cost`;
+    subEl.textContent = `The loan would cost ${fmt(loanInterest)} in interest, but your savings only earns ${fmt(hysaLost)}. Paying cash saves ${fmt(Math.abs(netAdvantage))} overall.`;
+  }
+
+  // Rate spread note
+  const spread = loanRate - savingsRate;
+  document.getElementById('cvfSpread').textContent = `${Math.abs(spread).toFixed(1)}% (loan ${spread >= 0 ? 'higher' : 'lower'} than savings)`;
+  document.getElementById('cvfSpreadNote').textContent = spread > 3
+    ? 'The gap is wide — paying cash has a clear mathematical advantage.'
+    : spread > 0
+    ? 'The gap is narrow — the savings growth nearly offsets the loan cost.'
+    : 'Your savings rate exceeds the loan rate — financing is the stronger choice.';
+
+  // Year-by-year table
+  const tbody = document.getElementById('cvfTableBody');
+  tbody.innerHTML = '';
+  let cumInterestPaid = 0;
+  let loanBal = price;
+
+  for (let y = 1; y <= Math.ceil(years); y++) {
+    const hysaBal = price * Math.pow(1 + savingsRate / 100, y);
+    const hysaGain = hysaBal - price;
+
+    // Loan balance after y years
+    const pmtsMade = Math.min(y * 12, months);
+    const loanBalY = r === 0
+      ? Math.max(0, price - (price / months) * pmtsMade)
+      : price * Math.pow(1+r, pmtsMade) - monthly * (Math.pow(1+r, pmtsMade) - 1) / r;
+
+    // Interest paid this year
+    const pmtsPrev = Math.min((y-1) * 12, months);
+    const loanBalPrev = r === 0
+      ? Math.max(0, price - (price / months) * pmtsPrev)
+      : price * Math.pow(1+r, pmtsPrev) - monthly * (Math.pow(1+r, pmtsPrev) - 1) / r;
+    const principalPaid = Math.max(0, loanBalPrev - Math.max(0, loanBalY));
+    const paymentsThisYear = monthly * Math.min(12, months - pmtsPrev);
+    const interestThisYear = Math.max(0, paymentsThisYear - principalPaid);
+    cumInterestPaid += interestThisYear;
+
+    const row = document.createElement('tr');
+    row.className = y % 2 === 0 ? 'bg-slate-50 dark:bg-slate-900/20' : '';
+    row.innerHTML = `
+      <td class="px-4 py-2.5 font-semibold text-slate-700 dark:text-slate-300">Year ${y}</td>
+      <td class="px-4 py-2.5 text-right text-slate-700 dark:text-slate-300">${fmt(hysaBal)}</td>
+      <td class="px-4 py-2.5 text-right text-slate-500 dark:text-slate-400">${Math.max(0, loanBalY) > 1 ? fmt(Math.max(0, loanBalY)) : '<span class="text-emerald-600 dark:text-emerald-400 font-semibold">Paid Off ✓</span>'}</td>
+      <td class="px-4 py-2.5 text-right text-emerald-600 dark:text-emerald-400 font-medium">+${fmt(hysaGain)}</td>
+      <td class="px-4 py-2.5 text-right text-red-500 dark:text-red-400">${fmt(cumInterestPaid)}</td>
+    `;
+    tbody.appendChild(row);
+  }
+}
+
+// Run on load so numbers are ready when user switches tab
+calcCVF();
 </script>
 
 {% endblock %}

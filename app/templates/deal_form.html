@@ -32,7 +32,6 @@
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">Spot?</label>
       <div class="flex items-center gap-2 mt-2">
-      <input type="hidden" name="spot_sold" value="0">
       <input type="checkbox" class="h-4 w-4" name="spot_sold" value="1" {% if deal and deal.spot_sold %}checked{% endif %}>
         <span class="text-sm text-slate-700 dark:text-slate-300">Yes (sets Delivered Date = today)</span>
       </div>
@@ -43,7 +42,6 @@
     </div>
     <div>
       <label class="text-xs text-slate-500 dark:text-slate-400">Status</label>
-      <input type="hidden" name="status" id="status_hidden" value="">
       <select class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" name="status" id="status_select">
         {% for s in ["Pending","Scheduled","Delivered","Dead"] %}
           <option value="{{ s }}" {% if deal and deal.status==s %}selected{% endif %}>{{ s }}</option>
