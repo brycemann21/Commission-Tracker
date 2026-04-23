@@ -1,601 +1,906 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="flex items-end justify-between gap-3 mb-4">
-  <div>
-    <h1 class="text-xl font-bold">Lease Converter</h1>
-    <div class="text-sm text-slate-500 dark:text-slate-400">Show the true cost of ownership — lease vs. finance side by side</div>
+
+<div class="mb-5">
+  <h1 class="text-xl font-bold dark:text-white">Fuel Savings &amp; Finance Calculator</h1>
+  <div class="text-sm text-slate-500 dark:text-slate-400">Compare fuel costs between vehicles, or run a cash vs. finance analysis for your customer.</div>
+</div>
+
+<!-- Tab switcher -->
+<div class="flex gap-1 mb-5 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg w-fit">
+  <button id="tabFuel" onclick="switchTab('fuel')"
+    class="px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow-sm">
+    ⛽ Fuel Savings
+  </button>
+  <button id="tabFinance" onclick="switchTab('finance')"
+    class="px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
+    💰 Cash vs. Finance
+  </button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- FUEL SAVINGS TAB                                        -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div id="panelFuel">
+
+<!-- Driving Profile -->
+<div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 mb-5">
+  <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-3">Your Driving Profile</div>
+  <div class="flex flex-wrap gap-4 items-end">
+    <div>
+      <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Miles / Year</label>
+      <input type="number" id="milesYear" value="15000" min="1000" max="100000" step="1000"
+             class="w-32 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400"
+             oninput="recalculate()">
+    </div>
+    <div>
+      <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Gas Price / Gallon ($)</label>
+      <input type="number" id="gasPrice" value="3.50" min="1" max="10" step="0.10"
+             class="w-32 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400"
+             oninput="recalculate()">
+    </div>
+    <div>
+      <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Compare Over</label>
+      <select id="years" class="border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400" onchange="recalculate()">
+        <option value="3">3 years</option>
+        <option value="5" selected>5 years</option>
+        <option value="7">7 years</option>
+        <option value="10">10 years</option>
+      </select>
+    </div>
+    <div class="ml-auto text-xs text-slate-400 dark:text-slate-500 self-center">Data from EPA / fueleconomy.gov</div>
   </div>
 </div>
 
-<!-- IRS Benchmark Banner -->
-<div class="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4 mb-6">
-  <div class="flex items-start gap-3">
-    <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-    <div>
-      <div class="font-semibold text-indigo-900 dark:text-indigo-200 text-sm">2026 IRS Standard Mileage Rate: 72.5¢/mile</div>
-      <div class="text-xs text-indigo-700 dark:text-indigo-400 mt-0.5">The IRS rate reflects the <strong>true total cost</strong> of owning &amp; operating a vehicle — depreciation, fuel, insurance, maintenance, repairs, tires, and financing. AAA's 2025 study found the average new vehicle costs <strong>$11,577/year</strong> to own.</div>
+<!-- Vehicle selectors -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+  {% for slot in ["1", "2"] %}
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+    <div class="flex items-center justify-between mb-3">
+      <div class="text-sm font-semibold dark:text-white">
+        {% if slot == "1" %}<span class="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1.5"></span>Vehicle 1
+        {% else %}<span class="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1.5"></span>Vehicle 2{% endif %}
+      </div>
+      <button onclick="clearVehicle({{ slot }})" class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">Clear</button>
+    </div>
+    <div class="grid grid-cols-2 gap-2 mb-2">
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Year</label>
+        <select id="year{{ slot }}" onchange="loadMakes({{ slot }})"
+                class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded px-2 py-2 text-sm focus:outline-none focus:border-indigo-400">
+          <option value="">Loading...</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Make</label>
+        <select id="make{{ slot }}" onchange="loadModels({{ slot }})" disabled
+                class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded px-2 py-2 text-sm focus:outline-none focus:border-indigo-400 disabled:opacity-40">
+          <option value="">- Make -</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-2">
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Model</label>
+        <select id="model{{ slot }}" onchange="loadTrims({{ slot }})" disabled
+                class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded px-2 py-2 text-sm focus:outline-none focus:border-indigo-400 disabled:opacity-40">
+          <option value="">- Model -</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Trim / Engine</label>
+        <select id="trim{{ slot }}" onchange="loadVehicle({{ slot }})" disabled
+                class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded px-2 py-2 text-sm focus:outline-none focus:border-indigo-400 disabled:opacity-40">
+          <option value="">- Trim -</option>
+        </select>
+      </div>
+    </div>
+    <!-- MPG result -->
+    <div id="result{{ slot }}" class="hidden mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
+      <div class="text-sm font-semibold dark:text-white mb-2" id="resultName{{ slot }}"></div>
+      <div class="grid grid-cols-3 gap-2 text-center">
+        <div class="bg-slate-50 dark:bg-slate-900/50 rounded p-2">
+          <div class="text-xl font-bold" id="mpgComb{{ slot }}">-</div>
+          <div class="text-[10px] text-slate-500 dark:text-slate-400">MPG Combined</div>
+        </div>
+        <div class="bg-slate-50 dark:bg-slate-900/50 rounded p-2">
+          <div class="text-xl font-bold dark:text-white" id="mpgCity{{ slot }}">-</div>
+          <div class="text-[10px] text-slate-500 dark:text-slate-400">City</div>
+        </div>
+        <div class="bg-slate-50 dark:bg-slate-900/50 rounded p-2">
+          <div class="text-xl font-bold dark:text-white" id="mpgHwy{{ slot }}">-</div>
+          <div class="text-[10px] text-slate-500 dark:text-slate-400">Highway</div>
+        </div>
+      </div>
+      <div class="mt-3 grid grid-cols-2 gap-2 text-center">
+        <div class="bg-slate-50 dark:bg-slate-900/50 rounded p-2">
+          <div class="text-lg font-bold text-slate-800 dark:text-slate-200" id="annualCost{{ slot }}">-</div>
+          <div class="text-[10px] text-slate-500 dark:text-slate-400">Annual Fuel Cost</div>
+        </div>
+        <div class="bg-slate-50 dark:bg-slate-900/50 rounded p-2">
+          <div class="text-lg font-bold text-slate-800 dark:text-slate-200" id="totalCost{{ slot }}">-</div>
+          <div class="text-[10px] text-slate-500 dark:text-slate-400" id="totalCostLabel{{ slot }}">5-Year Fuel Cost</div>
+        </div>
+      </div>
+      <div class="mt-2 text-[10px] text-slate-400 dark:text-slate-500 text-center" id="co2{{ slot }}"></div>
+    </div>
+    <div id="loading{{ slot }}" class="hidden mt-4 text-center text-xs text-slate-400 py-3">Loading vehicle data...</div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Fuel savings banner -->
+<div id="comparisonBanner" class="hidden bg-white dark:bg-slate-800 rounded-lg border-2 border-emerald-400 dark:border-emerald-600 p-5 mb-5">
+  <div class="text-center">
+    <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Fuel Savings Summary</div>
+    <div class="text-3xl font-bold text-emerald-700 dark:text-emerald-400 mb-1" id="savingsAmount">-</div>
+    <div class="text-sm text-slate-600 dark:text-slate-300" id="savingsLabel"></div>
+    <div class="mt-3 text-xs text-slate-400 dark:text-slate-500" id="savingsDetail"></div>
+  </div>
+  <div class="mt-5">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-4 h-4 rounded-sm bg-blue-500 shrink-0"></div>
+      <div class="flex-1">
+        <div class="flex justify-between text-xs mb-0.5">
+          <span class="font-medium text-slate-600 dark:text-slate-300" id="barLabel1">Vehicle 1</span>
+          <span class="text-slate-600 dark:text-slate-300" id="barCost1"></span>
+        </div>
+        <div class="h-5 bg-slate-100 dark:bg-slate-700 rounded overflow-hidden">
+          <div class="h-5 bg-blue-500 rounded transition-all duration-500" id="bar1" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="w-4 h-4 rounded-sm bg-emerald-500 shrink-0"></div>
+      <div class="flex-1">
+        <div class="flex justify-between text-xs mb-0.5">
+          <span class="font-medium text-slate-600 dark:text-slate-300" id="barLabel2">Vehicle 2</span>
+          <span class="text-slate-600 dark:text-slate-300" id="barCost2"></span>
+        </div>
+        <div class="h-5 bg-slate-100 dark:bg-slate-700 rounded overflow-hidden">
+          <div class="h-5 bg-emerald-500 rounded transition-all duration-500" id="bar2" style="width:0%"></div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
 
-<!-- ── Inputs ── -->
-<div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4 mb-6">
-  <div class="font-semibold mb-1 dark:text-white">Vehicle &amp; Deal Info</div>
-  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">Presets auto-fill — tweak any field</div>
+<!-- ═══ PURCHASE COSTS SECTION ═══ -->
+<div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 mb-5">
+  <!-- Header / toggle -->
+  <button onclick="togglePurchaseCosts()" class="w-full flex items-center justify-between px-5 py-4 text-left group">
+    <div class="flex items-center gap-2">
+      <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      <span class="text-sm font-semibold dark:text-white">Purchase Costs</span>
+      <span class="text-xs text-slate-400 dark:text-slate-500">— add financing to compare total cost of ownership</span>
+    </div>
+    <svg id="purchaseChevron" class="w-4 h-4 text-slate-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+    </svg>
+  </button>
 
-  <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-    <div>
-      <label class="text-xs text-slate-500 dark:text-slate-400">Vehicle MSRP</label>
-      <div class="relative">
-        <span class="absolute left-3 top-2.5 text-slate-400">$</span>
-        <input type="number" id="msrp" value="38000" step="500" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" oninput="calc()">
-      </div>
+  <div id="purchaseCostsBody" class="hidden border-t border-slate-100 dark:border-slate-700 px-5 py-4">
+    <!-- Keep for N years -->
+    <div class="flex items-center gap-3 mb-5">
+      <label class="text-sm text-slate-600 dark:text-slate-300">I plan to keep my vehicle</label>
+      <input type="number" id="keepYears" value="5" min="1" max="15"
+             class="w-16 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded px-2 py-1.5 text-sm text-center focus:outline-none focus:border-indigo-400"
+             oninput="syncKeepYears(); recalculate()">
+      <label class="text-sm text-slate-600 dark:text-slate-300">years.</label>
+      <span class="text-xs text-slate-400 dark:text-slate-500 ml-2">(also updates the comparison window above)</span>
     </div>
-    <div>
-      <label class="text-xs text-slate-500 dark:text-slate-400">Selling Price</label>
-      <div class="relative">
-        <span class="absolute left-3 top-2.5 text-slate-400">$</span>
-        <input type="number" id="sellingPrice" value="36500" step="500" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" oninput="calc()">
-      </div>
-    </div>
-    <div>
-      <label class="text-xs text-slate-500 dark:text-slate-400">Down Payment</label>
-      <div class="relative">
-        <span class="absolute left-3 top-2.5 text-slate-400">$</span>
-        <input type="number" id="downPayment" value="2000" step="500" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" oninput="calc()">
-      </div>
-    </div>
-    <div>
-      <label class="text-xs text-slate-500 dark:text-slate-400">Trade-In Value</label>
-      <div class="relative">
-        <span class="absolute left-3 top-2.5 text-slate-400">$</span>
-        <input type="number" id="tradeIn" value="0" step="500" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-7 pr-3 py-2" oninput="calc()">
-      </div>
-    </div>
-  </div>
 
-  <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-    <div>
-      <label class="text-xs text-slate-500 dark:text-slate-400">Annual Miles</label>
-      <select id="annualMiles" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" onchange="calc()">
-        <option value="10000">10,000</option>
-        <option value="12000" selected>12,000</option>
-        <option value="15000">15,000</option>
-      </select>
-    </div>
-    <div>
-      <label class="text-xs text-slate-500 dark:text-slate-400">Credit Tier</label>
-      <select id="creditTier" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" onchange="applyCreditTier();calc()">
-        <option value="excellent">Excellent (720+)</option>
-        <option value="good" selected>Good (680-719)</option>
-        <option value="average">Average (620-679)</option>
-      </select>
-    </div>
-    <div>
-      <label class="text-xs text-slate-500 dark:text-slate-400">NY Sales Tax %</label>
-      <input type="number" id="taxRate" value="8" step="0.125" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" oninput="calc()">
-    </div>
-    <div>
-      <label class="text-xs text-slate-500 dark:text-slate-400">Comparison Period</label>
-      <select id="compPeriod" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2" onchange="calc()">
-        <option value="36">3 Years</option>
-        <option value="72" selected>6 Years (2 Lease Cycles)</option>
-        <option value="108">9 Years (3 Lease Cycles)</option>
-      </select>
-    </div>
-  </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {% for slot in ["1", "2"] %}
+      <div>
+        <div class="flex items-center gap-2 mb-3">
+          <span class="inline-block w-2.5 h-2.5 rounded-full {{ 'bg-blue-500' if slot == '1' else 'bg-emerald-500' }}"></span>
+          <div class="text-sm font-semibold dark:text-white">Vehicle {{ slot }}</div>
+          <div class="text-xs text-slate-400 dark:text-slate-500 truncate" id="purchaseName{{ slot }}"></div>
+        </div>
+        <div class="space-y-2">
+          <div class="flex items-center gap-3">
+            <label class="w-32 text-xs text-slate-500 dark:text-slate-400 text-right shrink-0">Purchase Price</label>
+            <div class="flex items-center border border-slate-300 dark:border-slate-600 rounded overflow-hidden">
+              <span class="px-2 py-2 bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm border-r border-slate-300 dark:border-slate-600">$</span>
+              <input type="number" id="price{{ slot }}" placeholder="0" min="0" step="500"
+                     class="w-28 px-2 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                     oninput="recalculate()">
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <label class="w-32 text-xs text-slate-500 dark:text-slate-400 text-right shrink-0">Down Payment</label>
+            <div class="flex items-center border border-slate-300 dark:border-slate-600 rounded overflow-hidden">
+              <span class="px-2 py-2 bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm border-r border-slate-300 dark:border-slate-600">$</span>
+              <input type="number" id="down{{ slot }}" placeholder="0" min="0" step="500"
+                     class="w-28 px-2 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                     oninput="updateLoanAmount({{ slot }}); recalculate()">
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <label class="w-32 text-xs text-slate-500 dark:text-slate-400 text-right shrink-0">Loan Amount</label>
+            <div class="flex items-center border border-slate-200 dark:border-slate-600 rounded overflow-hidden bg-slate-50 dark:bg-slate-700/50">
+              <span class="px-2 py-2 bg-slate-100 dark:bg-slate-700 text-slate-400 text-sm border-r border-slate-200 dark:border-slate-600">$</span>
+              <input type="number" id="loan{{ slot }}" placeholder="0" min="0" step="500" readonly
+                     class="w-28 px-2 py-2 text-sm text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-700/50 focus:outline-none cursor-default">
+            </div>
+          </div>
 
-  <!-- Lease vs Finance specific inputs -->
-  <div class="grid sm:grid-cols-2 gap-4">
-    <!-- Lease Column -->
-    <div class="bg-emerald-50 dark:bg-emerald-950/30 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
-      <div class="text-sm font-semibold text-emerald-800 dark:text-emerald-300 mb-2">Lease Terms</div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="text-xs text-slate-500 dark:text-slate-400">Term (months)</label>
-          <select id="leaseTerm" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm" onchange="calc()">
-            <option value="24">24</option>
-            <option value="36" selected>36</option>
-            <option value="39">39</option>
-          </select>
-        </div>
-        <div>
-          <label class="text-xs text-slate-500 dark:text-slate-400">Residual %</label>
-          <input type="number" id="residualPct" value="57" step="1" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm" oninput="calc()">
-        </div>
-        <div>
-          <label class="text-xs text-slate-500 dark:text-slate-400">Money Factor</label>
-          <input type="number" id="moneyFactor" value="0.00125" step="0.00001" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm" oninput="calc()">
-          <div class="text-[10px] text-slate-400 mt-0.5">≈ <span id="mfApr">3.0</span>% APR</div>
-        </div>
-        <div>
-          <label class="text-xs text-slate-500 dark:text-slate-400">Due at Signing</label>
-          <div class="relative">
-            <span class="absolute left-2 top-2 text-slate-400 text-sm">$</span>
-            <input type="number" id="dueAtSigning" value="2000" step="100" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded pl-6 pr-2 py-2 text-sm" oninput="calc()">
+          <!-- Interest rate — collapsible -->
+          <div>
+            <button type="button" onclick="toggleRate({{ slot }})"
+                    class="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 mt-1 mb-1 transition">
+              <svg id="rateChevron{{ slot }}" class="w-3 h-3 transition-transform duration-150 -rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
+              </svg>
+              <span id="rateToggleLabel{{ slot }}">Show interest rate</span>
+            </button>
+            <div id="rateRow{{ slot }}" class="hidden flex items-center gap-3">
+              <label class="w-32 text-xs text-slate-500 dark:text-slate-400 text-right shrink-0">Interest Rate</label>
+              <div class="flex items-center border border-slate-300 dark:border-slate-600 rounded overflow-hidden">
+                <input type="number" id="rate{{ slot }}" value="6.5" min="0" max="30" step="0.1"
+                       class="w-20 px-2 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                       oninput="recalculate()">
+                <span class="px-2 py-2 bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm border-l border-slate-300 dark:border-slate-600">%</span>
+              </div>
+              <label class="text-xs text-slate-500 dark:text-slate-400">Loan Period</label>
+              <div class="flex items-center border border-slate-300 dark:border-slate-600 rounded overflow-hidden">
+                <input type="number" id="loanMonths{{ slot }}" value="60" min="12" max="96" step="12"
+                       class="w-16 px-2 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                       oninput="recalculate()">
+                <span class="px-2 py-2 bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm border-l border-slate-300 dark:border-slate-600">mo</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Monthly payment + total loan cost result -->
+          <div id="loanResult{{ slot }}" class="hidden mt-2 bg-slate-50 dark:bg-slate-900/40 rounded p-3 grid grid-cols-3 gap-2 text-center">
+            <div>
+              <div class="text-base font-bold dark:text-white" id="monthlyPayment{{ slot }}">-</div>
+              <div class="text-[10px] text-slate-500 dark:text-slate-400">Monthly Payment</div>
+            </div>
+            <div>
+              <div class="text-base font-bold dark:text-white" id="totalLoanCost{{ slot }}">-</div>
+              <div class="text-[10px] text-slate-500 dark:text-slate-400">Total Loan Cost</div>
+            </div>
+            <div>
+              <div class="text-base font-bold text-slate-700 dark:text-slate-300" id="totalOwnership{{ slot }}">-</div>
+              <div class="text-[10px] text-slate-500 dark:text-slate-400" id="ownershipLabel{{ slot }}">Total Own. Cost</div>
+            </div>
           </div>
         </div>
       </div>
+      {% endfor %}
     </div>
-    <!-- Finance Column -->
-    <div class="bg-blue-50 dark:bg-blue-950/30 rounded-lg p-3 border border-blue-200 dark:border-blue-800">
-      <div class="text-sm font-semibold text-blue-800 dark:text-blue-300 mb-2">Finance Terms</div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="text-xs text-slate-500 dark:text-slate-400">Term (months)</label>
-          <select id="financeTerm" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm" onchange="calc()">
-            <option value="48">48</option>
-            <option value="60" selected>60</option>
-            <option value="72">72</option>
-            <option value="84">84</option>
-          </select>
+
+    <!-- Total cost of ownership comparison -->
+    <div id="tcoBanner" class="hidden mt-5 pt-5 border-t border-slate-100 dark:border-slate-700">
+      <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-3">Total Cost of Ownership (Loan + Fuel)</div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+        <div class="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 border border-blue-100 dark:border-blue-800">
+          <div class="text-xs text-slate-500 dark:text-slate-400 mb-1" id="tcoName1">Vehicle 1</div>
+          <div class="text-2xl font-bold text-blue-700 dark:text-blue-400" id="tcoTotal1">-</div>
+          <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-1" id="tcoBreakdown1"></div>
         </div>
-        <div>
-          <label class="text-xs text-slate-500 dark:text-slate-400">APR %</label>
-          <input type="number" id="financeApr" value="6.5" step="0.1" class="w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded px-3 py-2 text-sm" oninput="calc()">
+        <div class="flex items-center justify-center">
+          <div class="text-center">
+            <div class="text-xs text-slate-400 uppercase tracking-wide mb-1">Difference</div>
+            <div class="text-2xl font-bold" id="tcoDiff">-</div>
+            <div class="text-xs text-slate-500 dark:text-slate-400 mt-1" id="tcoDiffLabel"></div>
+          </div>
+        </div>
+        <div class="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 border border-emerald-100 dark:border-emerald-800">
+          <div class="text-xs text-slate-500 dark:text-slate-400 mb-1" id="tcoName2">Vehicle 2</div>
+          <div class="text-2xl font-bold text-emerald-700 dark:text-emerald-400" id="tcoTotal2">-</div>
+          <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-1" id="tcoBreakdown2"></div>
+        </div>
+      </div>
+      <div class="mt-3 text-xs text-slate-400 dark:text-slate-500 text-center" id="tcoVerdict"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Empty state -->
+<div id="emptyState" class="text-center py-12 text-slate-400 dark:text-slate-500">
+  <svg class="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
+  </svg>
+  <div class="text-sm font-medium mb-1">Select both vehicles to compare</div>
+  <div class="text-xs">Use the dropdowns above to pick Year, Make, Model, and Trim for each vehicle.</div>
+</div>
+
+</div><!-- end #panelFuel -->
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- CASH VS. FINANCE TAB                                    -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div id="panelFinance" class="hidden">
+
+  <!-- Inputs -->
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-5 mb-5">
+    <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-4">Loan Details</div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Vehicle Price</label>
+        <div class="flex items-center border border-slate-300 dark:border-slate-600 rounded overflow-hidden">
+          <span class="px-3 py-2 bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm border-r border-slate-300 dark:border-slate-600">$</span>
+          <input type="number" id="cvfPrice" value="28000" min="1000" max="500000" step="500"
+                 class="flex-1 px-3 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                 oninput="calcCVF()">
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Loan Interest Rate</label>
+        <div class="flex items-center border border-slate-300 dark:border-slate-600 rounded overflow-hidden">
+          <input type="number" id="cvfLoanRate" value="6.5" min="0" max="30" step="0.1"
+                 class="flex-1 px-3 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                 oninput="calcCVF()">
+          <span class="px-3 py-2 bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm border-l border-slate-300 dark:border-slate-600">%</span>
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Loan Term</label>
+        <select id="cvfMonths" class="w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400" onchange="calcCVF()">
+          <option value="24">24 months (2 yr)</option>
+          <option value="36">36 months (3 yr)</option>
+          <option value="48">48 months (4 yr)</option>
+          <option value="60" selected>60 months (5 yr)</option>
+          <option value="72">72 months (6 yr)</option>
+          <option value="84">84 months (7 yr)</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">HYSA / Savings Rate</label>
+        <div class="flex items-center border border-slate-300 dark:border-slate-600 rounded overflow-hidden">
+          <input type="number" id="cvfSavingsRate" value="3.5" min="0" max="15" step="0.1"
+                 class="flex-1 px-3 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                 oninput="calcCVF()">
+          <span class="px-3 py-2 bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm border-l border-slate-300 dark:border-slate-600">%</span>
         </div>
       </div>
     </div>
   </div>
-</div>
 
-<!-- ── Results: Side by Side ── -->
-<div class="grid md:grid-cols-2 gap-4 mb-6">
-  <!-- Lease Card -->
-  <div class="bg-white dark:bg-slate-800 rounded border-2 border-emerald-400 dark:border-emerald-600 p-4">
-    <div class="flex items-center gap-2 mb-3">
-      <div class="w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center">
-        <svg class="w-4 h-4 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+  <!-- Results -->
+  <div id="cvfResults" class="space-y-4">
+
+    <!-- Two option cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+      <!-- Option A: Pay Cash -->
+      <div class="bg-white dark:bg-slate-800 rounded-lg border-2 border-red-200 dark:border-red-800 p-5">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 text-xs font-bold">A</span>
+          <div class="font-semibold text-slate-800 dark:text-white text-sm">Pay Cash from Savings</div>
+        </div>
+        <div class="space-y-2 text-sm text-slate-600 dark:text-slate-300 mb-4">
+          <div class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span>Withdraw the full amount — savings account depletes</div>
+          <div class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span>No monthly car payment</div>
+          <div class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span>Your money stops earning compound interest</div>
+        </div>
+        <div class="bg-red-50 dark:bg-red-900/20 rounded-lg p-3 border border-red-100 dark:border-red-800">
+          <div class="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">What you give up</div>
+          <div class="text-2xl font-bold text-red-600 dark:text-red-400" id="cvfHysaLost">-</div>
+          <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">in lost savings interest over <span id="cvfYrsA">5</span> yrs</div>
+        </div>
       </div>
-      <div class="font-bold text-emerald-700 dark:text-emerald-300">LEASE</div>
-    </div>
-    <div class="space-y-2 text-sm">
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Monthly Payment</span><span id="leaseMonthly" class="font-semibold">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Due at Signing</span><span id="leaseDAS" class="font-semibold">—</span></div>
-      <div class="border-t border-slate-100 dark:border-slate-700 my-1"></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Total Payments (<span id="leaseYears">6</span> yrs)</span><span id="leaseTotalPayments" class="font-semibold">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Est. Maintenance</span><span id="leaseMaint" class="font-semibold">—</span></div>
-      <div class="border-t border-slate-100 dark:border-slate-700 my-1"></div>
-      <div class="flex justify-between text-base"><span class="font-semibold text-slate-700 dark:text-slate-200">Total Cost</span><span id="leaseTotalCost" class="font-bold text-emerald-600 dark:text-emerald-400">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Cost Per Mile</span><span id="leaseCPM" class="font-bold text-emerald-600 dark:text-emerald-400">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Vehicle at End</span><span class="text-emerald-600 dark:text-emerald-400 font-medium">New car every 3 yrs ✓</span></div>
-    </div>
-  </div>
 
-  <!-- Finance Card -->
-  <div class="bg-white dark:bg-slate-800 rounded border-2 border-blue-300 dark:border-blue-700 p-4">
-    <div class="flex items-center gap-2 mb-3">
-      <div class="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
-        <svg class="w-4 h-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <!-- Option B: Finance -->
+      <div class="bg-white dark:bg-slate-800 rounded-lg border-2 border-emerald-200 dark:border-emerald-800 p-5">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 text-xs font-bold">B</span>
+          <div class="font-semibold text-slate-800 dark:text-white text-sm">Finance — Keep Savings Working</div>
+        </div>
+        <div class="space-y-2 text-sm text-slate-600 dark:text-slate-300 mb-4">
+          <div class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span>Savings stays in the bank, keeps compounding</div>
+          <div class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span>Monthly payment: <strong class="text-slate-800 dark:text-slate-100" id="cvfMonthlyInline">-</strong></div>
+          <div class="flex items-start gap-2"><span class="text-slate-400 mt-0.5">•</span>Pay interest on the loan over the term</div>
+        </div>
+        <div class="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 border border-emerald-100 dark:border-emerald-800">
+          <div class="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">What you pay in loan interest</div>
+          <div class="text-2xl font-bold text-emerald-700 dark:text-emerald-400" id="cvfLoanInterest">-</div>
+          <div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">total interest over <span id="cvfYrsB">5</span> yrs</div>
+        </div>
       </div>
-      <div class="font-bold text-blue-700 dark:text-blue-300">FINANCE</div>
     </div>
-    <div class="space-y-2 text-sm">
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Monthly Payment</span><span id="finMonthly" class="font-semibold">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Down Payment</span><span id="finDown" class="font-semibold">—</span></div>
-      <div class="border-t border-slate-100 dark:border-slate-700 my-1"></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Total Payments (<span id="finYears">6</span> yrs)</span><span id="finTotalPayments" class="font-semibold">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Interest Paid</span><span id="finInterest" class="font-semibold text-red-500">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Est. Maintenance</span><span id="finMaint" class="font-semibold">—</span></div>
-      <div class="border-t border-slate-100 dark:border-slate-700 my-1"></div>
-      <div class="flex justify-between text-base"><span class="font-semibold text-slate-700 dark:text-slate-200">Total Cost</span><span id="finTotalCost" class="font-bold text-blue-600 dark:text-blue-400">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Cost Per Mile</span><span id="finCPM" class="font-bold text-blue-600 dark:text-blue-400">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-500 dark:text-slate-400">Vehicle Value at End</span><span id="finResidualVal" class="text-slate-600 dark:text-slate-300 font-medium">—</span></div>
+
+    <!-- Verdict banner -->
+    <div id="cvfVerdict" class="rounded-lg p-5 text-center border-2">
+      <div class="text-xs font-semibold uppercase tracking-wide mb-1 opacity-70" id="cvfVerdictEyebrow">Recommendation</div>
+      <div class="text-xl font-bold mb-1" id="cvfVerdictTitle">-</div>
+      <div class="text-sm opacity-80" id="cvfVerdictSub">-</div>
     </div>
-  </div>
-</div>
 
-<!-- ── Savings Summary ── -->
-<div id="savingsBanner" class="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 rounded-lg p-4 mb-6 hidden">
-  <div class="flex items-center gap-3">
-    <div class="w-10 h-10 rounded-full bg-emerald-200 dark:bg-emerald-800 flex items-center justify-center shrink-0">
-      <svg class="w-5 h-5 text-emerald-700 dark:text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+    <!-- Year-by-year table -->
+    <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+      <div class="px-5 py-3 border-b border-slate-100 dark:border-slate-700">
+        <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Year-by-Year Breakdown</div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="bg-slate-50 dark:bg-slate-900/40 text-slate-500 dark:text-slate-400">
+              <th class="px-4 py-2.5 text-left font-semibold">Year</th>
+              <th class="px-4 py-2.5 text-right font-semibold">Savings Balance</th>
+              <th class="px-4 py-2.5 text-right font-semibold">Loan Balance</th>
+              <th class="px-4 py-2.5 text-right font-semibold text-emerald-600 dark:text-emerald-400">Interest Earned</th>
+              <th class="px-4 py-2.5 text-right font-semibold text-red-500 dark:text-red-400">Interest Paid</th>
+            </tr>
+          </thead>
+          <tbody id="cvfTableBody" class="divide-y divide-slate-100 dark:divide-slate-700">
+          </tbody>
+        </table>
+      </div>
     </div>
-    <div>
-      <div class="font-bold text-emerald-800 dark:text-emerald-200 text-lg" id="savingsAmount">—</div>
-      <div class="text-sm text-emerald-700 dark:text-emerald-400" id="savingsDetail">—</div>
+
+    <!-- Rate spread note -->
+    <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg px-4 py-3 text-xs text-amber-800 dark:text-amber-300">
+      <strong>How to read this:</strong> When your loan rate is higher than your savings rate, paying cash saves money. When they're close (or savings earns more), financing can come out ahead — because your money keeps compounding the whole time.
+      The <strong>rate spread</strong> is currently <strong id="cvfSpread">-</strong>. <span id="cvfSpreadNote"></span>
     </div>
-  </div>
-</div>
 
-<!-- ── Cost Per Mile Chart ── -->
-<div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4 mb-6">
-  <div class="font-semibold mb-1 dark:text-white">Cost Per Mile Over Time</div>
-  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">IRS benchmark: 72.5¢/mile — includes depreciation, fuel, insurance, maintenance, repairs, tires, &amp; financing</div>
-  <div class="relative" style="height: 300px;">
-    <canvas id="cpmChart"></canvas>
   </div>
-</div>
+</div><!-- end #panelFinance -->
 
-<!-- ── Cumulative Cost Chart ── -->
-<div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4 mb-6">
-  <div class="font-semibold mb-1 dark:text-white">Cumulative Total Cost</div>
-  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">Running total of all payments + maintenance over time</div>
-  <div class="relative" style="height: 300px;">
-    <canvas id="cumChart"></canvas>
-  </div>
-</div>
-
-<!-- ── Maintenance Breakdown ── -->
-<div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4 mb-6">
-  <div class="font-semibold mb-1 dark:text-white">Annual Maintenance Cost Curve</div>
-  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">Lease resets to warranty every 3 years — finance keeps climbing</div>
-  <div class="relative" style="height: 280px;">
-    <canvas id="maintChart"></canvas>
-  </div>
-</div>
-
-<!-- ── Key Talking Points ── -->
-<div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4 mb-6">
-  <div class="font-semibold mb-3 dark:text-white">Key Talking Points</div>
-  <div class="grid sm:grid-cols-2 gap-3" id="talkingPoints">
-    <!-- Populated by JS -->
-  </div>
-</div>
-
-<!-- ── Depreciation Reality Check ── -->
-<div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 p-4 mb-6">
-  <div class="font-semibold mb-1 dark:text-white">Depreciation Reality Check</div>
-  <div class="text-xs text-slate-500 dark:text-slate-400 mb-3">What a financed vehicle is actually worth over time — the equity illusion</div>
-  <div class="relative" style="height: 280px;">
-    <canvas id="depChart"></canvas>
-  </div>
-  <div class="mt-3 p-3 bg-amber-50 dark:bg-amber-950/30 rounded border border-amber-200 dark:border-amber-800">
-    <div class="text-xs text-amber-800 dark:text-amber-300" id="equityNote">—</div>
-  </div>
-</div>
-
-<!-- ── Sources ── -->
-<div class="text-xs text-slate-400 dark:text-slate-500 mb-4">
-  Sources: IRS Notice 2026-10 (72.5¢/mi business rate) · AAA Your Driving Costs 2025 ($11,577/yr avg) · Industry average maintenance data.
-  This tool provides estimates for comparison purposes. Actual costs vary by vehicle, driving habits, and market conditions.
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script>
-// ── Globals ──
-const $ = id => document.getElementById(id);
-const fmt = n => '$'+n.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
-const fmtC = n => n.toFixed(1)+'¢';
-let cpmChart, cumChart, maintChart, depChart;
+const vehicles = { 1: null, 2: null };
+const BASE = 'https://www.fueleconomy.gov/ws/rest';
 
-// Credit tier presets
-const TIERS = {
-  excellent: {mf: 0.00085, apr: 4.9, residual: 60},
-  good:      {mf: 0.00125, apr: 6.5, residual: 57},
-  average:   {mf: 0.00185, apr: 8.9, residual: 55},
-};
-
-// Avg annual maintenance by vehicle age (year 1, 2, 3, ... 10)
-// Based on industry averages: warranty years are cheap, then ramps up
-const MAINT_BY_YEAR = [350, 450, 550, 850, 1050, 1250, 1450, 1700, 1950, 2200];
-
-function applyCreditTier(){
-  const tier = TIERS[$('creditTier').value];
-  $('moneyFactor').value = tier.mf;
-  $('financeApr').value = tier.apr;
-  $('residualPct').value = tier.residual;
+function parseItems(xml) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xml, 'application/xml');
+  const items = doc.querySelectorAll('menuItem');
+  if (items.length === 0) {
+    const texts = [...doc.querySelectorAll('text')].map(n => n.textContent.trim());
+    const values = [...doc.querySelectorAll('value')].map(n => n.textContent.trim());
+    return texts.map((t, i) => ({ text: t, value: values[i] || t }));
+  }
+  return [...items].map(item => ({
+    text: item.querySelector('text')?.textContent.trim() || '',
+    value: item.querySelector('value')?.textContent.trim() || ''
+  }));
 }
 
-function isDark(){ return document.documentElement.classList.contains('dark'); }
-
-function chartColors(){
+function parseVehicle(xml) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xml, 'application/xml');
+  const get = tag => doc.querySelector(tag)?.textContent.trim() || '';
   return {
-    grid: isDark() ? 'rgba(148,163,184,0.12)' : 'rgba(0,0,0,0.06)',
-    text: isDark() ? '#94a3b8' : '#64748b',
-    lease: '#10b981',
-    leaseBg: isDark() ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.1)',
-    finance: '#3b82f6',
-    financeBg: isDark() ? 'rgba(59,130,246,0.15)' : 'rgba(59,130,246,0.1)',
-    irs: '#f59e0b',
-    depreciation: '#ef4444',
-    loanBal: '#8b5cf6',
+    id: get('id'), year: get('year'), make: get('make'), model: get('model'),
+    fuelType: get('fuelType1'),
+    city: parseFloat(get('city08')) || 0,
+    hwy: parseFloat(get('highway08')) || 0,
+    comb: parseFloat(get('comb08')) || 0,
+    co2: parseInt(get('co2')) || 0,
   };
 }
 
-function calc(){
-  const msrp = +$('msrp').value || 0;
-  const sellPrice = +$('sellingPrice').value || 0;
-  const down = +$('downPayment').value || 0;
-  const trade = +$('tradeIn').value || 0;
-  const annualMiles = +$('annualMiles').value;
-  const taxPct = (+$('taxRate').value || 0) / 100;
-  const compMonths = +$('compPeriod').value;
-  const compYears = compMonths / 12;
-
-  // Lease inputs
-  const lTermMonths = +$('leaseTerm').value;
-  const residualPct = (+$('residualPct').value || 0) / 100;
-  const mf = +$('moneyFactor').value || 0;
-  const das = +$('dueAtSigning').value || 0;
-
-  // Finance inputs
-  const fTermMonths = +$('financeTerm').value;
-  const fApr = (+$('financeApr').value || 0) / 100;
-
-  // Show MF as APR
-  $('mfApr').textContent = (mf * 2400).toFixed(1);
-
-  // ── LEASE CALCULATION ──
-  const residualVal = msrp * residualPct;
-  const leaseCapCost = sellPrice - down - trade;
-  const leaseDepreciation = leaseCapCost - residualVal;
-  const leaseDepPerMonth = leaseDepreciation / lTermMonths;
-  const leaseRentCharge = (leaseCapCost + residualVal) * mf;
-  const leaseMonthlyPreTax = leaseDepPerMonth + leaseRentCharge;
-  const leaseMonthly = leaseMonthlyPreTax * (1 + taxPct);
-
-  // How many lease cycles in the comparison period?
-  const leaseCycles = Math.ceil(compMonths / lTermMonths);
-  const totalLeaseMonths = Math.min(leaseCycles * lTermMonths, compMonths);
-  const totalLeasePayments = leaseMonthly * totalLeaseMonths;
-  const totalLeaseDAS = das * leaseCycles;
-
-  // Lease maintenance: always years 1-3 of the curve, repeating
-  let leaseMaintTotal = 0;
-  for(let y = 0; y < compYears; y++){
-    const ageInCycle = y % (lTermMonths/12);
-    leaseMaintTotal += MAINT_BY_YEAR[Math.floor(ageInCycle)] || MAINT_BY_YEAR[0];
-  }
-
-  const leaseTotalCost = totalLeasePayments + totalLeaseDAS + leaseMaintTotal;
-  const totalLeaseMiles = annualMiles * compYears;
-  const leaseCPM = (leaseTotalCost / totalLeaseMiles) * 100;
-
-  // ── FINANCE CALCULATION ──
-  const finAmount = sellPrice + (sellPrice * taxPct) - down - trade;
-  const monthlyRate = fApr / 12;
-  let finMonthly;
-  if(monthlyRate > 0){
-    finMonthly = finAmount * (monthlyRate * Math.pow(1+monthlyRate, fTermMonths)) / (Math.pow(1+monthlyRate, fTermMonths)-1);
-  } else {
-    finMonthly = finAmount / fTermMonths;
-  }
-
-  // Payments over the comparison period (stop at loan payoff)
-  const finPaymentMonths = Math.min(fTermMonths, compMonths);
-  const totalFinPayments = finMonthly * finPaymentMonths;
-
-  // Total interest paid
-  const totalFinPaid = finMonthly * fTermMonths;
-  const totalInterest = totalFinPaid - finAmount;
-
-  // Finance maintenance: continuous aging
-  let finMaintTotal = 0;
-  for(let y = 0; y < compYears; y++){
-    finMaintTotal += MAINT_BY_YEAR[Math.min(y, MAINT_BY_YEAR.length-1)];
-  }
-
-  // Depreciation curve for the financed vehicle
-  // Roughly: 20% yr1, 15% yr2, 13% yr3, 10% yr4-5, 8% yr6+
-  const depRates = [0.20, 0.15, 0.13, 0.10, 0.10, 0.08, 0.08, 0.07, 0.07, 0.06];
-  let finCarValue = sellPrice;
-  const finValueByYear = [sellPrice];
-  for(let y = 0; y < compYears; y++){
-    const rate = depRates[Math.min(y, depRates.length-1)];
-    finCarValue *= (1 - rate);
-    finValueByYear.push(Math.round(finCarValue));
-  }
-
-  // Loan balance over time
-  let balance = finAmount;
-  const loanBalByYear = [finAmount];
-  for(let y = 0; y < compYears; y++){
-    for(let m = 0; m < 12; m++){
-      if(balance <= 0) break;
-      const intCharge = balance * monthlyRate;
-      const princ = finMonthly - intCharge;
-      balance = Math.max(0, balance - princ);
-    }
-    loanBalByYear.push(Math.max(0, Math.round(balance)));
-  }
-
-  const finTotalCost = totalFinPayments + down + finMaintTotal;
-  const totalFinMiles = annualMiles * compYears;
-  const finCPM = (finTotalCost / totalFinMiles) * 100;
-
-  // ── UPDATE UI ──
-  $('leaseMonthly').textContent = fmt(Math.round(leaseMonthly));
-  $('leaseDAS').textContent = fmt(das) + (leaseCycles > 1 ? ' × '+leaseCycles : '');
-  $('leaseYears').textContent = compYears;
-  $('leaseTotalPayments').textContent = fmt(Math.round(totalLeasePayments + totalLeaseDAS));
-  $('leaseMaint').textContent = fmt(Math.round(leaseMaintTotal));
-  $('leaseTotalCost').textContent = fmt(Math.round(leaseTotalCost));
-  $('leaseCPM').textContent = fmtC(leaseCPM);
-
-  $('finMonthly').textContent = fmt(Math.round(finMonthly));
-  $('finDown').textContent = fmt(down);
-  $('finYears').textContent = compYears;
-  $('finTotalPayments').textContent = fmt(Math.round(totalFinPayments + down));
-  $('finInterest').textContent = fmt(Math.round(totalInterest));
-  $('finMaint').textContent = fmt(Math.round(finMaintTotal));
-  $('finTotalCost').textContent = fmt(Math.round(finTotalCost));
-  $('finCPM').textContent = fmtC(finCPM);
-  $('finResidualVal').textContent = '~' + fmt(finValueByYear[finValueByYear.length-1]) + ' (depreciating)';
-
-  // Savings banner
-  const diff = finTotalCost - leaseTotalCost;
-  const banner = $('savingsBanner');
-  if(diff > 0){
-    banner.classList.remove('hidden');
-    $('savingsAmount').textContent = 'Leasing saves ' + fmt(Math.round(diff)) + ' over ' + compYears + ' years';
-    $('savingsDetail').textContent = `That's ${fmt(Math.round(diff/compYears))}/year or ${fmtC(finCPM - leaseCPM)} less per mile — and you're always in a new car with full warranty.`;
-  } else {
-    banner.classList.remove('hidden');
-    banner.className = banner.className.replace('emerald','blue');
-    $('savingsAmount').textContent = 'Finance costs ' + fmt(Math.round(Math.abs(diff))) + ' less over ' + compYears + ' years';
-    $('savingsDetail').textContent = 'But the financed vehicle will be ' + compYears + ' years old with higher maintenance ahead.';
-  }
-
-  // Equity note
-  const endEquity = finValueByYear[finValueByYear.length-1] - loanBalByYear[loanBalByYear.length-1];
-  $('equityNote').innerHTML = `<strong>After ${compYears} years:</strong> The financed vehicle is worth ~${fmt(finValueByYear[finValueByYear.length-1])} — that's ${fmt(Math.round(sellPrice - finValueByYear[finValueByYear.length-1]))} lost to depreciation. ` +
-    (loanBalByYear[loanBalByYear.length-1] > 0
-      ? `You still owe ${fmt(loanBalByYear[loanBalByYear.length-1])}, so your equity is only ${fmt(Math.round(endEquity))}.`
-      : `The loan is paid off, giving you ${fmt(Math.round(endEquity))} in equity — in an aging vehicle with rising maintenance costs.`);
-
-  // ── CHARTS ──
-  const c = chartColors();
-  const yearLabels = Array.from({length: compYears+1}, (_,i) => 'Year '+i);
-
-  // Cost Per Mile chart
-  const leaseCpmByYear = [];
-  const finCpmByYear = [];
-  let lRunning = 0, fRunning = 0;
-  for(let y = 0; y <= compYears; y++){
-    if(y === 0){ leaseCpmByYear.push(null); finCpmByYear.push(null); continue; }
-    // Lease running cost
-    const lCycleYear = ((y-1) % (lTermMonths/12));
-    const lMonthsThisYear = 12;
-    lRunning += (leaseMonthly * lMonthsThisYear) + (lCycleYear === 0 ? das : 0) + MAINT_BY_YEAR[Math.floor(lCycleYear)];
-    leaseCpmByYear.push(+((lRunning / (annualMiles * y)) * 100).toFixed(1));
-
-    // Finance running cost
-    const fMonthsThisYear = Math.min(12, Math.max(0, fTermMonths - (y-1)*12));
-    const fLeftoverMonths = 12 - fMonthsThisYear;
-    fRunning += (finMonthly * fMonthsThisYear) + (y===1 ? down : 0) + MAINT_BY_YEAR[Math.min(y-1, MAINT_BY_YEAR.length-1)];
-    finCpmByYear.push(+((fRunning / (annualMiles * y)) * 100).toFixed(1));
-  }
-
-  // IRS reference line
-  const irsLine = Array(compYears+1).fill(72.5);
-
-  if(cpmChart) cpmChart.destroy();
-  cpmChart = new Chart($('cpmChart'), {
-    type: 'line',
-    data: {
-      labels: yearLabels,
-      datasets: [
-        {label:'Lease ¢/mi', data:leaseCpmByYear, borderColor:c.lease, backgroundColor:c.leaseBg, fill:false, tension:0.3, pointRadius:4},
-        {label:'Finance ¢/mi', data:finCpmByYear, borderColor:c.finance, backgroundColor:c.financeBg, fill:false, tension:0.3, pointRadius:4},
-        {label:'IRS Rate (72.5¢)', data:irsLine, borderColor:c.irs, borderDash:[6,4], borderWidth:2, pointRadius:0, fill:false},
-      ]
-    },
-    options: {
-      responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:c.text, usePointStyle:true, pointStyle:'circle'}}},
-      scales:{
-        x:{ticks:{color:c.text}, grid:{color:c.grid}},
-        y:{ticks:{color:c.text, callback:v=>v+'¢'}, grid:{color:c.grid}, beginAtZero:true}
-      }
-    }
-  });
-
-  // Cumulative cost chart
-  const leaseCum = [0], finCum = [0];
-  let lCum = 0, fCum = 0;
-  for(let y = 1; y <= compYears; y++){
-    const lCycleYear = ((y-1) % (lTermMonths/12));
-    lCum += (leaseMonthly * 12) + (lCycleYear === 0 ? das : 0) + MAINT_BY_YEAR[Math.floor(lCycleYear)];
-    leaseCum.push(Math.round(lCum));
-
-    const fMonths = Math.min(12, Math.max(0, fTermMonths - (y-1)*12));
-    fCum += (finMonthly * fMonths) + (y===1 ? down : 0) + MAINT_BY_YEAR[Math.min(y-1, MAINT_BY_YEAR.length-1)];
-    finCum.push(Math.round(fCum));
-  }
-
-  if(cumChart) cumChart.destroy();
-  cumChart = new Chart($('cumChart'), {
-    type: 'line',
-    data: {
-      labels: yearLabels,
-      datasets: [
-        {label:'Lease Total', data:leaseCum, borderColor:c.lease, backgroundColor:c.leaseBg, fill:true, tension:0.3, pointRadius:4},
-        {label:'Finance Total', data:finCum, borderColor:c.finance, backgroundColor:c.financeBg, fill:true, tension:0.3, pointRadius:4},
-      ]
-    },
-    options: {
-      responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:c.text, usePointStyle:true, pointStyle:'circle'}}},
-      scales:{
-        x:{ticks:{color:c.text}, grid:{color:c.grid}},
-        y:{ticks:{color:c.text, callback:v=>'$'+(v/1000).toFixed(0)+'k'}, grid:{color:c.grid}, beginAtZero:true}
-      }
-    }
-  });
-
-  // Maintenance chart
-  const lMaintYearly = [], fMaintYearly = [];
-  for(let y = 0; y < compYears; y++){
-    const lCycleYear = y % (lTermMonths/12);
-    lMaintYearly.push(MAINT_BY_YEAR[Math.floor(lCycleYear)]);
-    fMaintYearly.push(MAINT_BY_YEAR[Math.min(y, MAINT_BY_YEAR.length-1)]);
-  }
-
-  if(maintChart) maintChart.destroy();
-  maintChart = new Chart($('maintChart'), {
-    type: 'bar',
-    data: {
-      labels: Array.from({length:compYears}, (_,i) => 'Year '+(i+1)),
-      datasets: [
-        {label:'Lease Maint.', data:lMaintYearly, backgroundColor:c.lease, borderRadius:4},
-        {label:'Finance Maint.', data:fMaintYearly, backgroundColor:c.finance, borderRadius:4},
-      ]
-    },
-    options: {
-      responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:c.text, usePointStyle:true, pointStyle:'circle'}}},
-      scales:{
-        x:{ticks:{color:c.text}, grid:{display:false}},
-        y:{ticks:{color:c.text, callback:v=>'$'+v}, grid:{color:c.grid}, beginAtZero:true}
-      }
-    }
-  });
-
-  // Depreciation chart
-  if(depChart) depChart.destroy();
-  depChart = new Chart($('depChart'), {
-    type: 'line',
-    data: {
-      labels: yearLabels,
-      datasets: [
-        {label:'Vehicle Value', data:finValueByYear, borderColor:c.depreciation, backgroundColor:'rgba(239,68,68,0.08)', fill:true, tension:0.3, pointRadius:4},
-        {label:'Loan Balance', data:loanBalByYear, borderColor:c.loanBal, borderDash:[5,3], fill:false, tension:0.3, pointRadius:4},
-      ]
-    },
-    options: {
-      responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:c.text, usePointStyle:true, pointStyle:'circle'}}},
-      scales:{
-        x:{ticks:{color:c.text}, grid:{color:c.grid}},
-        y:{ticks:{color:c.text, callback:v=>'$'+(v/1000).toFixed(0)+'k'}, grid:{color:c.grid}, beginAtZero:true}
-      }
-    }
-  });
-
-  // ── TALKING POINTS ──
-  const points = [
-    {icon:'💰', title:'Monthly Savings', text: leaseMonthly < finMonthly ? `Lease saves ${fmt(Math.round(finMonthly - leaseMonthly))}/month — that's ${fmt(Math.round((finMonthly - leaseMonthly)*12))}/year back in your pocket.` : `Finance is ${fmt(Math.round(leaseMonthly - finMonthly))}/month less, but you absorb all depreciation.`},
-    {icon:'🔧', title:'Maintenance Advantage', text:`Lease maintenance over ${compYears} years: ${fmt(Math.round(leaseMaintTotal))}. Finance: ${fmt(Math.round(finMaintTotal))}. That's ${fmt(Math.round(finMaintTotal - leaseMaintTotal))} more on a car that keeps aging.`},
-    {icon:'📉', title:'Depreciation Trap', text:`A financed vehicle loses ~${fmt(Math.round(sellPrice - finValueByYear[3]))} in value in just 3 years. With a lease, that depreciation is built into the payment — you never feel the hit.`},
-    {icon:'🔄', title:'Trade at 3 Years?', text:`If you finance and trade at 3 years anyway, you're essentially leasing with worse terms — higher payment, negative equity risk, and more hassle.`},
-    {icon:'🛡️', title:'Always Under Warranty', text:`Leasing keeps you in the factory warranty window. No surprise repair bills for transmission, AC, suspension — the things that hit at years 4-7.`},
-    {icon:'🚗', title:'Newest Safety Tech', text:`Every 3 years you get the latest safety features, better fuel economy, and updated technology. A financed car is stuck in time.`},
-    {icon:'📊', title:'IRS Says It All', text:`The IRS sets the mileage rate at 72.5¢/mile for 2026 — that's what it truly costs to own and operate a vehicle per mile. Your lease cost per mile: ${fmtC(leaseCPM)}.`},
-    {icon:'⚡', title:'Cost Per Mile', text:`Lease: ${fmtC(leaseCPM)}/mile vs Finance: ${fmtC(finCPM)}/mile. Over ${(annualMiles*compYears).toLocaleString()} miles, that adds up fast.`},
-  ];
-
-  $('talkingPoints').innerHTML = points.map(p =>
-    `<div class="flex gap-2 p-3 rounded-lg bg-slate-50 dark:bg-slate-700/50">
-      <span class="text-lg shrink-0">${p.icon}</span>
-      <div><div class="text-sm font-semibold dark:text-white">${p.title}</div><div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">${p.text}</div></div>
-    </div>`
-  ).join('');
+async function apiFetch(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('API error');
+  return res.text();
 }
 
-// Re-render charts on theme change
-const _origToggle = window.toggleDarkMode;
-if(_origToggle){
-  window.toggleDarkMode = function(){
-    _origToggle();
-    setTimeout(calc, 50);
-  };
+async function loadYears() {
+  try {
+    const xml = await apiFetch(`${BASE}/vehicle/menu/year`);
+    const items = parseItems(xml);
+    const sorted = [...items].sort((a, b) => parseInt(b.value) - parseInt(a.value));
+    [1, 2].forEach(slot => {
+      const sel = document.getElementById(`year${slot}`);
+      sel.innerHTML = '<option value="">- Year -</option>';
+      sorted.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.value; opt.textContent = item.text;
+        sel.appendChild(opt);
+      });
+    });
+  } catch(e) { console.error('Failed to load years', e); }
 }
 
-// Also watch for system theme changes
-window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change', () => setTimeout(calc, 50));
+async function loadMakes(slot) {
+  const year = document.getElementById(`year${slot}`).value;
+  const makeEl = document.getElementById(`make${slot}`);
+  const modelEl = document.getElementById(`model${slot}`);
+  const trimEl = document.getElementById(`trim${slot}`);
+  makeEl.innerHTML = '<option value="">Loading...</option>'; makeEl.disabled = true;
+  modelEl.innerHTML = '<option value="">- Model -</option>'; modelEl.disabled = true;
+  trimEl.innerHTML = '<option value="">- Trim -</option>'; trimEl.disabled = true;
+  hideResult(slot);
+  if (!year) return;
+  try {
+    const xml = await apiFetch(`${BASE}/vehicle/menu/make?year=${year}`);
+    const items = parseItems(xml);
+    makeEl.innerHTML = '<option value="">- Make -</option>';
+    items.forEach(item => { const opt = document.createElement('option'); opt.value = item.value; opt.textContent = item.text; makeEl.appendChild(opt); });
+    makeEl.disabled = false;
+  } catch(e) { makeEl.innerHTML = '<option value="">Error</option>'; }
+}
 
-// Init
-calc();
+async function loadModels(slot) {
+  const year = document.getElementById(`year${slot}`).value;
+  const make = document.getElementById(`make${slot}`).value;
+  const modelEl = document.getElementById(`model${slot}`);
+  const trimEl = document.getElementById(`trim${slot}`);
+  modelEl.innerHTML = '<option value="">Loading...</option>'; modelEl.disabled = true;
+  trimEl.innerHTML = '<option value="">- Trim -</option>'; trimEl.disabled = true;
+  hideResult(slot);
+  if (!make) return;
+  try {
+    const xml = await apiFetch(`${BASE}/vehicle/menu/model?year=${year}&make=${encodeURIComponent(make)}`);
+    const items = parseItems(xml);
+    modelEl.innerHTML = '<option value="">- Model -</option>';
+    items.forEach(item => { const opt = document.createElement('option'); opt.value = item.value; opt.textContent = item.text; modelEl.appendChild(opt); });
+    modelEl.disabled = false;
+  } catch(e) { modelEl.innerHTML = '<option value="">Error</option>'; }
+}
+
+async function loadTrims(slot) {
+  const year = document.getElementById(`year${slot}`).value;
+  const make = document.getElementById(`make${slot}`).value;
+  const model = document.getElementById(`model${slot}`).value;
+  const trimEl = document.getElementById(`trim${slot}`);
+  trimEl.innerHTML = '<option value="">Loading...</option>'; trimEl.disabled = true;
+  hideResult(slot);
+  if (!model) return;
+  try {
+    const xml = await apiFetch(`${BASE}/vehicle/menu/options?year=${year}&make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}`);
+    const items = parseItems(xml);
+    trimEl.innerHTML = '<option value="">- Trim -</option>';
+    items.forEach(item => { const opt = document.createElement('option'); opt.value = item.value; opt.textContent = item.text; trimEl.appendChild(opt); });
+    trimEl.disabled = false;
+    if (items.length === 1) { trimEl.value = items[0].value; loadVehicle(slot); }
+  } catch(e) { trimEl.innerHTML = '<option value="">Error</option>'; }
+}
+
+async function loadVehicle(slot) {
+  const vehicleId = document.getElementById(`trim${slot}`).value;
+  if (!vehicleId) { hideResult(slot); return; }
+  document.getElementById(`loading${slot}`).classList.remove('hidden');
+  hideResult(slot);
+  try {
+    const xml = await apiFetch(`${BASE}/vehicle/${vehicleId}`);
+    const v = parseVehicle(xml);
+    vehicles[slot] = v;
+    showResult(slot, v);
+    // Update purchase cost vehicle name label
+    document.getElementById(`purchaseName${slot}`).textContent = `${v.year} ${v.make} ${v.model}`;
+    recalculate();
+  } catch(e) { console.error(e); }
+  finally { document.getElementById(`loading${slot}`).classList.add('hidden'); }
+}
+
+function showResult(slot, v) {
+  const color = slot == 1 ? 'text-blue-700 dark:text-blue-400' : 'text-emerald-700 dark:text-emerald-400';
+  document.getElementById(`resultName${slot}`).textContent = `${v.year} ${v.make} ${v.model}`;
+  document.getElementById(`mpgComb${slot}`).textContent = v.comb || '-';
+  document.getElementById(`mpgCity${slot}`).textContent = v.city || '-';
+  document.getElementById(`mpgHwy${slot}`).textContent = v.hwy || '-';
+  document.getElementById(`mpgComb${slot}`).className = `text-xl font-bold ${color}`;
+  if (v.co2 > 0) document.getElementById(`co2${slot}`).textContent = `${v.co2} g CO₂/mile · ${v.fuelType}`;
+  document.getElementById(`result${slot}`).classList.remove('hidden');
+}
+
+function hideResult(slot) {
+  vehicles[slot] = null;
+  document.getElementById(`result${slot}`).classList.add('hidden');
+  document.getElementById(`purchaseName${slot}`).textContent = '';
+  document.getElementById(`loanResult${slot}`).classList.add('hidden');
+  updateComparisonBanner();
+}
+
+function clearVehicle(slot) {
+  ['year','make','model','trim'].forEach(f => {
+    const el = document.getElementById(`${f}${slot}`);
+    el.value = '';
+    if (f !== 'year') el.disabled = true;
+  });
+  ['make','model','trim'].forEach(f => {
+    document.getElementById(`${f}${slot}`).innerHTML = `<option value="">- ${f.charAt(0).toUpperCase()+f.slice(1)} -</option>`;
+  });
+  hideResult(slot);
+}
+
+// ── Purchase cost helpers ──
+function updateLoanAmount(slot) {
+  const price = parseFloat(document.getElementById(`price${slot}`).value) || 0;
+  const down = parseFloat(document.getElementById(`down${slot}`).value) || 0;
+  document.getElementById(`loan${slot}`).value = Math.max(0, price - down) || '';
+}
+
+function calcMonthlyPayment(principal, annualRate, months) {
+  if (principal <= 0) return 0;
+  if (annualRate === 0) return principal / months;
+  const r = annualRate / 100 / 12;
+  return principal * r * Math.pow(1 + r, months) / (Math.pow(1 + r, months) - 1);
+}
+
+function syncKeepYears() {
+  const v = document.getElementById('keepYears').value;
+  document.getElementById('years').value = v;
+}
+
+function togglePurchaseCosts() {
+  const body = document.getElementById('purchaseCostsBody');
+  const chevron = document.getElementById('purchaseChevron');
+  const hidden = body.classList.toggle('hidden');
+  chevron.style.transform = hidden ? '' : 'rotate(180deg)';
+}
+
+function toggleRate(slot) {
+  const row = document.getElementById(`rateRow${slot}`);
+  const chevron = document.getElementById(`rateChevron${slot}`);
+  const label = document.getElementById(`rateToggleLabel${slot}`);
+  const hidden = row.classList.toggle('hidden');
+  chevron.style.transform = hidden ? 'rotate(-90deg)' : 'rotate(0deg)';
+  label.textContent = hidden ? 'Show interest rate' : 'Hide interest rate';
+  recalculate();
+}
+
+function fmt(n) { return '$' + Math.round(n).toLocaleString('en-US'); }
+
+function recalculate() {
+  const miles = parseFloat(document.getElementById('milesYear').value) || 15000;
+  const gasPrice = parseFloat(document.getElementById('gasPrice').value) || 3.50;
+  const numYears = parseInt(document.getElementById('years').value) || 5;
+
+  // Sync keep years if purchase section is open
+  const keepEl = document.getElementById('keepYears');
+  if (parseInt(keepEl.value) !== numYears) keepEl.value = numYears;
+
+  [1, 2].forEach(slot => {
+    const v = vehicles[slot];
+    if (!v || !v.comb) return;
+    const annual = (miles / v.comb) * gasPrice;
+    const fuelTotal = annual * numYears;
+    document.getElementById(`annualCost${slot}`).textContent = fmt(annual);
+    document.getElementById(`totalCost${slot}`).textContent = fmt(fuelTotal);
+    document.getElementById(`totalCostLabel${slot}`).textContent = `${numYears}-Year Fuel Cost`;
+
+    // Loan calc
+    const price = parseFloat(document.getElementById(`price${slot}`)?.value) || 0;
+    const down = parseFloat(document.getElementById(`down${slot}`)?.value) || 0;
+    const loan = Math.max(0, price - down);
+    const rateHidden = document.getElementById(`rateRow${slot}`).classList.contains('hidden');
+    const rate = rateHidden ? 0 : (parseFloat(document.getElementById(`rate${slot}`).value) || 0);
+    const months = parseInt(document.getElementById(`loanMonths${slot}`).value) || 60;
+
+    if (price > 0) {
+      const monthly = calcMonthlyPayment(loan, rate, months);
+      const totalLoan = monthly * months + down;
+      const totalOwn = totalLoan + fuelTotal;
+      document.getElementById(`monthlyPayment${slot}`).textContent = fmt(monthly) + '/mo';
+      document.getElementById(`totalLoanCost${slot}`).textContent = fmt(totalLoan);
+      document.getElementById(`totalOwnership${slot}`).textContent = fmt(totalOwn);
+      document.getElementById(`ownershipLabel${slot}`).textContent = `${numYears}-yr Own. Cost`;
+      document.getElementById(`loanResult${slot}`).classList.remove('hidden');
+    } else {
+      document.getElementById(`loanResult${slot}`).classList.add('hidden');
+    }
+  });
+
+  updateComparisonBanner();
+  updateTCO();
+}
+
+function updateComparisonBanner() {
+  const v1 = vehicles[1], v2 = vehicles[2];
+  const banner = document.getElementById('comparisonBanner');
+  const empty = document.getElementById('emptyState');
+  if (!v1 || !v2) { banner.classList.add('hidden'); empty.classList.remove('hidden'); return; }
+
+  const miles = parseFloat(document.getElementById('milesYear').value) || 15000;
+  const gasPrice = parseFloat(document.getElementById('gasPrice').value) || 3.50;
+  const numYears = parseInt(document.getElementById('years').value) || 5;
+  const cost1 = (miles / v1.comb) * gasPrice * numYears;
+  const cost2 = (miles / v2.comb) * gasPrice * numYears;
+  const diff = Math.abs(cost1 - cost2);
+  const cheaper = cost1 < cost2 ? 1 : 2;
+  const cheaperV = cheaper === 1 ? v1 : v2;
+  const expensiveV = cheaper === 1 ? v2 : v1;
+
+  document.getElementById('savingsAmount').textContent = fmt(diff) + ' saved';
+  document.getElementById('savingsLabel').textContent = `The ${cheaperV.year} ${cheaperV.make} ${cheaperV.model} saves ${fmt(diff)} over ${numYears} years vs the ${expensiveV.make} ${expensiveV.model}`;
+  document.getElementById('savingsDetail').textContent = `${Math.abs(v1.comb - v2.comb)} MPG difference · ${fmt(diff/numYears)}/year · at ${miles.toLocaleString()} mi/yr @ $${gasPrice.toFixed(2)}/gal`;
+
+  const maxCost = Math.max(cost1, cost2);
+  document.getElementById('bar1').style.width = `${(cost1/maxCost*100).toFixed(1)}%`;
+  document.getElementById('bar2').style.width = `${(cost2/maxCost*100).toFixed(1)}%`;
+  document.getElementById('barLabel1').textContent = `${v1.year} ${v1.make} ${v1.model}`;
+  document.getElementById('barLabel2').textContent = `${v2.year} ${v2.make} ${v2.model}`;
+  document.getElementById('barCost1').textContent = fmt(cost1);
+  document.getElementById('barCost2').textContent = fmt(cost2);
+
+  banner.classList.remove('hidden');
+  empty.classList.add('hidden');
+}
+
+function updateTCO() {
+  const v1 = vehicles[1], v2 = vehicles[2];
+  const p1 = parseFloat(document.getElementById('price1')?.value) || 0;
+  const p2 = parseFloat(document.getElementById('price2')?.value) || 0;
+  const tcoBanner = document.getElementById('tcoBanner');
+
+  if (!v1 || !v2 || (p1 === 0 && p2 === 0)) { tcoBanner.classList.add('hidden'); return; }
+
+  const miles = parseFloat(document.getElementById('milesYear').value) || 15000;
+  const gasPrice = parseFloat(document.getElementById('gasPrice').value) || 3.50;
+  const numYears = parseInt(document.getElementById('years').value) || 5;
+
+  function getTotalOwnership(slot, v) {
+    const price = parseFloat(document.getElementById(`price${slot}`).value) || 0;
+    const down = parseFloat(document.getElementById(`down${slot}`).value) || 0;
+    const loan = Math.max(0, price - down);
+    const rateHidden = document.getElementById(`rateRow${slot}`).classList.contains('hidden');
+    const rate = rateHidden ? 0 : (parseFloat(document.getElementById(`rate${slot}`).value) || 0);
+    const months = parseInt(document.getElementById(`loanMonths${slot}`).value) || 60;
+    const monthly = calcMonthlyPayment(loan, rate, months);
+    const totalLoan = monthly * months + down;
+    const fuelTotal = (miles / v.comb) * gasPrice * numYears;
+    return { tco: totalLoan + fuelTotal, loan: totalLoan, fuel: fuelTotal, price };
+  }
+
+  const r1 = getTotalOwnership(1, v1);
+  const r2 = getTotalOwnership(2, v2);
+
+  // Only show if at least one has a price entered
+  if (r1.price === 0 && r2.price === 0) { tcoBanner.classList.add('hidden'); return; }
+
+  document.getElementById('tcoName1').textContent = `${v1.year} ${v1.make} ${v1.model}`;
+  document.getElementById('tcoName2').textContent = `${v2.year} ${v2.make} ${v2.model}`;
+  document.getElementById('tcoTotal1').textContent = r1.price > 0 ? fmt(r1.tco) : '-';
+  document.getElementById('tcoTotal2').textContent = r2.price > 0 ? fmt(r2.tco) : '-';
+  document.getElementById('tcoBreakdown1').textContent = r1.price > 0 ? `Loan ${fmt(r1.loan)} + Fuel ${fmt(r1.fuel)}` : 'Enter purchase price above';
+  document.getElementById('tcoBreakdown2').textContent = r2.price > 0 ? `Loan ${fmt(r2.loan)} + Fuel ${fmt(r2.fuel)}` : 'Enter purchase price above';
+
+  if (r1.price > 0 && r2.price > 0) {
+    const diff = Math.abs(r1.tco - r2.tco);
+    const cheaper = r1.tco < r2.tco ? 1 : 2;
+    const cheaperV = cheaper === 1 ? v1 : v2;
+    document.getElementById('tcoDiff').textContent = fmt(diff);
+    document.getElementById('tcoDiff').className = 'text-2xl font-bold text-emerald-600 dark:text-emerald-400';
+    document.getElementById('tcoDiffLabel').textContent = `${cheaperV.make} ${cheaperV.model} costs less overall`;
+    const priceDiff = Math.abs(r1.price - r2.price);
+    const fuelSavings = Math.abs(r1.fuel - r2.fuel);
+    document.getElementById('tcoVerdict').textContent =
+      `Price difference: ${fmt(priceDiff)} · Fuel savings over ${numYears} yrs: ${fmt(fuelSavings)} · Net: ${r1.tco < r2.tco ? v1.make + ' ' + v1.model : v2.make + ' ' + v2.model} wins by ${fmt(diff)}`;
+  } else {
+    document.getElementById('tcoDiff').textContent = '-';
+    document.getElementById('tcoDiffLabel').textContent = 'Enter prices for both vehicles';
+    document.getElementById('tcoVerdict').textContent = '';
+  }
+
+  tcoBanner.classList.remove('hidden');
+}
+
+loadYears();
+
+// ── Tab switching ──────────────────────────────────────────────────────────
+function switchTab(tab) {
+  const isFuel = tab === 'fuel';
+  document.getElementById('panelFuel').classList.toggle('hidden', !isFuel);
+  document.getElementById('panelFinance').classList.toggle('hidden', isFuel);
+
+  const activeClass = 'bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow-sm';
+  const inactiveClass = 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200';
+
+  const tabFuel = document.getElementById('tabFuel');
+  const tabFinance = document.getElementById('tabFinance');
+
+  if (isFuel) {
+    tabFuel.className = `px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 ${activeClass}`;
+    tabFinance.className = `px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 ${inactiveClass}`;
+  } else {
+    tabFinance.className = `px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 ${activeClass}`;
+    tabFuel.className = `px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 ${inactiveClass}`;
+    calcCVF();
+  }
+}
+
+// ── Cash vs. Finance calculator ───────────────────────────────────────────
+function calcCVF() {
+  const price       = parseFloat(document.getElementById('cvfPrice').value) || 0;
+  const loanRate    = parseFloat(document.getElementById('cvfLoanRate').value) || 0;
+  const savingsRate = parseFloat(document.getElementById('cvfSavingsRate').value) || 0;
+  const months      = parseInt(document.getElementById('cvfMonths').value) || 60;
+  const years       = months / 12;
+
+  if (price <= 0) return;
+
+  // HYSA interest lost if withdrawn
+  const hysaFuture  = price * Math.pow(1 + savingsRate / 100, years);
+  const hysaLost    = hysaFuture - price;
+
+  // Loan monthly payment & total interest
+  const r = loanRate / 100 / 12;
+  const monthly = r === 0
+    ? price / months
+    : price * r * Math.pow(1+r, months) / (Math.pow(1+r, months) - 1);
+  const loanInterest = monthly * months - price;
+
+  // Net: positive = financing wins, negative = cash wins
+  const netAdvantage = hysaLost - loanInterest; // +ve means HYSA earns more than loan costs
+
+  // Update card values
+  document.getElementById('cvfHysaLost').textContent    = fmt(hysaLost);
+  document.getElementById('cvfLoanInterest').textContent = fmt(loanInterest);
+  document.getElementById('cvfMonthlyInline').textContent = fmt(monthly) + '/mo';
+  document.getElementById('cvfYrsA').textContent = years % 1 === 0 ? years : years.toFixed(1);
+  document.getElementById('cvfYrsB').textContent = years % 1 === 0 ? years : years.toFixed(1);
+
+  // Verdict
+  const verdictEl  = document.getElementById('cvfVerdict');
+  const titleEl    = document.getElementById('cvfVerdictTitle');
+  const subEl      = document.getElementById('cvfVerdictSub');
+
+  if (Math.abs(netAdvantage) < 50) {
+    verdictEl.className = 'rounded-lg p-5 text-center border-2 bg-slate-50 dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300';
+    titleEl.textContent = "It's essentially a tie";
+    subEl.textContent = `The difference is only ${fmt(Math.abs(netAdvantage))} — both options are nearly equal. Other factors (liquidity, cash flow) should guide the decision.`;
+  } else if (netAdvantage > 0) {
+    // Finance wins (HYSA earns more than loan costs)
+    verdictEl.className = 'rounded-lg p-5 text-center border-2 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-400 dark:border-emerald-600 text-emerald-800 dark:text-emerald-200';
+    titleEl.textContent = `✓ Financing saves ${fmt(netAdvantage)} — keep your money in savings`;
+    subEl.textContent = `Your savings earns ${fmt(hysaLost)} in interest while you finance. The loan only costs ${fmt(loanInterest)}. You come out ${fmt(netAdvantage)} ahead by financing.`;
+  } else {
+    // Pay cash wins
+    verdictEl.className = 'rounded-lg p-5 text-center border-2 bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-600 text-red-800 dark:text-red-200';
+    titleEl.textContent = `✓ Paying cash saves ${fmt(Math.abs(netAdvantage))} — avoid the higher loan cost`;
+    subEl.textContent = `The loan would cost ${fmt(loanInterest)} in interest, but your savings only earns ${fmt(hysaLost)}. Paying cash saves ${fmt(Math.abs(netAdvantage))} overall.`;
+  }
+
+  // Rate spread note
+  const spread = loanRate - savingsRate;
+  document.getElementById('cvfSpread').textContent = `${Math.abs(spread).toFixed(1)}% (loan ${spread >= 0 ? 'higher' : 'lower'} than savings)`;
+  document.getElementById('cvfSpreadNote').textContent = spread > 3
+    ? 'The gap is wide — paying cash has a clear mathematical advantage.'
+    : spread > 0
+    ? 'The gap is narrow — the savings growth nearly offsets the loan cost.'
+    : 'Your savings rate exceeds the loan rate — financing is the stronger choice.';
+
+  // Year-by-year table
+  const tbody = document.getElementById('cvfTableBody');
+  tbody.innerHTML = '';
+  let cumInterestPaid = 0;
+  let loanBal = price;
+
+  for (let y = 1; y <= Math.ceil(years); y++) {
+    const hysaBal = price * Math.pow(1 + savingsRate / 100, y);
+    const hysaGain = hysaBal - price;
+
+    // Loan balance after y years
+    const pmtsMade = Math.min(y * 12, months);
+    const loanBalY = r === 0
+      ? Math.max(0, price - (price / months) * pmtsMade)
+      : price * Math.pow(1+r, pmtsMade) - monthly * (Math.pow(1+r, pmtsMade) - 1) / r;
+
+    // Interest paid this year
+    const pmtsPrev = Math.min((y-1) * 12, months);
+    const loanBalPrev = r === 0
+      ? Math.max(0, price - (price / months) * pmtsPrev)
+      : price * Math.pow(1+r, pmtsPrev) - monthly * (Math.pow(1+r, pmtsPrev) - 1) / r;
+    const principalPaid = Math.max(0, loanBalPrev - Math.max(0, loanBalY));
+    const paymentsThisYear = monthly * Math.min(12, months - pmtsPrev);
+    const interestThisYear = Math.max(0, paymentsThisYear - principalPaid);
+    cumInterestPaid += interestThisYear;
+
+    const row = document.createElement('tr');
+    row.className = y % 2 === 0 ? 'bg-slate-50 dark:bg-slate-900/20' : '';
+    row.innerHTML = `
+      <td class="px-4 py-2.5 font-semibold text-slate-700 dark:text-slate-300">Year ${y}</td>
+      <td class="px-4 py-2.5 text-right text-slate-700 dark:text-slate-300">${fmt(hysaBal)}</td>
+      <td class="px-4 py-2.5 text-right text-slate-500 dark:text-slate-400">${Math.max(0, loanBalY) > 1 ? fmt(Math.max(0, loanBalY)) : '<span class="text-emerald-600 dark:text-emerald-400 font-semibold">Paid Off ✓</span>'}</td>
+      <td class="px-4 py-2.5 text-right text-emerald-600 dark:text-emerald-400 font-medium">+${fmt(hysaGain)}</td>
+      <td class="px-4 py-2.5 text-right text-red-500 dark:text-red-400">${fmt(cumInterestPaid)}</td>
+    `;
+    tbody.appendChild(row);
+  }
+}
+
+// Run on load so numbers are ready when user switches tab
+calcCVF();
 </script>
+
 {% endblock %}
