@@ -1,3 +1,18 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  CRITICAL: api/app/main.py is what Vercel actually deploys.     ║
+# ║  Every feature must exist in BOTH app/main.py AND here.         ║
+# ║                                                                  ║
+# ║  REQUIRED FEATURES CHECKLIST (grep to verify):                  ║
+# ║  ✓ wishlist_page          - Wishlist tab                        ║
+# ║  ✓ photos_vauto_tags      - vAuto Tags button                   ║
+# ║  ✓ seen_in_upload         - NOT IN CSV same-day fix             ║
+# ║  ✓ dismissed_groups       - Dismissed tab grouped by date       ║
+# ║  ✓ photos_bulk_restore    - Restore dismissed vehicles          ║
+# ║  ✓ photos_restore         - Single vehicle restore              ║
+# ║  ✓ effective_spot         - Spot deal preserve on edit          ║
+# ║  ✓ BackgroundTask         - PDF tempfile cleanup                ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
 
 import asyncio
 import base64
