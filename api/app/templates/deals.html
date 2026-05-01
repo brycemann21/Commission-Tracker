@@ -543,6 +543,27 @@ document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeSche
 })();
 
 // Toggle paid
+
+async function toggleSpot(btn, dealId) {
+  const isSpot = btn.textContent.trim().startsWith('⚡');
+  const newVal = isSpot ? '0' : '1';
+  try {
+    const res = await fetch('/deals/' + dealId + '/quick_update', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({field: 'spot_sold', value: newVal})
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error();
+    if (newVal === '1') {
+      btn.textContent = '⚡ Spot';
+      btn.classList.add('font-bold', 'text-violet-600', 'dark:text-violet-400');
+    } else {
+      btn.textContent = 'Spot?';
+      btn.classList.remove('font-bold', 'text-violet-600', 'dark:text-violet-400');
+    }
+  } catch(e) { setTimeout(() => location.reload(), 500); }
+}
 async function togglePaid(btn, dealId) {
   btn.disabled = true; btn.style.opacity = '0.6';
   try {

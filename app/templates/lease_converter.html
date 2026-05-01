@@ -7,7 +7,7 @@
 </div>
 
 <!-- Tab switcher -->
-<div class="flex gap-1 mb-5 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg w-fit no-print">
+<div class="flex gap-1 mb-5 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg w-fit">
   <button id="tabFuel" onclick="switchTab('fuel')"
     class="px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow-sm">
     ⛽ Fuel Savings
@@ -23,33 +23,19 @@
 <!-- ═══════════════════════════════════════════════════════ -->
 <div id="panelFuel">
 
-<!-- Print header (only visible when printing) -->
-<div class="print-only print-header">
-  <div class="print-title">Fuel Savings Comparison</div>
-  <div class="print-subtitle">DCH Wappingers Falls Toyota &nbsp;|&nbsp; Powered by EPA / fueleconomy.gov data</div>
-</div>
-
-<!-- Print button -->
-<div class="flex justify-end mb-3 no-print">
-  <button onclick="printTab('fuel')" class="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition">
-    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
-    Print PDF for Customer
-  </button>
-</div>
-
 <!-- Driving Profile -->
-<div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 mb-5 no-print">
+<div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-4 mb-5">
   <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-3">Your Driving Profile</div>
   <div class="flex flex-wrap gap-4 items-end">
     <div>
       <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Miles / Year</label>
-      <input type="number" id="milesYear" placeholder="e.g. 15000" min="1000" max="100000" step="1000"
+      <input type="number" id="milesYear" value="15000" min="1000" max="100000" step="1000"
              class="w-32 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400"
              oninput="recalculate()">
     </div>
     <div>
       <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Gas Price / Gallon ($)</label>
-      <input type="number" id="gasPrice" placeholder="e.g. 3.50" min="1" max="10" step="0.10"
+      <input type="number" id="gasPrice" value="3.50" min="1" max="10" step="0.10"
              class="w-32 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 rounded px-3 py-2 text-sm focus:outline-none focus:border-indigo-400"
              oninput="recalculate()">
     </div>
@@ -332,29 +318,15 @@
 <!-- ═══════════════════════════════════════════════════════ -->
 <div id="panelFinance" class="hidden">
 
-<!-- Print header (only visible when printing) -->
-<div class="print-only print-header">
-  <div class="print-title">Cash vs. Finance Analysis</div>
-  <div class="print-subtitle">DCH Wappingers Falls Toyota &nbsp;|&nbsp; For informational purposes only</div>
-</div>
-
-<!-- Print button -->
-<div class="flex justify-end mb-3 no-print">
-  <button onclick="printTab('finance')" class="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition">
-    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
-    Print PDF for Customer
-  </button>
-</div>
-
   <!-- Inputs -->
-  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-5 mb-5 no-print">
+  <div class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-5 mb-5">
     <div class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-4">Loan Details</div>
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <div>
         <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Vehicle Price</label>
         <div class="flex items-center border border-slate-300 dark:border-slate-600 rounded overflow-hidden">
           <span class="px-3 py-2 bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm border-r border-slate-300 dark:border-slate-600">$</span>
-          <input type="number" id="cvfPrice" placeholder="e.g. 28000" min="1000" max="500000" step="500"
+          <input type="number" id="cvfPrice" value="28000" min="1000" max="500000" step="500"
                  class="flex-1 px-3 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400"
                  oninput="calcCVF()">
         </div>
@@ -362,7 +334,7 @@
       <div>
         <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Loan Interest Rate</label>
         <div class="flex items-center border border-slate-300 dark:border-slate-600 rounded overflow-hidden">
-          <input type="number" id="cvfLoanRate" placeholder="e.g. 6.5" min="0" max="30" step="0.1"
+          <input type="number" id="cvfLoanRate" value="6.5" min="0" max="30" step="0.1"
                  class="flex-1 px-3 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400"
                  oninput="calcCVF()">
           <span class="px-3 py-2 bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm border-l border-slate-300 dark:border-slate-600">%</span>
@@ -382,7 +354,7 @@
       <div>
         <label class="block text-xs text-slate-500 dark:text-slate-400 mb-1">HYSA / Savings Rate</label>
         <div class="flex items-center border border-slate-300 dark:border-slate-600 rounded overflow-hidden">
-          <input type="number" id="cvfSavingsRate" placeholder="e.g. 3.5" min="0" max="15" step="0.1"
+          <input type="number" id="cvfSavingsRate" value="3.5" min="0" max="15" step="0.1"
                  class="flex-1 px-3 py-2 text-sm dark:bg-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400"
                  oninput="calcCVF()">
           <span class="px-3 py-2 bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400 text-sm border-l border-slate-300 dark:border-slate-600">%</span>
@@ -927,92 +899,8 @@ function calcCVF() {
   }
 }
 
-// ── Print handler ─────────────────────────────────────────────────────────
-function printTab(tab) {
-  // Make sure we're on the right tab before printing
-  if (tab === 'fuel') {
-    document.getElementById('panelFuel').classList.remove('hidden');
-    document.getElementById('panelFinance').classList.add('hidden');
-  } else {
-    document.getElementById('panelFinance').classList.remove('hidden');
-    document.getElementById('panelFuel').classList.add('hidden');
-  }
-  setTimeout(() => window.print(), 100);
-}
-
 // Run on load so numbers are ready when user switches tab
 calcCVF();
 </script>
-
-<style>
-/* ── Print styles ─────────────────────────────────────────────────────── */
-.print-only { display: none; }
-
-@media print {
-  /* Hide everything that isn't the active calculator panel */
-  body * { visibility: hidden; }
-  #panelFuel, #panelFuel *, #panelFinance, #panelFinance * { visibility: visible; }
-
-  /* Hide the inactive panel */
-  #panelFuel.hidden, #panelFinance.hidden { display: none !important; }
-
-  /* Hide inputs, buttons, nav, empty state, purchase cost toggle */
-  .no-print, #emptyState, #purchaseCostsBody, button[onclick^="togglePurchaseCosts"],
-  button[onclick^="clearVehicle"], button[onclick^="toggleRate"],
-  #loading1, #loading2 { display: none !important; }
-
-  /* Show print-only header */
-  .print-only { display: block !important; visibility: visible; }
-
-  /* Reset layout for print */
-  #panelFuel, #panelFinance {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%;
-    padding: 0;
-    background: white;
-  }
-
-  /* Clean up card borders for print */
-  .rounded-lg { border-radius: 6px !important; }
-  .dark\:bg-slate-800 { background: white !important; }
-  .dark\:text-white, .dark\:text-slate-200, .dark\:text-slate-300 { color: #1e293b !important; }
-
-  /* Print header styles */
-  .print-header {
-    text-align: center;
-    padding: 12px 0 16px;
-    border-bottom: 2px solid #0f3460;
-    margin-bottom: 16px;
-  }
-  .print-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: #0f3460;
-  }
-  .print-subtitle {
-    font-size: 11px;
-    color: #64748b;
-    margin-top: 3px;
-  }
-
-  /* Print disclaimer at bottom */
-  #panelFinance::after, #panelFuel::after {
-    content: "This analysis is for informational purposes only and does not constitute financial advice. Consult a financial advisor for personalized guidance.";
-    display: block;
-    margin-top: 20px;
-    font-size: 9px;
-    color: #94a3b8;
-    text-align: center;
-    border-top: 1px solid #e2e8f0;
-    padding-top: 8px;
-  }
-
-  @page {
-    margin: 0.6in 0.5in;
-    size: letter;
-  }
-}
-</style>
 
 {% endblock %}

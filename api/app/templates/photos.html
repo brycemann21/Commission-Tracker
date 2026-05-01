@@ -240,16 +240,11 @@
   </div>
 </form>
 {% elif current_tab == 'dismissed' %}
-<!-- Dismissed vehicles tab — grouped by date -->
 {% if vehicles|length > 0 %}
-
-<!-- Bulk restore bar + select all -->
 <form method="post" action="/photos/bulk/restore" id="bulkRestoreForm">
   {{ csrf_hidden|safe }}
   <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-    <div class="text-sm text-slate-500 dark:text-slate-400">
-      {{ vehicles|length }} dismissed vehicle{{ 's' if vehicles|length != 1 else '' }} — restore any to bring them back to the board.
-    </div>
+    <div class="text-sm text-slate-500 dark:text-slate-400">{{ vehicles|length }} dismissed vehicle{{ 's' if vehicles|length != 1 else '' }} — restore any to bring them back to the board.</div>
     <div class="flex items-center gap-2">
       <div id="bulkRestoreBar" class="hidden flex items-center gap-2">
         <span class="text-sm font-medium text-indigo-700 dark:text-indigo-300"><b id="restoreCount">0</b> selected</span>
@@ -262,23 +257,16 @@
       </label>
     </div>
   </div>
-
-  <!-- Groups by dismissed date -->
   {% for day_label, group_vehicles in dismissed_groups.items() %}
   <div class="mb-4">
-    <!-- Date header with "Restore all in group" button -->
     <div class="flex items-center justify-between mb-2 px-1">
       <div class="flex items-center gap-2">
         <span class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">{{ day_label }}</span>
         <span class="text-xs text-slate-400 dark:text-slate-500">({{ group_vehicles|length }} vehicle{{ 's' if group_vehicles|length != 1 else '' }})</span>
       </div>
-      <button type="button"
-              onclick="restoreGroup([{% for v in group_vehicles %}{{ v.id }}{% if not loop.last %},{% endif %}{% endfor %}])"
-              class="text-xs text-indigo-500 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition">
-        ↩ Restore all from this day
-      </button>
+      <button type="button" onclick="restoreGroup([{% for v in group_vehicles %}{{ v.id }}{% if not loop.last %},{% endif %}{% endfor %}])"
+              class="text-xs text-indigo-500 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition">↩ Restore all from this day</button>
     </div>
-
     <div class="bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
@@ -294,18 +282,14 @@
         <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
           {% for v in group_vehicles %}
           <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition">
-            <td class="px-3 py-2.5">
-              <input type="checkbox" name="vehicle_ids" value="{{ v.id }}" class="restore-cb h-3.5 w-3.5 rounded" onchange="updateRestoreBar()">
-            </td>
+            <td class="px-3 py-2.5"><input type="checkbox" name="vehicle_ids" value="{{ v.id }}" class="restore-cb h-3.5 w-3.5 rounded" onchange="updateRestoreBar()"></td>
             <td class="px-3 py-2.5 font-mono font-medium dark:text-white">{{ v.stock_num }}</td>
             <td class="px-3 py-2.5 dark:text-slate-200">{{ v.year_make_model }}</td>
             <td class="px-3 py-2.5 text-center {{ 'text-red-600 dark:text-red-400 font-bold' if v.age_days >= 30 else 'text-slate-500 dark:text-slate-300' }}">{{ v.age_days }}d</td>
             <td class="px-3 py-2.5 text-xs text-slate-400 dark:text-slate-500">{{ v.notes or '—' }}</td>
             <td class="px-3 py-2.5 text-center">
               <button onclick="restoreOne({{ v.id }})" type="button"
-                      class="px-2.5 py-1 rounded text-xs font-medium bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition">
-                ↩ Restore
-              </button>
+                      class="px-2.5 py-1 rounded text-xs font-medium bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition">↩ Restore</button>
             </td>
           </tr>
           {% endfor %}
@@ -315,7 +299,6 @@
   </div>
   {% endfor %}
 </form>
-
 {% else %}
 <div class="text-center py-12 text-slate-400 dark:text-slate-500">
   <svg class="w-10 h-10 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 13l4 4L19 7"/></svg>
@@ -384,16 +367,13 @@ function saveTotalInventory() {
   }).then(() => { btn.textContent = '✓'; setTimeout(() => location.reload(), 800); });
 }
 
-// ── Dismissed tab restore helpers ──
 function updateRestoreBar() {
   const checked = document.querySelectorAll('.restore-cb:checked').length;
   const total = document.querySelectorAll('.restore-cb').length;
   const bar = document.getElementById('bulkRestoreBar');
-  const barEmpty = document.getElementById('bulkRestoreBarEmpty');
   const selectAll = document.getElementById('restoreSelectAll');
   document.getElementById('restoreCount').textContent = checked;
   if (bar) bar.classList.toggle('hidden', checked === 0);
-  if (barEmpty) barEmpty.classList.toggle('hidden', checked > 0);
   if (selectAll) {
     selectAll.indeterminate = checked > 0 && checked < total;
     selectAll.checked = checked === total && total > 0;
@@ -401,9 +381,8 @@ function updateRestoreBar() {
 }
 function toggleRestoreAll(on) {
   document.querySelectorAll('.restore-cb').forEach(cb => cb.checked = on);
-  updateRestoreAll();
+  updateRestoreBar();
 }
-function updateRestoreAll() { updateRestoreBar(); }
 function restoreOne(id) {
   if (!confirm('Restore this vehicle to the board?')) return;
   fetch('/photos/' + id + '/restore', {
@@ -412,7 +391,7 @@ function restoreOne(id) {
     body: 'csrf_token={{ csrf_token }}'
   }).then(r => {
     if (r.redirected || r.ok) {
-      const row = document.querySelector(`input[value="${id}"]`)?.closest('tr');
+      const row = document.querySelector('input[value="' + id + '"]')?.closest('tr');
       if (row) { row.style.opacity = '0.3'; row.style.transition = 'opacity 0.2s'; }
       setTimeout(() => location.reload(), 250);
     }
@@ -421,13 +400,13 @@ function restoreOne(id) {
 function restoreGroup(ids) {
   if (!ids.length) return;
   if (!confirm('Restore all ' + ids.length + ' vehicle' + (ids.length !== 1 ? 's' : '') + ' from this day?')) return;
-  // Check the checkboxes for these ids and submit the bulk form
   ids.forEach(id => {
-    const cb = document.querySelector(`.restore-cb[value="${id}"]`);
+    const cb = document.querySelector('.restore-cb[value="' + id + '"]');
     if (cb) cb.checked = true;
   });
   document.getElementById('bulkRestoreForm').submit();
 }
+
 </script>
 
 {% endblock %}
